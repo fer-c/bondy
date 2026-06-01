@@ -6,19 +6,15 @@
 -module(bondy_connect_sup).
 
 -moduledoc """
-Top supervisor for the `bondy_connect` application.
-
-`one_for_one`, permanent. The skeleton starts with no children. Per `DESIGN.md`
-§5 the eventual tree is:
+Top supervisor for the `bondy_connect` application (`one_for_one`, permanent):
 
 ```
 bondy_connect_sup            (one_for_one)
 ├── bondy_connect_manager            (gen_server)        name registry + connect/disconnect
-└── bondy_connect_connections_sup    (simple_one_for_one) one child per connection
+└── bondy_connect_connections_sup    (simple_one_for_one) one bondy_connect_conn_sup per connection
 ```
 
-Those children are introduced in Phase 3 (walking skeleton); see
-`IMPLEMENTATION.md`.
+The manager starts first so it is available before any connection is created.
 """.
 
 -behaviour(supervisor).
@@ -59,5 +55,22 @@ init([]) ->
         intensity => 5,
         period => 10
     },
-    ChildSpecs = [],
+    ChildSpecs = [
+        #{
+            id => bondy_connect_manager,
+            start => {bondy_connect_manager, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_connect_manager]
+        },
+        #{
+            id => bondy_connect_connections_sup,
+            start => {bondy_connect_connections_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [bondy_connect_connections_sup]
+        }
+    ],
     {ok, {SupFlags, ChildSpecs}}.
