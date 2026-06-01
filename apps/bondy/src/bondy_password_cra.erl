@@ -3,24 +3,19 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc Server-side WAMP-CRA password storage.
+%%
+%% The cryptographic algorithm lives in `bondy_wamp_cra' (the router-independent
+%% single source of truth shared with the WAMP client). This module keeps the
+%% server-only concerns: building a `bondy_password:t()' and supplying defaults
+%% (`kdf', `iterations') from `bondy_config' when the caller omits them.
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_password_cra).
 
--define(SALT_LENGTH, 16).
-
--type data()        ::  #{
-    salt := binary(),
-    salted_password := binary()
-}.
--type params()    ::  #{
-    kdf := kdf(),
-    iterations := non_neg_integer(),
-    hash_function := hash_fun(),
-    hash_length := non_neg_integer(),
-    salt := binary(),
-    salt_length := non_neg_integer()
-}.
--type kdf()             ::  pbkdf2.
--type hash_fun()        ::  sha256.
+-type data()        ::  bondy_wamp_cra:data().
+-type params()      ::  bondy_wamp_cra:params().
 
 -export_type([data/0]).
 -export_type([params/0]).
@@ -79,32 +74,21 @@ new(Password, Params0, Builder) ->
 -spec verify_string(binary(), data(), params()) -> boolean().
 
 verify_string(String, Data, Params) ->
-    #{
-        salt := Salt,
-        salted_password := SPassword
-    } = Data,
-
-    compare(salted_password(String, Salt, Params), SPassword).
-
-
+    bondy_wamp_cra:verify_string(String, Data, Params).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Validates the CRA params, filling `kdf' and `iterations' from
+%% `bondy_config' when absent.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec validate_params(Params :: params()) ->
     Validated :: params() | no_return().
 
 validate_params(Params0) ->
-    Static = #{
-        hash_function => hash_function(),
-        hash_length => hash_length(),
-        salt_length => salt_length()
-    },
     Params1 = validate_kdf(Params0),
     Params2 = validate_iterations(Params1),
-    maps:merge(Params2, Static).
+    bondy_wamp_cra:validate_params(Params2).
 
 
 %% -----------------------------------------------------------------------------
@@ -114,7 +98,7 @@ validate_params(Params0) ->
 -spec hash_function() -> atom().
 
 hash_function() ->
-    sha256.
+    bondy_wamp_cra:hash_function().
 
 
 %% -----------------------------------------------------------------------------
@@ -124,7 +108,7 @@ hash_function() ->
 -spec hash_length() -> integer().
 
 hash_length() ->
-    32.
+    bondy_wamp_cra:hash_length().
 
 
 %% -----------------------------------------------------------------------------
@@ -134,7 +118,8 @@ hash_length() ->
 -spec salt_length() -> integer().
 
 salt_length() ->
-    ?SALT_LENGTH.
+    bondy_wamp_cra:salt_length().
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -143,7 +128,7 @@ salt_length() ->
 -spec nonce_length() -> integer().
 
 nonce_length() ->
-    16.
+    bondy_wamp_cra:nonce_length().
 
 
 %% -----------------------------------------------------------------------------
@@ -153,7 +138,7 @@ nonce_length() ->
 -spec salt() -> binary().
 
 salt() ->
-    base64:encode(crypto:strong_rand_bytes(salt_length())).
+    bondy_wamp_cra:salt().
 
 
 %% -----------------------------------------------------------------------------
@@ -163,7 +148,7 @@ salt() ->
 -spec nonce() -> binary().
 
 nonce() ->
-    base64:encode(crypto:strong_rand_bytes(nonce_length())).
+    bondy_wamp_cra:nonce().
 
 
 %% -----------------------------------------------------------------------------
@@ -172,17 +157,8 @@ nonce() ->
 %% -----------------------------------------------------------------------------
 -spec salted_password(binary(), binary(), map()) -> binary().
 
-salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
-    #{
-        iterations := Iterations,
-        hash_function := HashFun,
-        hash_length := HashLen
-    } = Params,
-
-    SaltedPassword = crypto:pbkdf2_hmac(
-        HashFun, Password, Salt, Iterations, HashLen
-    ),
-    base64:encode(SaltedPassword).
+salted_password(Password, Salt, Params) ->
+    bondy_wamp_cra:salted_password(Password, Salt, Params).
 
 
 %% -----------------------------------------------------------------------------
@@ -192,7 +168,7 @@ salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
 -spec compare(binary(), binary()) -> boolean().
 
 compare(A, B) ->
-    crypto:hash_equals(A, B).
+    bondy_wamp_cra:compare(A, B).
 
 
 

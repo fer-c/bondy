@@ -4,13 +4,19 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc This modules provides the necessary functions to support the
-%% Cryptosign capabilities.
+%% @doc This module provides the necessary functions to support the Cryptosign
+%% capabilities.
+%%
+%% It is a thin shim over `bondy_wamp_cryptosign', the router-independent single
+%% source of truth shared with the WAMP client. New code should call
+%% `bondy_wamp_cryptosign' directly.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_cryptosign).
 
--type key_pair()        ::  #{public => binary(), secret => binary()}.
+-type key_pair()        ::  bondy_wamp_cryptosign:key_pair().
+
+-export_type([key_pair/0]).
 
 %% API
 -export([generate_key/0]).
@@ -19,6 +25,7 @@
 -export([strong_rand_bytes/0]).
 -export([strong_rand_bytes/1]).
 -export([verify/3]).
+
 
 
 %% =============================================================================
@@ -34,8 +41,7 @@
 -spec generate_key() -> KeyPair :: key_pair().
 
 generate_key() ->
-    {Pub, Priv} = crypto:generate_key(eddsa, ed25519),
-    #{public => Pub, secret => Priv}.
+    bondy_wamp_cryptosign:generate_key().
 
 
 %% -----------------------------------------------------------------------------
@@ -45,17 +51,17 @@ generate_key() ->
 -spec strong_rand_bytes() -> binary().
 
 strong_rand_bytes() ->
-    strong_rand_bytes(32).
+    bondy_wamp_cryptosign:strong_rand_bytes().
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec strong_rand_bytes(pos_integer()) -> binary().
+-spec strong_rand_bytes(non_neg_integer()) -> binary().
 
-strong_rand_bytes(Length) when is_integer(Length) andalso Length >= 0 ->
-    crypto:strong_rand_bytes(Length).
+strong_rand_bytes(Length) ->
+    bondy_wamp_cryptosign:strong_rand_bytes(Length).
 
 
 %% -----------------------------------------------------------------------------
@@ -65,8 +71,8 @@ strong_rand_bytes(Length) when is_integer(Length) andalso Length >= 0 ->
 -spec sign(Challenge :: binary(), KeyPair :: key_pair()) ->
     Signature :: binary().
 
-sign(Challenge, #{public := Pub, secret := Priv}) ->
-    public_key:sign(Challenge, ignored, {ed_pri, ed25519, Pub, Priv}, []).
+sign(Challenge, KeyPair) ->
+    bondy_wamp_cryptosign:sign(Challenge, KeyPair).
 
 
 %% -----------------------------------------------------------------------------
@@ -74,40 +80,21 @@ sign(Challenge, #{public := Pub, secret := Priv}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec verify(
-    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()) -> boolean() | no_return().
+    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()) ->
+    boolean() | no_return().
 
 verify(Signature, Challenge, PublicKey) ->
-    Normalised = normalise_signature(Signature, Challenge),
-
-    public_key:verify(
-        Challenge, ignored, Normalised, {ed_pub, ed25519, PublicKey}
-    ).
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
+    bondy_wamp_cryptosign:verify(Signature, Challenge, PublicKey).
 
 
 %% -----------------------------------------------------------------------------
-%% @private
 %% @doc As the cryptosign spec is not formal some clients e.g. Python
 %% return Signature(64) ++ Challenge(32) while others e.g. JS return just the
 %% Signature(64).
 %% @end
 %% -----------------------------------------------------------------------------
-normalise_signature(Signature, _) when byte_size(Signature) == 64 ->
-    Signature;
+-spec normalise_signature(Signature :: binary(), Challenge :: binary()) ->
+    binary() | no_return().
 
-normalise_signature(Signature, Challenge) when byte_size(Signature) == 96 ->
-    case binary:match(Signature, Challenge) of
-        {64, 32} ->
-            binary:part(Signature, {0, 64});
-        _ ->
-            error(invalid_signature)
-    end;
-
-normalise_signature(_, _) ->
-    error(invalid_signature).
+normalise_signature(Signature, Challenge) ->
+    bondy_wamp_cryptosign:normalise_signature(Signature, Challenge).

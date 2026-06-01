@@ -122,9 +122,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
             ),
             session => ExtSessionId
         }),
-        ExpectedSignature = base64:encode(
-            crypto:mac(hmac, sha256, SPassword, Challenge)
-        ),
+        ExpectedSignature = bondy_wamp_cra:response(Challenge, SPassword),
 
         KeyLen = bondy_password:hash_length(PWD),
 

@@ -640,6 +640,8 @@ is_a_test(Function) ->
 start_bondy() ->
     case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
+            ok = ensure_etc(),
+
             application:set_env([{kernel, ?KERNEL_ENV}]),
 
             ok = start_disterl(),
@@ -739,6 +741,55 @@ start_disterl() ->
         } ->
             os:cmd(os:find_executable("epmd") ++ " -daemon"),
             {ok, _} = net_kernel:start(Nodename)
+    end.
+
+
+%% @private
+%% Common Test sets the current working directory to the per-run `ct_run.*'
+%% log dir, but the listener/config paths in ?ENV are relative (e.g.
+%% "./etc/ssl/server/keycert.pem"). Reproduce a release's cwd layout by
+%% symlinking `./etc' to the repository's `etc' directory so those relative
+%% paths resolve. Idempotent and best-effort: a no-op when `./etc' already
+%% exists or the repo root / its `etc' dir cannot be located.
+ensure_etc() ->
+    case filelib:is_dir("etc") of
+        true ->
+            ok;
+        false ->
+            {ok, Cwd} = file:get_cwd(),
+            case find_repo_root(Cwd) of
+                {ok, Root} ->
+                    EtcSrc = filename:join(Root, "etc"),
+                    case filelib:is_dir(EtcSrc) of
+                        true ->
+                            _ = file:make_symlink(EtcSrc, "etc"),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                error ->
+                    ok
+            end
+    end.
+
+
+%% @private
+%% Walk up from `Dir' to the repository root, identified by a directory that
+%% holds both an `apps' subdirectory and a `rebar.config' (profile-independent,
+%% unlike deriving it from `code:lib_dir/1').
+find_repo_root(Dir) ->
+    HasApps = filelib:is_dir(filename:join(Dir, "apps")),
+    HasRebar = filelib:is_file(filename:join(Dir, "rebar.config")),
+    case HasApps andalso HasRebar of
+        true ->
+            {ok, Dir};
+        false ->
+            case filename:dirname(Dir) of
+                Dir ->
+                    error;
+                Parent ->
+                    find_repo_root(Parent)
+            end
     end.
 
 
