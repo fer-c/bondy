@@ -958,7 +958,11 @@ do_forward(#cancel{} = M, Ctxt0) ->
     %% remote node after checking the callee does not support it.
     %% The caller is not affected, only in the kill case will receive an
     %% error later in the case of a remote callee.
-    handle_cancel(M, Ctxt0, maps:get(mode, M#cancel.options, skip));
+    %% The mode arrives as a binary (validated CANCEL option); normalise it to
+    %% the atom the handle_cancel/3 clauses match on.
+    handle_cancel(
+        M, Ctxt0, cancel_mode(maps:get(mode, M#cancel.options, skip))
+    );
 
 do_forward(#yield{} = M, Ctxt0) ->
     %% A local Callee is replying to an INVOCATION message.
@@ -1218,7 +1222,7 @@ handle_cancel(#cancel{} = M, Ctxt0, kill) ->
     RealmUri = bondy_context:realm_uri(Ctxt0),
     CallId = M#cancel.request_id,
     Caller = bondy_context:ref(Ctxt0),
-    Opts = #cancel.options,
+    Opts = M#cancel.options,
 
     Fun = fun(Promise, Ctxt1) ->
         %% If not authoried this will fail with an exception
@@ -1252,7 +1256,7 @@ handle_cancel(#cancel{} = M, Ctxt0, killnowait) ->
     RealmUri = bondy_context:realm_uri(Ctxt0),
     CallId = M#cancel.request_id,
     Caller = bondy_context:ref(Ctxt0),
-    Opts = #cancel.options,
+    Opts = M#cancel.options,
 
     Fun = fun(Promise, Ctxt1) ->
         %% If not authoried this will fail with an exception
@@ -1325,6 +1329,14 @@ handle_cancel(#cancel{} = M, Ctxt0, skip) ->
     _ = take_invocations(CallId, M, Fun, Ctxt0),
 
     ok.
+
+
+%% @private
+cancel_mode(<<"kill">>) -> kill;
+cancel_mode(<<"killnowait">>) -> killnowait;
+cancel_mode(<<"skip">>) -> skip;
+cancel_mode(Mode) when is_atom(Mode) -> Mode;
+cancel_mode(_) -> skip.
 
 
 %% -----------------------------------------------------------------------------
