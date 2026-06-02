@@ -24,6 +24,7 @@ all() ->
 
         %% HELLO / handshake start
         start_builds_hello,
+        hello_advertises_feature_matrix,
         start_only_from_closed,
 
         %% Auth round-trips (tie back to the bondy_wamp 0b primitives)
@@ -131,6 +132,47 @@ start_builds_hello(_) ->
     ?assertEqual([<<"anonymous">>], maps:get(authmethods, Details)),
     ?assert(maps:is_key(roles, Details)),
     ?assertEqual(establishing, bondy_connect_protocol:state_name(St1)).
+
+
+%% The default HELLO advertises exactly the advanced-profile features the client
+%% implements (M3). Crucially it must NOT advertise progressive_call_results or
+%% progressive_calls (deferred) — advertise == handle.
+hello_advertises_feature_matrix(_) ->
+    {ok, Hello, _St} = bondy_connect_protocol:start(
+        protocol(#{method => <<"anonymous">>})
+    ),
+    #hello{details = #{roles := Roles}} = Hello,
+
+    ?assert(feature(caller, call_canceling, Roles)),
+    ?assert(feature(caller, call_timeout, Roles)),
+    ?assert(feature(caller, caller_identification, Roles)),
+    ?assert(feature(caller, call_retries, Roles)),
+
+    ?assert(feature(callee, call_canceling, Roles)),
+    ?assert(feature(callee, pattern_based_registration, Roles)),
+    ?assert(feature(callee, shared_registration, Roles)),
+    ?assert(feature(callee, registration_revocation, Roles)),
+
+    ?assert(feature(publisher, publisher_exclusion, Roles)),
+    ?assert(feature(publisher, subscriber_blackwhite_listing, Roles)),
+    ?assert(feature(subscriber, pattern_based_subscription, Roles)),
+
+    %% Deferred features must be absent from every role.
+    [
+        begin
+            Features = maps:get(features, maps:get(Role, Roles, #{}), #{}),
+            ?assertNot(maps:is_key(progressive_call_results, Features)),
+            ?assertNot(maps:is_key(progressive_calls, Features))
+        end
+        || Role <- [caller, callee, publisher, subscriber]
+    ].
+
+
+%% @private
+feature(Role, Feature, Roles) ->
+    maps:get(
+        Feature, maps:get(features, maps:get(Role, Roles, #{}), #{}), false
+    ).
 
 
 start_only_from_closed(_) ->

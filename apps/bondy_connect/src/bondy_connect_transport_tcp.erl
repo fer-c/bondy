@@ -29,6 +29,8 @@ read synchronously. After the handshake the connection process can switch it to
 -export([connect/2]).
 -export([handshake/2]).
 -export([send/2]).
+-export([ping/2]).
+-export([pong/2]).
 -export([recv/2]).
 -export([handle_data/2]).
 -export([setopts/2]).
@@ -88,6 +90,18 @@ send(Msg, #state{socket = Socket, codec = Codec}) when Codec =/= undefined ->
         {error, _} = Error ->
             Error
     end.
+
+
+-spec ping(binary(), #state{}) -> ok | {error, term()}.
+
+ping(Payload, #state{socket = Socket}) ->
+    gen_tcp:send(Socket, bondy_connect_framing:ping_frame(Payload)).
+
+
+-spec pong(binary(), #state{}) -> ok | {error, term()}.
+
+pong(Payload, #state{socket = Socket}) ->
+    gen_tcp:send(Socket, bondy_connect_framing:pong_frame(Payload)).
 
 
 -spec recv(timeout(), #state{}) ->

@@ -122,7 +122,14 @@ decode_loop(Buffer, Max, Codec, Acc) ->
 
 %% @private
 decode_message(Payload, Rest, Max, #codec{encoding = Enc} = Codec, Acc) ->
-    try bondy_wamp_encoding:decode({raw, binary, Enc}, Payload) of
+    %% Partial decoding (`partial_decode => true', the default for json/cbor) is
+    %% a router-side passthrough optimisation: it parses only the routing head
+    %% and leaves Args/KWArgs as an unparsed binary so a router can re-route a
+    %% payload without decoding it. A client is the final consumer, so we
+    %% disable it and fully decode every message. We override only that flag,
+    %% keeping each serializer's required options (e.g. msgpack's map_format).
+    Opts = [{partial_decode, false} | bondy_wamp_encoding:opts(Enc, decode)],
+    try bondy_wamp_encoding:decode({raw, binary, Enc}, Payload, Opts) of
         {Msgs, _Ignored} ->
             decode_loop(Rest, Max, Codec, lists:reverse(Msgs) ++ Acc)
     catch

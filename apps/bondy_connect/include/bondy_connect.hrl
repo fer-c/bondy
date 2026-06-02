@@ -17,4 +17,9 @@
 -define(WAMP_CRYPTOSIGN_AUTH,   <<"cryptosign">>).
 -define(WAMP_TICKET_AUTH,       <<"ticket">>).
 
+%% Error URI returned to the caller when a local callee handler crashes or
+%% returns an unexpected value. Kept local so `bondy_connect' has no dependency
+%% on the `bondy' application.
+-define(BONDY_CONNECT_INTERNAL_ERROR,   <<"wamp.error.internal_error">>).
+
 -endif.

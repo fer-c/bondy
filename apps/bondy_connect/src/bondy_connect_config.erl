@@ -19,15 +19,68 @@ are secure-by-default (`verify_peer`).
 
 -include("bondy_connect.hrl").
 
+%% The advanced-profile features the client actually implements (M3). The rule
+%% is **advertise == handle**: we only claim a feature whose behaviour the
+%% client honours. Notably `progressive_call_results`/`progressive_calls` are
+%% **not** advertised — they are deferred (the router does not yet round-trip
+%% them) and advertising a feature we cannot honour would violate the contract.
 -define(DEFAULT_ROLES, #{
-    caller => #{},
-    callee => #{},
-    publisher => #{},
-    subscriber => #{}
+    caller => #{features => #{
+        call_timeout => true,
+        call_canceling => true,
+        caller_identification => true,
+        call_retries => true
+    }},
+    callee => #{features => #{
+        call_canceling => true,
+        caller_identification => true,
+        pattern_based_registration => true,
+        shared_registration => true,
+        registration_revocation => true
+    }},
+    publisher => #{features => #{
+        publisher_identification => true,
+        publisher_exclusion => true,
+        subscriber_blackwhite_listing => true
+    }},
+    subscriber => #{features => #{
+        pattern_based_subscription => true,
+        publisher_identification => true
+    }}
 }).
 
 -define(DEFAULT_SERIALIZERS, [json]).
 -define(DEFAULT_MAX_MESSAGE_LENGTH, 16777216). %% 16 MB
+
+%% Resilient by default (Phase 6): a dropped session is re-established with a
+%% bounded, backed-off retry budget. `retry_initial_connect` (default `false`)
+%% keeps `connect/1` fail-fast on the *first* attempt — backoff/replay only kick
+%% in once a session has established at least once. Set it `true` to also retry
+%% the initial connect.
+-define(DEFAULT_RECONNECT, #{
+    enabled => true,
+    retry_initial_connect => false,
+    max_retries => 10,
+    interval => 3000,
+    deadline => 60000,
+    backoff_enabled => true,
+    backoff_min => 1000,
+    backoff_max => 60000
+}).
+
+%% Idle keepalive (raw-socket ping/pong). After `idle_timeout` ms of silence the
+%% client pings; `max_attempts` unanswered pings (each waiting `timeout` ms)
+%% tears the link down and triggers reconnect.
+-define(DEFAULT_PING, #{
+    enabled => true,
+    idle_timeout => 30000,
+    timeout => 10000,
+    max_attempts => 3
+}).
+
+%% How long to wait in `waiting_for_network` for the network to recover before
+%% giving up (only used when partisan network monitoring is available).
+-define(DEFAULT_NETWORK_TIMEOUT, 60000).
 
 -export([validate/1]).
 
@@ -59,8 +112,9 @@ validate(Spec) when is_map(Spec) ->
             endpoint => maps:get(endpoint, Spec, undefined),
             max_message_length =>
                 maps:get(max_message_length, Spec, ?DEFAULT_MAX_MESSAGE_LENGTH),
-            reconnect => maps:get(reconnect, Spec, #{}),
-            ping => maps:get(ping, Spec, #{}),
+            reconnect => validate_reconnect(Spec),
+            ping => validate_ping(Spec),
+            network_timeout => validate_network_timeout(Spec),
             tls => validate_tls(Spec)
         },
         {ok, Config}
@@ -122,6 +176,69 @@ validate_auth(#{auth := _}) ->
 
 validate_auth(_) ->
     #{method => ?WAMP_ANON_AUTH}.
+
+
+%% @private
+%% Merge the user's reconnect map over the bounded defaults and validate.
+validate_reconnect(Spec) ->
+    merge_validate(reconnect, Spec, ?DEFAULT_RECONNECT, fun(K, V) ->
+        case K of
+            enabled -> is_boolean(V) orelse bad(reconnect, K, V);
+            retry_initial_connect -> is_boolean(V) orelse bad(reconnect, K, V);
+            backoff_enabled -> is_boolean(V) orelse bad(reconnect, K, V);
+            _ -> is_non_neg_int(V) orelse bad(reconnect, K, V)
+        end
+    end).
+
+
+%% @private
+validate_ping(Spec) ->
+    merge_validate(ping, Spec, ?DEFAULT_PING, fun(K, V) ->
+        case K of
+            enabled -> is_boolean(V) orelse bad(ping, K, V);
+            _ -> is_pos_int(V) orelse bad(ping, K, V)
+        end
+    end).
+
+
+%% @private
+validate_network_timeout(#{network_timeout := T}) when is_integer(T), T > 0 ->
+    T;
+validate_network_timeout(#{network_timeout := T}) ->
+    throw({invalid_network_timeout, T});
+validate_network_timeout(_) ->
+    ?DEFAULT_NETWORK_TIMEOUT.
+
+
+%% @private Merge the user-supplied map (if any) over `Default`, validating each
+%% user-supplied value with `ValidateFun`. Unknown keys are rejected so typos
+%% surface early rather than being silently ignored.
+merge_validate(Key, Spec, Default, ValidateFun) ->
+    case maps:get(Key, Spec, #{}) of
+        User when is_map(User) ->
+            _ = maps:foreach(
+                fun(K, V) ->
+                    case is_map_key(K, Default) of
+                        true -> _ = ValidateFun(K, V), ok;
+                        false -> throw({unknown_option, Key, K})
+                    end
+                end,
+                User
+            ),
+            maps:merge(Default, User);
+        Other ->
+            throw({invalid_option, Key, Other})
+    end.
+
+
+%% @private
+is_non_neg_int(V) -> is_integer(V) andalso V >= 0.
+
+%% @private
+is_pos_int(V) -> is_integer(V) andalso V > 0.
+
+%% @private
+bad(Group, Key, Value) -> throw({invalid_option, Group, Key, Value}).
 
 
 %% @private

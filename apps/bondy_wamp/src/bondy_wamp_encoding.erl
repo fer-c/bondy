@@ -27,6 +27,7 @@
 -export([encode/3]).
 -export([decode/2]).
 -export([decode/3]).
+-export([opts/2]).
 -export([is_encoding/1]).
 
 -export([message_name/1]).
@@ -571,6 +572,17 @@ unpack(M) ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Returns the default serializer options for a given `Encoding' and
+%% direction (`encode' | `decode'). Exposed so callers can derive a base set of
+%% serializer-correct options and override individual entries — e.g. a client
+%% prepending `{partial_decode, false}' to fully decode payloads (partial
+%% decoding is a router-side passthrough optimisation, not a client concern)
+%% while preserving each serializer's required options.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec opts(Encoding :: encoding(), Direction :: encode | decode) -> list().
+
 opts(erl, encode) ->
     bondy_wamp_config:get([serialization, erl, encode], []);
 
@@ -687,7 +699,9 @@ decode_message(Data, cbor, Opts, Acc) ->
     unpack(M, Acc);
 
 decode_message(Data, msgpack, Opts, Acc) ->
-    {ok, M} = msgpack:unpack(Data, Opts),
+    %% `partial_decode' is a bondy_wamp control flag, not a msgpack option, and
+    %% msgpack has no partial path — strip it before msgpack's strict parser.
+    {ok, M} = msgpack:unpack(Data, lists:keydelete(partial_decode, 1, Opts)),
     unpack(M, Acc);
 
 decode_message(Data, bert, _, Acc) ->

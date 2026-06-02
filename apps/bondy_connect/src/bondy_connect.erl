@@ -23,13 +23,17 @@ ok = bondy_connect:disconnect(Conn).
 (`conn()`) is the connection pid; a named connection (`connect/2`) can also be
 referenced by its name.
 
-M1 (walking skeleton) implements the **caller** role over the raw TCP
-transport. `register`/`subscribe`/`publish` arrive in Phase 4.
+All four client roles — **caller**, **callee**, **publisher**, **subscriber** —
+are supported over the raw TCP transport (M2). Handlers (`handler()`) run in
+isolated, load-regulated worker processes; a crashing handler never affects the
+connection.
 """.
 
 -type conn()    ::  pid() | atom().
+-type handler() ::  bondy_connect_handler_spec:handler().
 
 -export_type([conn/0]).
+-export_type([handler/0]).
 
 -define(CONNECT_TIMEOUT, 30000).
 
@@ -41,6 +45,20 @@ transport. `register`/`subscribe`/`publish` arrive in Phase 4.
 -export([call/3]).
 -export([call/4]).
 -export([call/5]).
+-export([call_async/3]).
+-export([call_async/4]).
+-export([call_async/5]).
+-export([cancel/2]).
+-export([cancel/3]).
+-export([register/3]).
+-export([register/4]).
+-export([unregister/2]).
+-export([subscribe/3]).
+-export([subscribe/4]).
+-export([unsubscribe/2]).
+-export([publish/3]).
+-export([publish/4]).
+-export([publish/5]).
 
 
 
@@ -116,18 +134,151 @@ Call a procedure. `Opts` may carry `timeout` (ms). Returns
 -spec call(conn(), binary(), Args :: list(), KWArgs :: map(), Opts :: map()) ->
     {ok, map()} | {error, term()}.
 call(Conn, Uri, Args, KWArgs, Opts) ->
-    case resolve(Conn) of
-        undefined ->
-            {error, not_connected};
-        Pid ->
-            bondy_connect_connection:call(Pid, Uri, Args, KWArgs, Opts)
-    end.
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:call(Pid, Uri, Args, KWArgs, Opts)
+    end).
+
+
+-doc "Asynchronous call with positional arguments. See `call_async/5`.".
+-spec call_async(conn(), binary(), list()) ->
+    {ok, reference()} | {error, term()}.
+call_async(Conn, Uri, Args) ->
+    call_async(Conn, Uri, Args, #{}, #{}).
+
+
+-doc "Asynchronous call with positional + keyword arguments. See `call_async/5`.".
+-spec call_async(conn(), binary(), list(), map()) ->
+    {ok, reference()} | {error, term()}.
+call_async(Conn, Uri, Args, KWArgs) ->
+    call_async(Conn, Uri, Args, KWArgs, #{}).
+
+
+-doc """
+Issue a call without blocking. Returns `{ok, Token}`; the reply is later sent to
+the calling process as `{bondy_connect, Token, {ok, Result} | {error, Reason}}`.
+""".
+-spec call_async(conn(), binary(), list(), map(), map()) ->
+    {ok, reference()} | {error, term()}.
+call_async(Conn, Uri, Args, KWArgs, Opts) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:call_async(Pid, Uri, Args, KWArgs, Opts)
+    end).
+
+
+-doc "Cancel an in-flight async call (mode `killnowait`). See `cancel/3`.".
+-spec cancel(conn(), reference()) -> ok | {error, term()}.
+cancel(Conn, Token) ->
+    cancel(Conn, Token, killnowait).
+
+
+-doc """
+Cancel an in-flight async call identified by the `Token` returned from
+`call_async`. `Mode` is `skip` | `kill` | `killnowait`. The async caller still
+receives a terminating `{bondy_connect, Token, {error, _}}` reply.
+""".
+-spec cancel(conn(), reference(), skip | kill | killnowait) ->
+    ok | {error, term()}.
+cancel(Conn, Token, Mode) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:cancel(Pid, Token, Mode)
+    end).
+
+
+-doc "Register a procedure. See `register/4`.".
+-spec register(conn(), binary(), handler()) ->
+    {ok, pos_integer()} | {error, term()}.
+register(Conn, Uri, Handler) ->
+    register(Conn, Uri, Handler, #{}).
+
+
+-doc """
+Register `Uri` as a procedure served by `Handler`. The handler runs in an
+isolated worker on each invocation; see `m:bondy_connect_handler_spec` for the
+contract. Returns `{ok, RegistrationId}`.
+""".
+-spec register(conn(), binary(), handler(), map()) ->
+    {ok, pos_integer()} | {error, term()}.
+register(Conn, Uri, Handler, Opts) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:register(Pid, Uri, Handler, Opts)
+    end).
+
+
+-doc "Unregister a procedure by its registration id or URI.".
+-spec unregister(conn(), pos_integer() | binary()) -> ok | {error, term()}.
+unregister(Conn, RegRef) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:unregister(Pid, RegRef)
+    end).
+
+
+-doc "Subscribe to a topic. See `subscribe/4`.".
+-spec subscribe(conn(), binary(), handler()) ->
+    {ok, pos_integer()} | {error, term()}.
+subscribe(Conn, Topic, Handler) ->
+    subscribe(Conn, Topic, Handler, #{}).
+
+
+-doc """
+Subscribe to `Topic`; `Handler` is invoked per event. Events are delivered
+**FIFO per subscription** by default — pass `Opts` `#{ordered => false}` for
+concurrent delivery. Returns `{ok, SubscriptionId}`.
+""".
+-spec subscribe(conn(), binary(), handler(), map()) ->
+    {ok, pos_integer()} | {error, term()}.
+subscribe(Conn, Topic, Handler, Opts) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:subscribe(Pid, Topic, Handler, Opts)
+    end).
+
+
+-doc "Unsubscribe from a topic by its subscription id or URI.".
+-spec unsubscribe(conn(), pos_integer() | binary()) -> ok | {error, term()}.
+unsubscribe(Conn, SubRef) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:unsubscribe(Pid, SubRef)
+    end).
+
+
+-doc "Publish to a topic with positional arguments. See `publish/5`.".
+-spec publish(conn(), binary(), list()) -> ok | {ok, pos_integer()} | {error, term()}.
+publish(Conn, Topic, Args) ->
+    publish(Conn, Topic, Args, #{}, #{}).
+
+
+-doc "Publish to a topic with positional + keyword arguments. See `publish/5`.".
+-spec publish(conn(), binary(), list(), map()) ->
+    ok | {ok, pos_integer()} | {error, term()}.
+publish(Conn, Topic, Args, KWArgs) ->
+    publish(Conn, Topic, Args, KWArgs, #{}).
+
+
+-doc """
+Publish to `Topic`. By default fire-and-forget (`ok`); with `Opts`
+`#{acknowledge => true}` it waits for the router and returns
+`{ok, PublicationId}`.
+""".
+-spec publish(conn(), binary(), list(), map(), map()) ->
+    ok | {ok, pos_integer()} | {error, term()}.
+publish(Conn, Topic, Args, KWArgs, Opts) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:publish(Pid, Topic, Args, KWArgs, Opts)
+    end).
 
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+with_conn(Conn, Fun) ->
+    case resolve(Conn) of
+        undefined -> {error, not_connected};
+        Pid -> Fun(Pid)
+    end.
 
 
 

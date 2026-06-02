@@ -11,49 +11,108 @@ session handshake through the pure `bondy_connect_protocol` layer, and
 correlates requests/replies (Decision 3 — it speaks **records** to both the
 transport and the protocol).
 
-## Transport states (M1)
+## Transport states
 
 ```
 connecting --> handshaking --> establishing --> established
+    ^                                               |
+    +-----------------------------------------------+   (drop -> reconnect)
+    |
+waiting_for_network   (network down, partisan-gated)
 ```
 
-`connecting` opens the transport; `handshaking` runs the raw-socket transport
-handshake (passive) then switches the socket to active and sends the HELLO the
-protocol layer produces; `establishing` feeds inbound CHALLENGE/WELCOME/ABORT
-records to the protocol layer until it reports `established` (or aborts);
-`established` services CALLs and routes RESULT/ERROR back to callers.
+`connecting` opens the transport (and owns the reconnect/backoff loop via
+`bondy_retry`); `handshaking` runs the raw-socket transport handshake (passive)
+then switches the socket to active and sends the HELLO the protocol layer
+produces; `establishing` feeds inbound CHALLENGE/WELCOME/ABORT records to the
+protocol layer until it reports `established` (or aborts); `established` services
+the four client roles and runs idle ping/pong keepalive.
 
-M1 implements the **caller** role (CALL ⇒ RESULT/ERROR correlation) only;
-register/subscribe/publish + handler workers arrive in Phase 4, reconnect/ping
-in Phase 6. `process_flag(sensitive, true)` is set while authenticating and
-cleared on `established` (Decision 12).
+## Resilience (Phase 6)
+
+A dropped session is re-established in-process: on a transport failure the
+session state is torn down (in-flight calls fail-fast with `{error, disconnected}`,
+in-flight workers are stopped, established registrations/subscriptions are
+cleared but the **declared** set is kept), then `connecting` retries with
+`bondy_retry` backoff. On re-establish the declared REGISTER/SUBSCRIBE set is
+replayed. When partisan network monitoring is available, a network-down failure
+parks in `waiting_for_network` until the network recovers. The initial connect
+is fail-fast by default (configurable via `reconnect.retry_initial_connect`).
+
+## Roles (M2)
+
+- **caller** — `call/5` (synchronous) and `call_async/5` (a token reply to the
+  caller pid); per-request timeouts; `RESULT`/`ERROR` correlation.
+- **callee** — `register/4`/`unregister/2`; inbound `INVOCATION` is dispatched
+  to an isolated, monitored, load-regulated `bondy_connect_handler` worker
+  whose result becomes a `YIELD` or `ERROR`.
+- **publisher** — `publish/5` (fire-and-forget, or acknowledged `PUBLISHED`).
+- **subscriber** — `subscribe/4`/`unsubscribe/2`; inbound `EVENT` is dispatched
+  to a worker, **FIFO per subscription** by default (opt-in `unordered`).
+
+Correlation, the registry, the per-subscription dispatch queues and the load
+counter all live in the `gen_statem` data — never shared ETS (fixes the awre
+race), auto-reclaimed on death. `process_flag(sensitive, true)` is set while
+authenticating and cleared on `established` (Decision 12). Reconnect/ping and
+CANCEL/INTERRUPT/progressive arrive in Phases 5–6.
 """.
 
 -behaviour(gen_statem).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_connect.hrl").
 
 -record(data, {
-    config          ::  map(),
-    conn_sup        ::  pid(),
-    transport_mod   ::  module(),
-    transport       ::  term() | undefined,
-    subprotocol     ::  {raw, binary, atom()},
-    protocol        ::  bondy_connect_protocol:state(),
-    session         ::  bondy_connect_session:t() | undefined,
+    config              ::  map(),
+    conn_sup            ::  pid(),
+    transport_mod       ::  module(),
+    transport           ::  term() | undefined,
+    subprotocol         ::  {raw, binary, atom()},
+    protocol            ::  bondy_connect_protocol:state(),
+    session             ::  bondy_connect_session:t() | undefined,
     ready_waiters = []  ::  [gen_statem:from()],
+    %% Resilience (Phase 6)
+    reconnect_retry     ::  bondy_retry:t() | undefined,
+    retry_initial = false :: boolean(),
+    established_once = false :: boolean(),
+    net_monitor = false ::  boolean(),
+    network_timeout     ::  pos_integer(),
+    %% Idle keepalive (ping/pong)
+    ping_retry          ::  bondy_retry:t() | undefined,
+    ping_idle_timeout   ::  pos_integer() | undefined,
+    ping_payload        ::  binary() | undefined,
     next_request_id = 1 ::  pos_integer(),
-    pending = #{}   ::  #{pos_integer() => gen_statem:from()}
+    %% ReqId => #{type, from, timer, meta}
+    pending = #{}       ::  #{pos_integer() => map()},
+    handler_sup         ::  pid() | undefined,
+    registry            ::  bondy_connect_registry:t(),
+    load                ::  bondy_connect_load:t(),
+    %% in-flight callee invocations: InvReqId => {WorkerPid, MonRef}
+    %% (the pid lets an inbound INTERRUPT kill the servicing worker).
+    invocations = #{}   ::  #{pos_integer() => {pid(), reference()}},
+    %% worker monitor reverse index: MonRef => {invocation, InvReqId}
+    %%                                       | {event, SubId}
+    mons = #{}          ::  #{reference() => term()},
+    %% per-subscription FIFO dispatch: SubId => #{busy, queue, mon}
+    dispatch = #{}      ::  #{pos_integer() => map()}
 }).
 
 -define(CONNECT_TIMEOUT, 5000).
 -define(ESTABLISH_TIMEOUT, 10000).
 -define(DEFAULT_CALL_TIMEOUT, 30000).
+-define(DEFAULT_ADMIN_TIMEOUT, 15000).
 
 -export([start_link/2]).
 -export([await_ready/2]).
 -export([call/5]).
+-export([call_async/5]).
+-export([cancel/3]).
+-export([register/4]).
+-export([unregister/2]).
+-export([subscribe/4]).
+-export([unsubscribe/2]).
+-export([publish/5]).
 -export([status/1]).
 
 -export([callback_mode/0]).
@@ -62,6 +121,7 @@ cleared on `established` (Decision 12).
 -export([format_status/1]).
 %% state functions
 -export([connecting/3]).
+-export([waiting_for_network/3]).
 -export([handshaking/3]).
 -export([establishing/3]).
 -export([established/3]).
@@ -83,36 +143,96 @@ start_link(Config, ConnSup) ->
 -doc "Block until the session is established (or it fails).".
 -spec await_ready(pid(), timeout()) -> ok | {error, term()}.
 await_ready(Pid, Timeout) ->
-    try
-        gen_statem:call(Pid, await_ready, Timeout)
-    catch
-        exit:{timeout, _} -> {error, timeout};
-        exit:{noproc, _} -> {error, not_connected};
-        exit:{Reason, _} -> {error, Reason}
-    end.
+    call_safe(Pid, await_ready, Timeout).
 
 
--doc "Issue a CALL and wait for the RESULT/ERROR.".
+-doc "Issue a synchronous CALL and wait for the RESULT/ERROR.".
 -spec call(pid(), uri(), list(), map(), map()) ->
     {ok, map()} | {error, term()}.
 call(Pid, Uri, Args, KWArgs, Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT),
-    try
-        gen_statem:call(Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + 5000)
-    catch
-        exit:{timeout, _} -> {error, timeout};
-        exit:{noproc, _} -> {error, not_connected};
-        exit:{Reason, _} -> {error, Reason}
-    end.
+    call_safe(Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + 5000).
+
+
+-doc """
+Issue an asynchronous CALL. Returns `{ok, Token}`; the RESULT/ERROR is later
+delivered to the calling process as `{bondy_connect, Token, Reply}` where
+`Reply` is `{ok, map()}` or `{error, term()}`.
+""".
+-spec call_async(pid(), uri(), list(), map(), map()) ->
+    {ok, reference()} | {error, term()}.
+call_async(Pid, Uri, Args, KWArgs, Opts) ->
+    call_safe(Pid, {call_async, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT).
+
+
+-doc """
+Cancel an in-flight asynchronous call identified by its `Token` (returned by
+`call_async/5`). `Mode` is `skip` | `kill` | `killnowait` (WAMP call-cancelling
+modes). The original async caller still receives the terminating
+`{error, #{uri := <<"wamp.error.canceled">>}}` reply.
+""".
+-spec cancel(pid(), reference(), skip | kill | killnowait) ->
+    ok | {error, term()}.
+cancel(Pid, Token, Mode) ->
+    call_safe(Pid, {cancel, Token, Mode}, ?DEFAULT_ADMIN_TIMEOUT).
+
+
+-doc "Register a procedure with a handler. Returns `{ok, RegistrationId}`.".
+-spec register(pid(), uri(), bondy_connect_handler_spec:handler(), map()) ->
+    {ok, pos_integer()} | {error, term()}.
+register(Pid, Uri, Handler, Opts) ->
+    call_safe(Pid, {register, Uri, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT).
+
+
+-doc "Unregister a procedure by its registration id or URI.".
+-spec unregister(pid(), pos_integer() | uri()) -> ok | {error, term()}.
+unregister(Pid, RegRef) ->
+    call_safe(Pid, {unregister, RegRef}, ?DEFAULT_ADMIN_TIMEOUT).
+
+
+-doc "Subscribe to a topic with a handler. Returns `{ok, SubscriptionId}`.".
+-spec subscribe(pid(), uri(), bondy_connect_handler_spec:handler(), map()) ->
+    {ok, pos_integer()} | {error, term()}.
+subscribe(Pid, Topic, Handler, Opts) ->
+    call_safe(Pid, {subscribe, Topic, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT).
+
+
+-doc "Unsubscribe from a topic by its subscription id or URI.".
+-spec unsubscribe(pid(), pos_integer() | uri()) -> ok | {error, term()}.
+unsubscribe(Pid, SubRef) ->
+    call_safe(Pid, {unsubscribe, SubRef}, ?DEFAULT_ADMIN_TIMEOUT).
+
+
+-doc """
+Publish to a topic. With `Opts` `#{acknowledge => true}` it waits for the
+router's `PUBLISHED` and returns `{ok, PublicationId}`; otherwise it returns
+`ok` once the message is on the wire.
+""".
+-spec publish(pid(), uri(), list(), map(), map()) ->
+    ok | {ok, pos_integer()} | {error, term()}.
+publish(Pid, Topic, Args, KWArgs, Opts) ->
+    call_safe(Pid, {publish, Topic, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT).
 
 
 -doc "The public status of the connection.".
--spec status(pid()) -> connecting | establishing | established | down.
+-spec status(pid()) ->
+    connecting | establishing | established | reconnecting | down.
 status(Pid) ->
     try
         gen_statem:call(Pid, status, 5000)
     catch
         _:_ -> down
+    end.
+
+
+%% @private
+call_safe(Pid, Request, Timeout) ->
+    try
+        gen_statem:call(Pid, Request, Timeout)
+    catch
+        exit:{timeout, _} -> {error, timeout};
+        exit:{noproc, _} -> {error, not_connected};
+        exit:{Reason, _} -> {error, Reason}
     end.
 
 
@@ -132,12 +252,23 @@ init({Config, ConnSup}) ->
     Mod = transport_mod(maps:get(transport, Config, tcp)),
     Sub = subprotocol(Config),
     {ok, Protocol} = bondy_connect_protocol:init(Config),
+    Reconnect = maps:get(reconnect, Config, #{}),
+    Ping = maps:get(ping, Config, #{}),
     Data = #data{
         config = Config,
         conn_sup = ConnSup,
         transport_mod = Mod,
         subprotocol = Sub,
-        protocol = Protocol
+        protocol = Protocol,
+        registry = bondy_connect_registry:new(),
+        load = bondy_connect_load:new(maps:get(handler, Config, #{})),
+        reconnect_retry = init_reconnect_retry(Reconnect),
+        retry_initial = maps:get(retry_initial_connect, Reconnect, false),
+        net_monitor = enable_net_monitor(),
+        network_timeout = maps:get(network_timeout, Config, 60000),
+        ping_retry = init_ping_retry(Ping),
+        ping_idle_timeout = ping_idle_timeout(Ping),
+        ping_payload = ping_payload(Ping)
     },
     {ok, connecting, Data}.
 
@@ -148,7 +279,11 @@ init({Config, ConnSup}) ->
 
 %% A 0-delay state_timeout kicks off the work (next_event is not allowed from a
 %% state enter callback). transport:connect/2 carries its own connect timeout.
-connecting(enter, _Old, Data) ->
+%% We reset the retry budget on entry (a fresh disconnection episode) — the
+%% backoff loop below re-arms the timeout via `keep_state` so this enter does
+%% not re-run between attempts.
+connecting(enter, _Old, Data0) ->
+    Data = reset_reconnect_retry(Data0),
     {keep_state, Data, [{state_timeout, 0, connect}]};
 
 connecting(state_timeout, connect, Data) ->
@@ -158,11 +293,38 @@ connecting(state_timeout, connect, Data) ->
         {ok, T} ->
             {next_state, handshaking, Data#data{transport = T}};
         {error, Reason} ->
-            fail({connect_error, Reason}, Data)
+            on_connect_failure({connect_error, Reason}, Data)
     end;
+
+connecting(info, {network_disconnected, _}, Data) ->
+    {next_state, waiting_for_network, Data};
 
 connecting(EventType, Event, Data) ->
     handle_common(EventType, Event, connecting, Data).
+
+
+%% -----------------------------------------------------------------------------
+%% waiting_for_network (network down — partisan-gated)
+%% -----------------------------------------------------------------------------
+
+waiting_for_network(enter, _Old, Data) ->
+    ?LOG_NOTICE(#{
+        description => "Network down; waiting for it to recover before reconnecting.",
+        timeout => Data#data.network_timeout
+    }),
+    {keep_state, Data, [{state_timeout, Data#data.network_timeout, network_timeout}]};
+
+waiting_for_network(state_timeout, network_timeout, Data) ->
+    stop_fail(network_timeout, Data);
+
+waiting_for_network(info, {network_connected, _}, Data) ->
+    {next_state, connecting, Data};
+
+waiting_for_network(info, {network_disconnected, _}, Data) ->
+    {keep_state, Data};
+
+waiting_for_network(EventType, Event, Data) ->
+    handle_common(EventType, Event, waiting_for_network, Data).
 
 
 %% -----------------------------------------------------------------------------
@@ -183,10 +345,10 @@ handshaking(state_timeout, handshake, Data) ->
                 ok ->
                     {next_state, establishing, Data1};
                 {error, Reason} ->
-                    fail({send_error, Reason}, Data1)
+                    on_transport_failure({send_error, Reason}, Data1)
             end;
         {error, Reason} ->
-            fail({handshake_error, Reason}, Data)
+            on_transport_failure({handshake_error, Reason}, Data)
     end;
 
 handshaking(EventType, Event, Data) ->
@@ -202,7 +364,7 @@ establishing(enter, _Old, Data) ->
     {keep_state, Data, [{state_timeout, ?ESTABLISH_TIMEOUT, timeout}]};
 
 establishing(state_timeout, timeout, Data) ->
-    fail(establish_timeout, Data);
+    on_transport_failure(establish_timeout, Data);
 
 establishing(info, Info, Data) ->
     handle_socket(Info, establishing, Data);
@@ -215,19 +377,76 @@ establishing(EventType, Event, Data) ->
 %% established
 %% -----------------------------------------------------------------------------
 
-established(enter, _Old, Data) ->
+established(enter, _Old, Data0) ->
     _ = process_flag(sensitive, false),
-    Data1 = reply_waiters(ok, Data),
-    {keep_state, Data1};
+    HSup = bondy_connect_conn_sup:handler_sup(Data0#data.conn_sup),
+    Data1 = Data0#data{handler_sup = HSup},
+    %% On a re-establish (we have established before) replay the declared
+    %% REGISTER/SUBSCRIBE set against the fresh session.
+    Data2 = case Data1#data.established_once of
+        true -> replay_declared(Data1);
+        false -> Data1
+    end,
+    Data3 = reply_waiters(ok, Data2#data{established_once = true}),
+    %% A successful establish resets the reconnect budget and arms keepalive.
+    Data4 = reset_reconnect_retry(Data3),
+    {keep_state, Data4, ping_idle_actions(Data4)};
+
+established({timeout, ping_idle}, ping_idle, Data) ->
+    send_ping(Data);
+
+established({timeout, ping}, ping_timeout, Data) ->
+    %% A ping went unanswered within its deadline — fail it and try again, or
+    %% tear the link down (and reconnect) once the attempts are exhausted.
+    ping_failed(Data);
 
 established({call, From}, {call, Uri, Args, KWArgs, Opts}, Data) ->
-    do_call(From, Uri, Args, KWArgs, Opts, Data);
+    do_call({sync, From}, Uri, Args, KWArgs, Opts, Data);
+
+established({call, {Owner, _} = From}, {call_async, Uri, Args, KWArgs, Opts}, Data) ->
+    Token = make_ref(),
+    Data1 = do_request(
+        call, {async, Owner, Token},
+        call_msg(Uri, Args, KWArgs, Opts),
+        call_timeout(Opts), #{}, Data
+    ),
+    {keep_state, Data1, [{reply, From, {ok, Token}}]};
+
+established({call, From}, {cancel, Token, Mode}, Data) ->
+    do_cancel(From, Token, Mode, Data);
+
+established({call, From}, {register, Uri, Handler, Opts}, Data) ->
+    do_register(From, Uri, Handler, Opts, Data);
+
+established({call, From}, {unregister, RegRef}, Data) ->
+    do_unregister(From, RegRef, Data);
+
+established({call, From}, {subscribe, Topic, Handler, Opts}, Data) ->
+    do_subscribe(From, Topic, Handler, Opts, Data);
+
+established({call, From}, {unsubscribe, SubRef}, Data) ->
+    do_unsubscribe(From, SubRef, Data);
+
+established({call, From}, {publish, Topic, Args, KWArgs, Opts}, Data) ->
+    do_publish(From, Topic, Args, KWArgs, Opts, Data);
 
 established({call, From}, await_ready, Data) ->
     {keep_state, Data, [{reply, From, ok}]};
 
+established(info, {handler_done, ReqId, Reply}, Data) ->
+    {keep_state, handle_handler_done(ReqId, Reply, Data)};
+
+established(info, {event_done, SubId, _Pid}, Data) ->
+    {keep_state, advance_event(SubId, Data)};
+
+established(info, {timeout, TRef, {req_timeout, ReqId}}, Data) ->
+    {keep_state, handle_req_timeout(ReqId, TRef, Data)};
+
+established(info, {'DOWN', MonRef, process, _Pid, Reason}, Data) ->
+    {keep_state, handle_worker_down(MonRef, Reason, Data)};
+
 established(info, Info, Data) ->
-    handle_socket(Info, established, Data);
+    handle_established_socket(Info, Data);
 
 established(EventType, Event, Data) ->
     handle_common(EventType, Event, established, Data).
@@ -241,6 +460,7 @@ established(EventType, Event, Data) ->
 
 
 terminate(_Reason, StateName, Data) ->
+    _ = disable_net_monitor(Data#data.net_monitor),
     _ = maybe_goodbye(StateName, Data),
     _ = close_transport(Data),
     _ = reply_pending({error, disconnected}, Data),
@@ -261,23 +481,40 @@ format_status(Status) ->
 
 %% @private
 handle_common({call, From}, status, StateName, Data) ->
-    {keep_state, Data, [{reply, From, public_status(StateName)}]};
+    {keep_state, Data, [{reply, From, public_status(StateName, Data)}]};
 
 handle_common({call, From}, await_ready, _StateName, Data) ->
     {keep_state, add_waiter(From, Data)};
 
-handle_common({call, From}, {call, _, _, _, _}, _StateName, Data) ->
-    %% A CALL before the session is established.
+handle_common({call, From}, Request, _StateName, Data)
+when is_tuple(Request), element(1, Request) == call;
+     is_tuple(Request), element(1, Request) == call_async;
+     is_tuple(Request), element(1, Request) == cancel;
+     is_tuple(Request), element(1, Request) == register;
+     is_tuple(Request), element(1, Request) == unregister;
+     is_tuple(Request), element(1, Request) == subscribe;
+     is_tuple(Request), element(1, Request) == unsubscribe;
+     is_tuple(Request), element(1, Request) == publish ->
+    %% A role request before the session is established.
     {keep_state, Data, [{reply, From, {error, not_established}}]};
 
 handle_common({call, From}, _Request, _StateName, Data) ->
     {keep_state, Data, [{reply, From, {error, badcall}}]};
 
 handle_common(info, {tcp_closed, _}, _StateName, Data) ->
-    fail(connection_closed, Data);
+    on_transport_failure(connection_closed, Data);
 
 handle_common(info, {tcp_error, _, Reason}, _StateName, Data) ->
-    fail({connection_error, Reason}, Data);
+    on_transport_failure({connection_error, Reason}, Data);
+
+%% Network monitor signals: while not in connecting/waiting_for_network the
+%% socket status takes priority, so we ignore them here (a real drop arrives as
+%% tcp_closed/tcp_error).
+handle_common(info, {network_disconnected, _}, _StateName, Data) ->
+    {keep_state, Data};
+
+handle_common(info, {network_connected, _}, _StateName, Data) ->
+    {keep_state, Data};
 
 handle_common(_EventType, _Event, _StateName, Data) ->
     {keep_state, Data}.
@@ -292,17 +529,30 @@ handle_socket({tcp, _Socket, Bin}, StateName, Data) ->
             ok = Mod:setopts([{active, once}], T1),
             process_records(Records, StateName, Data1);
         {error, Reason, T1} ->
-            fail({protocol_error, Reason}, Data#data{transport = T1})
+            on_transport_failure({protocol_error, Reason}, Data#data{transport = T1})
     end;
 
 handle_socket({tcp_closed, _}, _StateName, Data) ->
-    fail(connection_closed, Data);
+    on_transport_failure(connection_closed, Data);
 
 handle_socket({tcp_error, _, Reason}, _StateName, Data) ->
-    fail({connection_error, Reason}, Data);
+    on_transport_failure({connection_error, Reason}, Data);
 
 handle_socket(_Other, StateName, Data) ->
     {next_state, StateName, Data}.
+
+
+%% @private Process inbound socket bytes in the `established' state and reset the
+%% idle keepalive — inbound traffic proves the link is alive. Protocol-level
+%% stops (GOODBYE/ABORT) and reconnect transitions pass straight through.
+handle_established_socket(Info, Data) ->
+    case handle_socket(Info, established, Data) of
+        {next_state, established, Data1} ->
+            Data2 = ping_succeed(Data1),
+            {keep_state, Data2, keepalive_reset_actions(Data2)};
+        Result ->
+            Result
+    end.
 
 
 
@@ -326,8 +576,11 @@ process_records([Record | Rest], StateName, Data) ->
 
 
 %% @private
-%% Control frames are keepalive concerns (Phase 6) — ignored in M1.
-route({ping, _Payload}, StateName, Data) ->
+%% Control frames. An inbound ping (router keepalive) is answered with a pong; a
+%% pong (our keepalive answered) needs no record-level handling — the idle timer
+%% and ping retry are reset by `handle_established_socket/2` for any inbound data.
+route({ping, Payload}, StateName, Data) ->
+    _ = pong_send(Payload, Data),
     {continue, StateName, Data};
 route({pong, _Payload}, StateName, Data) ->
     {continue, StateName, Data};
@@ -373,60 +626,682 @@ route_established(Record, Data) ->
     end.
 
 
-%% @private Application-message routing (M1: CALL correlation only).
+%% @private Application-message routing.
 route_app(#result{request_id = ReqId} = R, Data) ->
-    resolve_call(ReqId, {ok, result_payload(R)}, Data);
+    Data1 = resolve_pending(ReqId, {ok, result_payload(R)}, Data),
+    {continue, established, Data1};
 
 route_app(#error{request_type = ?CALL, request_id = ReqId} = E, Data) ->
-    resolve_call(ReqId, {error, error_payload(E)}, Data);
+    Data1 = resolve_pending(ReqId, {error, error_payload(E)}, Data),
+    {continue, established, Data1};
+
+route_app(#registered{request_id = ReqId, registration_id = RegId}, Data) ->
+    {continue, established, confirm_registration(ReqId, RegId, Data)};
+
+route_app(#subscribed{request_id = ReqId, subscription_id = SubId}, Data) ->
+    {continue, established, confirm_subscription(ReqId, SubId, Data)};
+
+route_app(#unregistered{request_id = ReqId}, Data) when ReqId =/= 0 ->
+    {continue, established, confirm_unregister(ReqId, Data)};
+
+route_app(#unregistered{request_id = 0, details = Details}, Data) ->
+    %% Unsolicited UNREGISTERED — the router revoked one of our registrations
+    %% (registration_revocation, advanced profile). Drop it from the registry.
+    {continue, established, handle_revocation(Details, Data)};
+
+route_app(#unsubscribed{request_id = ReqId}, Data) ->
+    {continue, established, confirm_unsubscribe(ReqId, Data)};
+
+route_app(#published{request_id = ReqId, publication_id = PubId}, Data) ->
+    {continue, established, resolve_pending(ReqId, {ok, PubId}, Data)};
+
+route_app(#error{request_id = ReqId} = E, Data) ->
+    %% REGISTER/SUBSCRIBE/UNREGISTER/UNSUBSCRIBE/PUBLISH failure.
+    {continue, established, resolve_pending(ReqId, {error, error_payload(E)}, Data)};
+
+route_app(#invocation{} = Msg, Data) ->
+    {continue, established, handle_invocation(Msg, Data)};
+
+route_app(#event{} = Msg, Data) ->
+    {continue, established, handle_event(Msg, Data)};
+
+route_app(#interrupt{request_id = InvReqId, options = Opts}, Data) ->
+    %% The router is cancelling an in-flight INVOCATION we are servicing.
+    {continue, established, handle_interrupt(InvReqId, Opts, Data)};
 
 route_app(_Other, Data) ->
-    %% EVENT/INVOCATION/admin acks arrive in Phase 4.
+    %% Never-assert backstop: any other inbound application record (e.g. an
+    %% advanced feature we do not implement) is ignored rather than crashing
+    %% the connection.
     {continue, established, Data}.
 
 
-%% @private
-resolve_call(ReqId, Reply, #data{pending = Pending} = Data) ->
-    case maps:take(ReqId, Pending) of
-        {From, Pending1} ->
-            gen_statem:reply(From, Reply),
-            {continue, established, Data#data{pending = Pending1}};
+
+%% =============================================================================
+%% PRIVATE — outbound role requests
+%% =============================================================================
+
+
+
+%% @private (synchronous CALL — reply is deferred to RESULT/ERROR)
+do_call(From, Uri, Args, KWArgs, Opts, Data) ->
+    Data1 = do_request(
+        call, From, call_msg(Uri, Args, KWArgs, Opts),
+        call_timeout(Opts), #{}, Data
+    ),
+    {keep_state, Data1}.
+
+
+%% @private Cancel an in-flight async call. We find the pending CALL whose async
+%% token matches and send a CANCEL with the requested mode; the pending entry is
+%% left in place and is resolved by the resulting ERROR(canceled) the router
+%% sends back. `From` is replied to synchronously (`ok` / `{error, _}`).
+do_cancel(From, Token, Mode, Data) ->
+    case cancel_mode(Mode) of
+        {ok, ModeBin} ->
+            case find_async_call(Token, Data) of
+                {ok, ReqId} ->
+                    Msg = bondy_wamp_message:cancel(ReqId, #{mode => ModeBin}),
+                    Reply = case send_msg(Msg, Data) of
+                        ok -> ok;
+                        {error, R} -> {error, R}
+                    end,
+                    {keep_state, Data, [{reply, From, Reply}]};
+                error ->
+                    {keep_state, Data, [{reply, From, {error, unknown_call}}]}
+            end;
         error ->
-            {continue, established, Data}
+            {keep_state, Data, [{reply, From, {error, invalid_cancel_mode}}]}
     end.
 
 
-
-%% =============================================================================
-%% PRIVATE — CALL
-%% =============================================================================
-
+%% @private Resolve a `call_async` token to its pending CALL request id.
+find_async_call(Token, #data{pending = Pending}) ->
+    Found = maps:fold(
+        fun
+            (ReqId, #{type := call, from := {async, _, T}}, acc_none)
+            when T =:= Token ->
+                {ok, ReqId};
+            (_ReqId, _Entry, Acc) ->
+                Acc
+        end,
+        acc_none,
+        Pending
+    ),
+    case Found of
+        {ok, _} = OK -> OK;
+        acc_none -> error
+    end.
 
 
 %% @private
-do_call(From, Uri, Args, KWArgs, _Opts, Data) ->
-    #data{next_request_id = ReqId, pending = Pending} = Data,
-    Msg = bondy_wamp_message:call(ReqId, #{}, Uri, Args, KWArgs),
+cancel_mode(skip) -> {ok, <<"skip">>};
+cancel_mode(kill) -> {ok, <<"kill">>};
+cancel_mode(killnowait) -> {ok, <<"killnowait">>};
+cancel_mode(_) -> error.
+
+
+%% @private
+do_register(From, Uri, Handler, Opts, Data) ->
+    case bondy_connect_handler_spec:validate(Handler) of
+        ok ->
+            WireOpts = maps:with(
+                [match, invoke, concurrency, disclose_caller, force_reregister],
+                Opts
+            ),
+            Reg1 = bondy_connect_registry:declare_registration(
+                Uri, Handler, Opts, Data#data.registry
+            ),
+            send_request(
+                register, From,
+                fun(ReqId) -> bondy_wamp_message:register(ReqId, WireOpts, Uri) end,
+                ?DEFAULT_ADMIN_TIMEOUT, #{uri => Uri},
+                Data#data{registry = Reg1}
+            );
+        {error, _} = Error ->
+            {keep_state, Data, [{reply, From, Error}]}
+    end.
+
+
+%% @private
+do_unregister(From, RegRef, Data) ->
+    case resolve_registration(RegRef, Data) of
+        {ok, RegId} ->
+            send_request(
+                unregister, From,
+                fun(ReqId) -> bondy_wamp_message:unregister(ReqId, RegId) end,
+                ?DEFAULT_ADMIN_TIMEOUT, #{reg_id => RegId}, Data
+            );
+        error ->
+            {keep_state, Data, [{reply, From, {error, no_such_registration}}]}
+    end.
+
+
+%% @private
+do_subscribe(From, Topic, Handler, Opts, Data) ->
+    case bondy_connect_handler_spec:validate(Handler) of
+        ok ->
+            WireOpts = maps:with([match, get_retained, nkey], Opts),
+            Reg1 = bondy_connect_registry:declare_subscription(
+                Topic, Handler, Opts, Data#data.registry
+            ),
+            send_request(
+                subscribe, From,
+                fun(ReqId) -> bondy_wamp_message:subscribe(ReqId, WireOpts, Topic) end,
+                ?DEFAULT_ADMIN_TIMEOUT, #{uri => Topic},
+                Data#data{registry = Reg1}
+            );
+        {error, _} = Error ->
+            {keep_state, Data, [{reply, From, Error}]}
+    end.
+
+
+%% @private
+do_unsubscribe(From, SubRef, Data) ->
+    case resolve_subscription(SubRef, Data) of
+        {ok, SubId} ->
+            send_request(
+                unsubscribe, From,
+                fun(ReqId) -> bondy_wamp_message:unsubscribe(ReqId, SubId) end,
+                ?DEFAULT_ADMIN_TIMEOUT, #{sub_id => SubId}, Data
+            );
+        error ->
+            {keep_state, Data, [{reply, From, {error, no_such_subscription}}]}
+    end.
+
+
+%% @private
+do_publish(From, Topic, Args, KWArgs, Opts, Data) ->
+    WireOpts = maps:with(
+        [acknowledge, exclude, exclude_me, exclude_authid, exclude_authrole,
+         eligible, eligible_authid, eligible_authrole, disclose_me, retain],
+        Opts
+    ),
+    case maps:get(acknowledge, Opts, false) of
+        true ->
+            send_request(
+                publish, From,
+                fun(ReqId) ->
+                    bondy_wamp_message:publish(ReqId, WireOpts, Topic, Args, KWArgs)
+                end,
+                ?DEFAULT_ADMIN_TIMEOUT, #{}, Data
+            );
+        false ->
+            #data{next_request_id = ReqId} = Data,
+            Msg = bondy_wamp_message:publish(ReqId, WireOpts, Topic, Args, KWArgs),
+            Reply = case send_msg(Msg, Data) of
+                ok -> ok;
+                {error, R} -> {error, R}
+            end,
+            Data1 = Data#data{next_request_id = next_id(ReqId)},
+            {keep_state, Data1, [{reply, From, Reply}]}
+    end.
+
+
+%% @private Build the message with the next id, send it, and (on success) store
+%% a pending entry replying to `From` on the matching ack. Used by the admin
+%% roles (register/subscribe/...). The reply to `From` is deferred.
+send_request(Type, From, MsgFun, Timeout, Meta, Data) ->
+    #data{next_request_id = ReqId} = Data,
+    Msg = MsgFun(ReqId),
     case send_msg(Msg, Data) of
         ok ->
-            Data1 = Data#data{
-                next_request_id = next_id(ReqId),
-                pending = maps:put(ReqId, From, Pending)
-            },
+            Data1 = store_pending(
+                ReqId, #{type => Type, from => {sync, From}, meta => Meta},
+                Timeout, Data#data{next_request_id = next_id(ReqId)}
+            ),
             {keep_state, Data1};
         {error, Reason} ->
             {keep_state, Data, [{reply, From, {error, Reason}}]}
     end.
 
 
+%% @private Lower-level: send an already-built CALL and store pending (used by
+%% sync + async calls, where the reply target differs).
+do_request(Type, ReplyTo, Msg, Timeout, Meta, Data) ->
+    #data{next_request_id = ReqId} = Data,
+    Msg1 = set_request_id(Msg, ReqId),
+    case send_msg(Msg1, Data) of
+        ok ->
+            store_pending(
+                ReqId, #{type => Type, from => ReplyTo, meta => Meta},
+                Timeout, Data#data{next_request_id = next_id(ReqId)}
+            );
+        {error, Reason} ->
+            _ = dispatch_reply(ReplyTo, {error, Reason}),
+            Data
+    end.
+
+
+
+%% =============================================================================
+%% PRIVATE — inbound ack handling
+%% =============================================================================
+
+
+
 %% @private
-result_payload(#result{args = Args, kwargs = KWArgs}) ->
-    #{args => undefined_to(Args, []), kwargs => undefined_to(KWArgs, #{})}.
+confirm_registration(ReqId, RegId, Data) ->
+    case peek_pending(ReqId, Data) of
+        {ok, #{meta := #{uri := Uri}}} ->
+            Reg1 = bondy_connect_registry:confirm_registration(
+                Uri, RegId, Data#data.registry
+            ),
+            resolve_pending(ReqId, {ok, RegId}, Data#data{registry = Reg1});
+        _ ->
+            Data
+    end.
 
 
 %% @private
-error_payload(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->
-    #{uri => Uri, args => undefined_to(Args, []), kwargs => undefined_to(KWArgs, #{})}.
+confirm_subscription(ReqId, SubId, Data) ->
+    case peek_pending(ReqId, Data) of
+        {ok, #{meta := #{uri := Uri}}} ->
+            Reg1 = bondy_connect_registry:confirm_subscription(
+                Uri, SubId, Data#data.registry
+            ),
+            resolve_pending(ReqId, {ok, SubId}, Data#data{registry = Reg1});
+        _ ->
+            Data
+    end.
+
+
+%% @private
+confirm_unregister(ReqId, Data) ->
+    case peek_pending(ReqId, Data) of
+        {ok, #{type := unregister, meta := #{reg_id := RegId}}} ->
+            Reg1 = bondy_connect_registry:forget_registration(
+                RegId, Data#data.registry
+            ),
+            resolve_pending(ReqId, ok, Data#data{registry = Reg1});
+        _ ->
+            Data
+    end.
+
+
+%% @private
+confirm_unsubscribe(ReqId, Data) ->
+    case peek_pending(ReqId, Data) of
+        {ok, #{type := unsubscribe, meta := #{sub_id := SubId}}} ->
+            Reg1 = bondy_connect_registry:forget_subscription(
+                SubId, Data#data.registry
+            ),
+            Data1 = clear_dispatch(SubId, Data),
+            resolve_pending(ReqId, ok, Data1#data{registry = Reg1});
+        _ ->
+            Data
+    end.
+
+
+%% @private An unsolicited UNREGISTERED carries the revoked registration id in
+%% its details (`#{registration => RegId}`). Drop it from the registry; inbound
+%% INVOCATIONs for it would then be answered with `no_such_registration`.
+handle_revocation(Details, Data) when is_map(Details) ->
+    case revoked_registration_id(Details) of
+        {ok, RegId} ->
+            Reg1 = bondy_connect_registry:forget_registration(
+                RegId, Data#data.registry
+            ),
+            Data#data{registry = Reg1};
+        error ->
+            Data
+    end;
+
+handle_revocation(_Details, Data) ->
+    Data.
+
+
+%% @private Read the revoked registration id from the details (atom key from the
+%% decoder, binary key as a defensive fallback).
+revoked_registration_id(Details) ->
+    case maps:find(registration, Details) of
+        {ok, Id} when is_integer(Id) ->
+            {ok, Id};
+        _ ->
+            case maps:find(<<"registration">>, Details) of
+                {ok, Id} when is_integer(Id) -> {ok, Id};
+                _ -> error
+            end
+    end.
+
+
+
+%% =============================================================================
+%% PRIVATE — callee (INVOCATION)
+%% =============================================================================
+
+
+
+%% @private
+handle_invocation(#invocation{} = Msg, Data) ->
+    #invocation{
+        request_id = ReqId,
+        registration_id = RegId,
+        details = Details,
+        args = Args,
+        kwargs = KWArgs
+    } = Msg,
+    case bondy_connect_registry:registration(RegId, Data#data.registry) of
+        {ok, #{handler := Handler}} ->
+            admit_invocation(ReqId, Handler, Details, Args, KWArgs, Data);
+        error ->
+            Err = bondy_wamp_message:error(
+                ?INVOCATION, ReqId, #{}, ?WAMP_NO_SUCH_REGISTRATION
+            ),
+            _ = send_msg(Err, Data),
+            Data
+    end.
+
+
+%% @private
+admit_invocation(ReqId, Handler, Details, Args, KWArgs, Data) ->
+    case bondy_connect_load:admit(Data#data.load) of
+        {ok, Load1} ->
+            Job = #{
+                kind => invocation,
+                conn => self(),
+                req_id => ReqId,
+                handler => Handler,
+                args => undefined_to(Args, []),
+                kwargs => undefined_to(KWArgs, #{}),
+                details => Details
+            },
+            {Pid, MonRef} = start_worker(Job, Data),
+            Data#data{
+                load = Load1,
+                invocations =
+                    maps:put(ReqId, {Pid, MonRef}, Data#data.invocations),
+                mons = maps:put(MonRef, {invocation, ReqId}, Data#data.mons)
+            };
+        {error, overloaded} ->
+            Err = bondy_wamp_message:error(
+                ?INVOCATION, ReqId, #{}, ?WAMP_UNAVAILABLE
+            ),
+            _ = send_msg(Err, Data),
+            Data
+    end.
+
+
+%% @private
+handle_handler_done(ReqId, Reply, Data) ->
+    case maps:take(ReqId, Data#data.invocations) of
+        {{_Pid, MonRef}, Inv1} ->
+            _ = erlang:demonitor(MonRef, [flush]),
+            Out = invocation_reply(ReqId, Reply),
+            _ = send_msg(Out, Data),
+            Data#data{
+                invocations = Inv1,
+                mons = maps:remove(MonRef, Data#data.mons),
+                load = bondy_connect_load:release(Data#data.load)
+            };
+        error ->
+            Data
+    end.
+
+
+%% @private
+invocation_reply(ReqId, {yield, Args, KWArgs}) ->
+    case normalize_payload(Args, KWArgs) of
+        {undefined, undefined} ->
+            bondy_wamp_message:yield(ReqId, #{});
+        {A, K} ->
+            bondy_wamp_message:yield(ReqId, #{}, A, K)
+    end;
+
+invocation_reply(ReqId, {error, Uri, Args, KWArgs}) ->
+    {A, K} = normalize_payload(Args, KWArgs),
+    bondy_wamp_message:error(?INVOCATION, ReqId, #{}, Uri, A, K).
+
+
+%% @private The router asked us to cancel an in-flight INVOCATION (the caller
+%% issued a CANCEL with mode `kill`/`killnowait`). We cancel **forcefully** —
+%% kill the servicing worker and answer the INTERRUPT with an
+%% `ERROR(?INTERRUPT, canceled)` (cooperative interruption is future work).
+%% Unknown/already-finished invocations are ignored.
+handle_interrupt(InvReqId, _Opts, Data) ->
+    case maps:take(InvReqId, Data#data.invocations) of
+        {{Pid, MonRef}, Inv1} ->
+            _ = erlang:demonitor(MonRef, [flush]),
+            _ = exit(Pid, kill),
+            Err = bondy_wamp_message:error(
+                ?INTERRUPT, InvReqId, #{}, ?WAMP_CANCELLED
+            ),
+            _ = send_msg(Err, Data),
+            Data#data{
+                invocations = Inv1,
+                mons = maps:remove(MonRef, Data#data.mons),
+                load = bondy_connect_load:release(Data#data.load)
+            };
+        error ->
+            Data
+    end.
+
+
+
+%% =============================================================================
+%% PRIVATE — subscriber (EVENT), per-subscription FIFO
+%% =============================================================================
+
+
+
+%% @private
+handle_event(#event{} = Msg, Data) ->
+    #event{
+        subscription_id = SubId,
+        details = Details,
+        args = Args,
+        kwargs = KWArgs
+    } = Msg,
+    case bondy_connect_registry:subscription(SubId, Data#data.registry) of
+        {ok, #{handler := Handler, options := Opts}} ->
+            Job = #{
+                kind => event,
+                conn => self(),
+                sub_id => SubId,
+                handler => Handler,
+                args => undefined_to(Args, []),
+                kwargs => undefined_to(KWArgs, #{}),
+                details => Details
+            },
+            dispatch_event(SubId, maps:get(ordered, Opts, true), Job, Data);
+        error ->
+            Data
+    end.
+
+
+%% @private Unordered: fire and forget (handler_sup contains any crash).
+dispatch_event(_SubId, false, Job, Data) ->
+    _ = start_worker_nomon(Job, Data),
+    Data;
+
+%% @private Ordered: at most one worker per subscription at a time; the rest
+%% queue and run on `{event_done, SubId, _}` (or worker `DOWN`).
+dispatch_event(SubId, true, Job, Data) ->
+    case maps:get(SubId, Data#data.dispatch, undefined) of
+        #{busy := true, queue := Q} = Entry ->
+            Entry1 = Entry#{queue := queue:in(Job, Q)},
+            Data#data{dispatch = maps:put(SubId, Entry1, Data#data.dispatch)};
+        _ ->
+            {_Pid, Mon} = start_worker(Job, Data),
+            Entry = #{busy => true, queue => queue:new(), mon => Mon},
+            Data#data{
+                dispatch = maps:put(SubId, Entry, Data#data.dispatch),
+                mons = maps:put(Mon, {event, SubId}, Data#data.mons)
+            }
+    end.
+
+
+%% @private The current worker for `SubId` finished cleanly — flush its DOWN and
+%% start the next queued event (or clear the busy flag).
+advance_event(SubId, Data) ->
+    case maps:get(SubId, Data#data.dispatch, undefined) of
+        #{mon := Mon} = Entry ->
+            _ = erlang:demonitor(Mon, [flush]),
+            next_event(SubId, Entry, maps:remove(Mon, Data#data.mons), Data);
+        undefined ->
+            Data
+    end.
+
+
+%% @private The current worker for `SubId` died — its DOWN already removed the
+%% monitor; advance the queue.
+advance_event_down(SubId, Mons1, Data) ->
+    case maps:get(SubId, Data#data.dispatch, undefined) of
+        #{} = Entry ->
+            next_event(SubId, Entry, Mons1, Data);
+        undefined ->
+            Data#data{mons = Mons1}
+    end.
+
+
+%% @private
+next_event(SubId, #{queue := Q} = Entry, Mons, Data) ->
+    case queue:out(Q) of
+        {{value, Job}, Q1} ->
+            {_Pid, Mon2} = start_worker(Job, Data),
+            Entry1 = Entry#{queue := Q1, mon := Mon2},
+            Data#data{
+                dispatch = maps:put(SubId, Entry1, Data#data.dispatch),
+                mons = maps:put(Mon2, {event, SubId}, Mons)
+            };
+        {empty, _} ->
+            Data#data{
+                dispatch = maps:remove(SubId, Data#data.dispatch),
+                mons = Mons
+            }
+    end.
+
+
+%% @private
+clear_dispatch(SubId, Data) ->
+    case maps:get(SubId, Data#data.dispatch, undefined) of
+        #{mon := Mon} ->
+            _ = erlang:demonitor(Mon, [flush]),
+            Data#data{
+                dispatch = maps:remove(SubId, Data#data.dispatch),
+                mons = maps:remove(Mon, Data#data.mons)
+            };
+        undefined ->
+            Data
+    end.
+
+
+
+%% =============================================================================
+%% PRIVATE — worker lifecycle
+%% =============================================================================
+
+
+
+%% @private
+start_worker(Job, #data{handler_sup = HSup}) ->
+    {ok, Pid} = bondy_connect_handler_sup:start_worker(HSup, Job),
+    MonRef = erlang:monitor(process, Pid),
+    {Pid, MonRef}.
+
+
+%% @private
+start_worker_nomon(Job, #data{handler_sup = HSup}) ->
+    bondy_connect_handler_sup:start_worker(HSup, Job).
+
+
+%% @private A monitored worker died. For an invocation worker that died before
+%% replying, synthesize an ERROR; for an event worker, advance the FIFO.
+handle_worker_down(MonRef, Reason, Data) ->
+    case maps:take(MonRef, Data#data.mons) of
+        {{invocation, ReqId}, Mons1} ->
+            case maps:take(ReqId, Data#data.invocations) of
+                {{_Pid, MonRef}, Inv1} ->
+                    Err = bondy_wamp_message:error(
+                        ?INVOCATION, ReqId, #{}, ?BONDY_CONNECT_INTERNAL_ERROR
+                    ),
+                    _ = send_msg(Err, Data),
+                    Data#data{
+                        invocations = Inv1,
+                        mons = Mons1,
+                        load = bondy_connect_load:release(Data#data.load)
+                    };
+                _ ->
+                    Data#data{mons = Mons1}
+            end;
+        {{event, SubId}, Mons1} ->
+            _ = Reason,
+            advance_event_down(SubId, Mons1, Data);
+        error ->
+            Data
+    end.
+
+
+
+%% =============================================================================
+%% PRIVATE — pending / correlation
+%% =============================================================================
+
+
+
+%% @private
+store_pending(ReqId, Entry0, Timeout, Data) ->
+    TRef = erlang:start_timer(Timeout, self(), {req_timeout, ReqId}),
+    Entry = Entry0#{timer => TRef},
+    Data#data{pending = maps:put(ReqId, Entry, Data#data.pending)}.
+
+
+%% @private
+peek_pending(ReqId, #data{pending = Pending}) ->
+    maps:find(ReqId, Pending).
+
+
+%% @private
+resolve_pending(ReqId, Reply, #data{pending = Pending} = Data) ->
+    case maps:take(ReqId, Pending) of
+        {#{from := From, timer := TRef}, Pending1} ->
+            _ = cancel_timer(TRef),
+            _ = dispatch_reply(From, Reply),
+            Data#data{pending = Pending1};
+        error ->
+            Data
+    end.
+
+
+%% @private A per-request timeout fired before its ack/result arrived.
+handle_req_timeout(ReqId, TRef, #data{pending = Pending} = Data) ->
+    case maps:find(ReqId, Pending) of
+        {ok, #{timer := TRef, from := From}} ->
+            _ = dispatch_reply(From, {error, timeout}),
+            Data#data{pending = maps:remove(ReqId, Pending)};
+        _ ->
+            Data
+    end.
+
+
+%% @private
+dispatch_reply({sync, From}, Reply) ->
+    gen_statem:reply(From, Reply);
+dispatch_reply({async, Pid, Token}, Reply) ->
+    Pid ! {bondy_connect, Token, Reply},
+    ok;
+dispatch_reply(undefined, _Reply) ->
+    ok.
+
+
+%% @private
+reply_pending(Reply, #data{pending = Pending} = Data) ->
+    _ = [
+        begin
+            _ = cancel_timer(maps:get(timer, E, undefined)),
+            dispatch_reply(maps:get(from, E, undefined), Reply)
+        end
+        || E <- maps:values(Pending)
+    ],
+    Data#data{pending = #{}}.
+
+
+%% @private
+cancel_timer(undefined) ->
+    ok;
+cancel_timer(TRef) ->
+    _ = erlang:cancel_timer(TRef),
+    ok.
 
 
 
@@ -436,11 +1311,350 @@ error_payload(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->
 
 
 
-%% @private
-fail(Reason, Data) ->
+%% @private Terminal failure: reply outstanding waiters/pending with the error
+%% and stop. The supervisor will not restart us (transient + shutdown); the
+%% manager's monitor tears down the per-connection supervisor.
+stop_fail(Reason, Data) ->
+    ?LOG_WARNING(#{
+        description => "Connection giving up.",
+        reason => Reason
+    }),
     Data1 = reply_waiters({error, Reason}, Data),
     Data2 = reply_pending({error, Reason}, Data1),
     {stop, {shutdown, Reason}, Data2}.
+
+
+%% =============================================================================
+%% PRIVATE — resilience (reconnect / backoff / network)
+%% =============================================================================
+
+
+%% @private A connect attempt failed *while in `connecting'* — loop with backoff
+%% (or park on the network / give up).
+on_connect_failure(Reason, Data) ->
+    case reconnect_allowed(Data) andalso is_retriable(Reason) of
+        true ->
+            case is_netdown(Reason) andalso Data#data.net_monitor of
+                true -> {next_state, waiting_for_network, Data};
+                false -> backoff_retry(Reason, Data)
+            end;
+        false ->
+            stop_fail(Reason, Data)
+    end.
+
+
+%% @private A transport failure *outside* `connecting' (lost link, ping timeout,
+%% handshake/establish failure). Tear down the session, then reconnect (or park
+%% on the network / give up). The reconnect re-enters `connecting', which resets
+%% the retry budget and attempts immediately; subsequent attempts back off.
+on_transport_failure(Reason, Data0) ->
+    Data = teardown_session(Data0),
+    case reconnect_allowed(Data) andalso is_retriable(Reason) of
+        true ->
+            ?LOG_NOTICE(#{
+                description => "Session dropped; reconnecting.",
+                reason => Reason
+            }),
+            case is_netdown(Reason) andalso Data#data.net_monitor of
+                true -> {next_state, waiting_for_network, Data};
+                false -> {next_state, connecting, Data}
+            end;
+        false ->
+            stop_fail(Reason, Data)
+    end.
+
+
+%% @private The backoff loop within `connecting': advance the retry state and
+%% schedule the next attempt, or give up once the budget is exhausted.
+backoff_retry(Reason, #data{reconnect_retry = R0} = Data) ->
+    case bondy_retry:fail(R0) of
+        {Delay, R1} when is_integer(Delay) ->
+            ?LOG_NOTICE(#{
+                description => "Failed to connect; will retry after delay.",
+                delay => Delay,
+                reason => Reason
+            }),
+            {keep_state, Data#data{reconnect_retry = R1},
+                [{state_timeout, Delay, connect}]};
+        {Limit, R1} when Limit == deadline; Limit == max_retries ->
+            stop_fail({reconnect_failed, Reason}, Data#data{reconnect_retry = R1})
+    end.
+
+
+%% @private Reconnect is allowed when it is enabled and either we have already
+%% established once (a genuine drop) or the user opted into retrying the initial
+%% connect.
+reconnect_allowed(#data{reconnect_retry = undefined}) -> false;
+reconnect_allowed(#data{established_once = true}) -> true;
+reconnect_allowed(#data{retry_initial = true}) -> true;
+reconnect_allowed(#data{}) -> false.
+
+
+%% @private
+reset_reconnect_retry(#data{reconnect_retry = undefined} = Data) ->
+    Data;
+reset_reconnect_retry(#data{reconnect_retry = R} = Data) ->
+    {_, R1} = bondy_retry:succeed(R),
+    Data#data{reconnect_retry = R1}.
+
+
+%% @private
+init_reconnect_retry(#{enabled := true} = Opts) ->
+    bondy_retry:init(connect, Opts);
+init_reconnect_retry(_) ->
+    undefined.
+
+
+%% @private Tear down session-scoped state on a disconnect: fail in-flight calls
+%% fast, stop in-flight workers, close the (dead) transport, drop the
+%% established registry ids (keeping the declared set for replay) and reset the
+%% load counter. The protocol/registry-declared/keepalive config survive.
+teardown_session(Data0) ->
+    Data1 = reply_pending({error, disconnected}, Data0),
+    _ = kill_invocation_workers(Data1),
+    _ = demonitor_event_workers(Data1),
+    _ = close_transport(Data1),
+    Reg1 = bondy_connect_registry:clear_established(Data1#data.registry),
+    %% The protocol layer is a stateful machine that has been driven to its
+    %% terminal `established' state; a reconnect needs a fresh handshake, so
+    %% re-initialise it (this also clears any auth material).
+    {ok, Protocol1} = bondy_connect_protocol:init(Data1#data.config),
+    Data1#data{
+        protocol = Protocol1,
+        registry = Reg1,
+        session = undefined,
+        transport = undefined,
+        invocations = #{},
+        mons = #{},
+        dispatch = #{},
+        load = bondy_connect_load:new(maps:get(handler, Data1#data.config, #{}))
+    }.
+
+
+%% @private
+kill_invocation_workers(#data{invocations = Inv}) ->
+    maps:foreach(
+        fun(_ReqId, {Pid, MonRef}) ->
+            _ = erlang:demonitor(MonRef, [flush]),
+            _ = exit(Pid, kill)
+        end,
+        Inv
+    ).
+
+
+%% @private Event workers carry no reply; demonitor them so their late DOWN is
+%% ignored and let them run to completion under the (temporary) handler_sup.
+demonitor_event_workers(#data{dispatch = Disp}) ->
+    maps:foreach(
+        fun(_SubId, Entry) ->
+            case maps:get(mon, Entry, undefined) of
+                undefined -> ok;
+                Mon -> _ = erlang:demonitor(Mon, [flush]), ok
+            end
+        end,
+        Disp
+    ).
+
+
+%% @private Replay the declared REGISTER/SUBSCRIBE set after a reconnect. Each
+%% sends a fresh request whose ack re-confirms the registry id; no user reply is
+%% involved (`from => undefined`).
+replay_declared(Data) ->
+    Regs = bondy_connect_registry:declared_registrations(Data#data.registry),
+    Subs = bondy_connect_registry:declared_subscriptions(Data#data.registry),
+    ?LOG_NOTICE(#{
+        description => "Replaying declared registrations/subscriptions.",
+        registrations => length(Regs),
+        subscriptions => length(Subs)
+    }),
+    Data1 = lists:foldl(
+        fun({Uri, _Handler, Opts}, D) ->
+            WireOpts = maps:with(
+                [match, invoke, concurrency, disclose_caller, force_reregister],
+                Opts
+            ),
+            send_internal_request(
+                register,
+                fun(ReqId) -> bondy_wamp_message:register(ReqId, WireOpts, Uri) end,
+                #{uri => Uri}, D
+            )
+        end,
+        Data, Regs
+    ),
+    lists:foldl(
+        fun({Uri, _Handler, Opts}, D) ->
+            WireOpts = maps:with([match, get_retained, nkey], Opts),
+            send_internal_request(
+                subscribe,
+                fun(ReqId) -> bondy_wamp_message:subscribe(ReqId, WireOpts, Uri) end,
+                #{uri => Uri}, D
+            )
+        end,
+        Data1, Subs
+    ).
+
+
+%% @private Like `send_request/6` but with no `From` to reply to (used by replay).
+send_internal_request(Type, MsgFun, Meta, Data) ->
+    #data{next_request_id = ReqId} = Data,
+    Msg = MsgFun(ReqId),
+    case send_msg(Msg, Data) of
+        ok ->
+            store_pending(
+                ReqId, #{type => Type, from => undefined, meta => Meta},
+                ?DEFAULT_ADMIN_TIMEOUT, Data#data{next_request_id = next_id(ReqId)}
+            );
+        {error, _Reason} ->
+            %% The link dropped again mid-replay; the next reconnect replays anew.
+            Data
+    end.
+
+
+%% @private Enable partisan network monitoring if available (capability-gated).
+%% Returns whether monitoring is active; without partisan we behave as a plain
+%% reconnecting client.
+enable_net_monitor() ->
+    _ = code:ensure_loaded(partisan_inet),
+    case erlang:function_exported(partisan_inet, monitor, 1) of
+        true ->
+            try partisan_inet:monitor(true) =:= ok
+            catch _:_ -> false
+            end;
+        false ->
+            false
+    end.
+
+
+%% @private
+disable_net_monitor(true) ->
+    _ = catch partisan_inet:monitor(false),
+    ok;
+disable_net_monitor(false) ->
+    ok.
+
+
+%% @private Failure reasons we treat as recoverable (worth reconnecting).
+is_retriable(connection_closed) -> true;
+is_retriable(establish_timeout) -> true;
+is_retriable(ping_timeout) -> true;
+is_retriable({ping_send_error, _}) -> true;
+is_retriable({send_error, _}) -> true;
+is_retriable({protocol_error, _}) -> true;
+is_retriable({connection_error, _}) -> true;
+is_retriable({connect_error, R}) -> is_retriable_posix(R);
+is_retriable({handshake_error, R}) -> is_retriable_posix(R);
+is_retriable(_) -> false.
+
+
+%% @private
+is_retriable_posix(R) ->
+    is_netdown_posix(R) orelse lists:member(R, [
+        timeout, closed, econnrefused, econnreset, ehostdown, enotconn, etimedout
+    ]).
+
+
+%% @private Network-absence reasons (route to `waiting_for_network' when
+%% monitoring is active).
+is_netdown({connect_error, R}) -> is_netdown_posix(R);
+is_netdown({connection_error, R}) -> is_netdown_posix(R);
+is_netdown(_) -> false.
+
+
+%% @private
+is_netdown_posix(enetdown) -> true;
+is_netdown_posix(ehostunreach) -> true;
+is_netdown_posix(enetunreach) -> true;
+is_netdown_posix(_) -> false.
+
+
+%% =============================================================================
+%% PRIVATE — idle keepalive (ping/pong)
+%% =============================================================================
+
+
+%% @private
+init_ping_retry(#{enabled := true} = Ping) ->
+    bondy_retry:init(ping_timeout, #{
+        deadline => 0,
+        interval => maps:get(timeout, Ping),
+        max_retries => maps:get(max_attempts, Ping),
+        backoff_enabled => false
+    });
+init_ping_retry(_) ->
+    undefined.
+
+
+%% @private
+ping_idle_timeout(#{enabled := true, idle_timeout := T}) -> T;
+ping_idle_timeout(_) -> undefined.
+
+
+%% @private A stable per-connection ping payload (echoed in the pong). No crypto
+%% dependency — uniqueness across connections is not required.
+ping_payload(#{enabled := true}) ->
+    <<(erlang:phash2(self())):32, (erlang:unique_integer([positive])):64>>;
+ping_payload(_) ->
+    undefined.
+
+
+%% @private Arm the idle timer (or nothing when ping is disabled).
+ping_idle_actions(#data{ping_idle_timeout = undefined}) ->
+    [];
+ping_idle_actions(#data{ping_idle_timeout = T}) ->
+    [{{timeout, ping_idle}, T, ping_idle}].
+
+
+%% @private Any inbound traffic proves the link alive: cancel the ping deadline
+%% and re-arm the idle timer.
+keepalive_reset_actions(#data{ping_idle_timeout = undefined}) ->
+    [];
+keepalive_reset_actions(#data{ping_idle_timeout = T}) ->
+    [{{timeout, ping}, cancel}, {{timeout, ping_idle}, T, ping_idle}].
+
+
+%% @private The idle timer fired — send a ping and arm its deadline, or give up
+%% (reconnect) when the attempts are exhausted.
+send_ping(#data{ping_retry = undefined} = Data) ->
+    {keep_state, Data};
+send_ping(#data{ping_retry = R} = Data) ->
+    case bondy_retry:get(R) of
+        Time when is_integer(Time) ->
+            case ping_send(Data) of
+                ok ->
+                    {keep_state, Data, [{{timeout, ping}, Time, ping_timeout}]};
+                {error, Reason} ->
+                    on_transport_failure({ping_send_error, Reason}, Data)
+            end;
+        Limit when Limit == deadline; Limit == max_retries ->
+            on_transport_failure(ping_timeout, Data)
+    end.
+
+
+%% @private A ping deadline elapsed with no answer: count the failure and try
+%% another ping (or give up via `send_ping/1`).
+ping_failed(#data{ping_retry = undefined} = Data) ->
+    {keep_state, Data};
+ping_failed(#data{ping_retry = R} = Data) ->
+    {_, R1} = bondy_retry:fail(R),
+    send_ping(Data#data{ping_retry = R1}).
+
+
+%% @private
+ping_succeed(#data{ping_retry = undefined} = Data) ->
+    Data;
+ping_succeed(#data{ping_retry = R} = Data) ->
+    {_, R1} = bondy_retry:succeed(R),
+    Data#data{ping_retry = R1}.
+
+
+%% @private
+ping_send(#data{transport_mod = Mod, transport = T, ping_payload = P}) ->
+    Mod:ping(P, T).
+
+
+%% @private
+pong_send(Payload, #data{transport_mod = Mod, transport = T}) ->
+    Mod:pong(Payload, T).
 
 
 %% @private
@@ -457,9 +1671,40 @@ reply_waiters(Reply, #data{ready_waiters = Ws} = Data) ->
 
 
 %% @private
-reply_pending(Reply, #data{pending = Pending} = Data) ->
-    _ = [gen_statem:reply(From, Reply) || From <- maps:values(Pending)],
-    Data#data{pending = #{}}.
+resolve_registration(RegId, _Data) when is_integer(RegId) ->
+    {ok, RegId};
+resolve_registration(Uri, Data) when is_binary(Uri) ->
+    bondy_connect_registry:registration_id(Uri, Data#data.registry).
+
+
+%% @private
+resolve_subscription(SubId, _Data) when is_integer(SubId) ->
+    {ok, SubId};
+resolve_subscription(Uri, Data) when is_binary(Uri) ->
+    bondy_connect_registry:subscription_id(Uri, Data#data.registry).
+
+
+%% @private
+call_msg(Uri, Args, KWArgs, Opts) ->
+    %% Advanced-profile caller options passed through to the dealer:
+    %% `timeout`/`disclose_me` (caller_identification), `runmode`/`rkey`
+    %% (sharded/partitioned routing) and `retries` (call_retries).
+    %% `receive_progress` is accepted but progressive results are deferred.
+    WireOpts = maps:with(
+        [timeout, disclose_me, receive_progress, runmode, rkey, retries], Opts
+    ),
+    %% request id is filled in by do_request/set_request_id.
+    bondy_wamp_message:call(1, WireOpts, Uri, Args, KWArgs).
+
+
+%% @private
+set_request_id(#call{} = M, ReqId) ->
+    M#call{request_id = ReqId}.
+
+
+%% @private
+call_timeout(Opts) ->
+    maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT).
 
 
 %% @private
@@ -503,12 +1748,47 @@ undefined_to(undefined, Default) -> Default;
 undefined_to(Value, _Default) -> Value.
 
 
+%% @private Normalise a (Args, KWArgs) payload for the WAMP constructors: empty
+%% kwargs collapse to `undefined`; non-empty kwargs require a (possibly empty)
+%% args list.
+normalize_payload(undefined, undefined) ->
+    {undefined, undefined};
+normalize_payload(undefined, K) when is_map(K), map_size(K) == 0 ->
+    {undefined, undefined};
+normalize_payload(undefined, K) ->
+    {[], K};
+normalize_payload(A, undefined) ->
+    {A, undefined};
+normalize_payload(A, K) when is_map(K), map_size(K) == 0 ->
+    {A, undefined};
+normalize_payload(A, K) ->
+    {A, K}.
+
+
 %% @private
-public_status(connecting) -> connecting;
-public_status(handshaking) -> connecting;
-public_status(establishing) -> establishing;
-public_status(established) -> established;
-public_status(_) -> down.
+result_payload(#result{args = Args, kwargs = KWArgs}) ->
+    #{args => undefined_to(Args, []), kwargs => undefined_to(KWArgs, #{})}.
+
+
+%% @private
+error_payload(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->
+    #{
+        uri => Uri,
+        args => undefined_to(Args, []),
+        kwargs => undefined_to(KWArgs, #{})
+    }.
+
+
+%% @private A connection that has established at least once and is back in
+%% `connecting'/`waiting_for_network' is *reconnecting*; the first time through
+%% it is merely *connecting*.
+public_status(connecting, #data{established_once = true}) -> reconnecting;
+public_status(connecting, #data{}) -> connecting;
+public_status(waiting_for_network, #data{}) -> reconnecting;
+public_status(handshaking, #data{}) -> connecting;
+public_status(establishing, #data{}) -> establishing;
+public_status(established, #data{}) -> established;
+public_status(_, #data{}) -> down.
 
 
 %% @private

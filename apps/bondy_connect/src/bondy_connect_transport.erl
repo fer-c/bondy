@@ -56,6 +56,12 @@ assertion crash.
 -doc "Encode, frame and send a WAMP record.".
 -callback send(bondy_wamp_message:t(), state()) -> ok | {error, term()}.
 
+-doc "Send a transport keepalive ping carrying `Payload`.".
+-callback ping(Payload :: binary(), state()) -> ok | {error, term()}.
+
+-doc "Send a transport keepalive pong (the reply to an inbound ping).".
+-callback pong(Payload :: binary(), state()) -> ok | {error, term()}.
+
 -doc "Read available bytes and decode them (synchronous/passive).".
 -callback recv(timeout(), state()) ->
     {ok, [inbound()], state()} | {error, term()}.

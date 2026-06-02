@@ -39,7 +39,8 @@ all() ->
         codec_decode_multiple,
         codec_encode_oversize,
         codec_decode_oversize,
-        codec_decode_corrupt_payload
+        codec_decode_corrupt_payload,
+        codec_decode_materialises_payload
     ].
 
 
@@ -252,3 +253,29 @@ codec_decode_corrupt_payload(_) ->
         {error, {protocol_error, {decode_failed, _, _}}, _},
         bondy_connect_codec:decode(BadFrame, Codec)
     ).
+
+
+%% Regression: a client is the final consumer of payloads, so the codec must
+%% FULLY decode inbound Args/KWArgs and never surface a `partial' (the
+%% router-side passthrough optimisation). json/cbor default to partial
+%% decoding, and msgpack's option parser is strict and has no partial path —
+%% all three must come back materialised. Guards the disable-at-source decode
+%% (`{partial_decode, false}') against a regression to the old
+%% decode-then-`decode_partial' post-pass or a strict-parser crash.
+codec_decode_materialises_payload(_) ->
+    [materialises(Enc) || Enc <- [json, msgpack, cbor]],
+    ok.
+
+
+%% @private
+materialises(Enc) ->
+    Codec = bondy_connect_codec:new(Enc, ?MAX, ?MAX),
+    Args = [<<"hi">>, 42],
+    KWArgs = #{<<"k">> => <<"v">>},
+    Msg = bondy_wamp_message:result(1, #{}, Args, KWArgs),
+    {ok, Frame} = bondy_connect_codec:encode(Msg, Codec),
+    {ok, [Decoded], _} = bondy_connect_codec:decode(Frame, Codec),
+    ?assertEqual(false, bondy_wamp_message:is_partial(Decoded), {partial, Enc}),
+    #result{args = DArgs, kwargs = DKWArgs} = Decoded,
+    ?assertEqual(Args, DArgs, {args, Enc}),
+    ?assertEqual(KWArgs, DKWArgs, {kwargs, Enc}).

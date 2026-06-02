@@ -14,7 +14,7 @@
 all() ->
     [
         app_starts_and_stops,
-        sup_is_one_for_one
+        sup_tree
     ].
 
 
@@ -32,15 +32,21 @@ app_starts_and_stops(_) ->
     ?assertEqual(undefined, whereis(bondy_connect_sup)).
 
 
-%% The top supervisor starts childless with a one_for_one strategy.
-sup_is_one_for_one(_) ->
+%% The top supervisor is one_for_one and starts the connection manager and the
+%% dynamic connections supervisor (it owns no live connections until one is
+%% opened).
+sup_tree(_) ->
     {ok, _} = application:ensure_all_started(bondy_connect),
     Pid = whereis(bondy_connect_sup),
     ?assert(is_pid(Pid)),
 
     {ok, {SupFlags, ChildSpecs}} = bondy_connect_sup:init([]),
     ?assertEqual(one_for_one, maps:get(strategy, SupFlags)),
-    ?assertEqual([], ChildSpecs),
-    ?assertEqual([], supervisor:which_children(Pid)),
+    Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
+    ?assertEqual(
+        [bondy_connect_manager, bondy_connect_connections_sup],
+        Ids
+    ),
+    ?assert(is_pid(whereis(bondy_connect_manager))),
 
     ok = application:stop(bondy_connect).

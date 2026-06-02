@@ -181,7 +181,12 @@ resolve(Name, State) when is_atom(Name) ->
 %% @private
 forget(Pid, Ref, State) ->
     case maps:find(Pid, State#state.conns) of
-        {ok, #{name := Name, ref := Ref}} ->
+        {ok, #{name := Name, conn_sup := ConnSup, ref := Ref}} ->
+            %% Tear down the per-connection supervisor. Idempotent: a user
+            %% disconnect already stopped it; a connection that gave up on its
+            %% own (reconnect budget exhausted) did not, so this reaps the
+            %% otherwise-orphaned conn_sup + handler_sup.
+            _ = bondy_connect_connections_sup:stop_connection(ConnSup),
             State#state{
                 conns = maps:remove(Pid, State#state.conns),
                 names = drop_name(Name, State#state.names)
