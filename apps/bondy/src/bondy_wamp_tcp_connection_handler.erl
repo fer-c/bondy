@@ -399,6 +399,13 @@ source_ip(ProxyProtocol, PeerIP) ->
 
 peername(Transport, Socket) ->
     case bondy_utils:peername(Transport, Socket) of
+        {ok, {local, _}} ->
+            %% A Unix domain socket has no network peer; it is local by
+            %% construction. Represent it as the loopback address so the
+            %% IP-based pipeline (logging, events, source-based authz) works
+            %% unchanged.
+            {{127, 0, 0, 1}, 0};
+
         {ok, {_, _} = Peername} ->
            Peername;
 

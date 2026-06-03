@@ -16,6 +16,8 @@
     {applications, [
         kernel,
         stdlib,
+        ssl,
+        gun,
         bondy_stdlib,
         bondy_wamp,
         bondy_regulator

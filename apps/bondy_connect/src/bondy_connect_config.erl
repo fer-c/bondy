@@ -110,6 +110,7 @@ validate(Spec) when is_map(Spec) ->
             serializers => maps:get(serializers, Spec, ?DEFAULT_SERIALIZERS),
             transport => maps:get(transport, Spec, tcp),
             endpoint => maps:get(endpoint, Spec, undefined),
+            ws_path => maps:get(ws_path, Spec, <<"/ws">>),
             max_message_length =>
                 maps:get(max_message_length, Spec, ?DEFAULT_MAX_MESSAGE_LENGTH),
             reconnect => validate_reconnect(Spec),

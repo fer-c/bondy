@@ -1811,6 +1811,9 @@ public_status(_, #data{}) -> down.
 %% @private
 transport_mod(tcp) -> bondy_connect_transport_tcp;
 transport_mod(tls) -> bondy_connect_transport_tls;
+transport_mod(uds) -> bondy_connect_transport_uds;
+transport_mod(ws) -> bondy_connect_transport_ws;
+transport_mod(wss) -> bondy_connect_transport_ws;
 transport_mod(Other) -> error({unsupported_transport, Other}).
 
 
@@ -1827,7 +1830,11 @@ endpoint(Config) ->
     Opts = #{
         connect_timeout => ?CONNECT_TIMEOUT,
         max_message_length => maps:get(max_message_length, Config, 16#1000000),
-        tls => maps:get(tls, Config, #{verify => verify_peer})
+        tls => maps:get(tls, Config, #{verify => verify_peer}),
+        %% Consumed by the WebSocket transport (ignored by the raw transports).
+        scheme => maps:get(transport, Config, tcp),
+        serializers => maps:get(serializers, Config, [json]),
+        ws_path => maps:get(ws_path, Config, <<"/ws">>)
     },
     {Endpoint, Opts}.
 

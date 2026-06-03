@@ -331,6 +331,9 @@ start_public_listeners() ->
     %% WAMP TCP listeners
     ok = bondy_wamp_tcp:start_listeners(),
 
+    %% WAMP Unix domain socket listener (opt-in; no-op unless configured)
+    ok = bondy_wamp_uds:start_listeners(),
+
     %% WAMP Websocket and REST Gateway HTTP listeners
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_http_gateway:start_listeners(),
@@ -442,6 +445,7 @@ suspend_listeners() ->
         "No new connections will be accepted from now on."
     }),
     ok = bondy_wamp_tcp:suspend_listeners(),
+    ok = bondy_wamp_uds:suspend_listeners(),
 
     ?LOG_NOTICE(#{description =>
         "Suspending Bridge Relay listeners. "
@@ -464,6 +468,7 @@ stop_listeners() ->
         description => "Terminating all TCP(TLS) client connections."
     }),
     ok = bondy_wamp_tcp:stop_listeners(),
+    ok = bondy_wamp_uds:stop_listeners(),
 
     ?LOG_NOTICE(#{
         description => "Terminating all Bridge Relay connections."
