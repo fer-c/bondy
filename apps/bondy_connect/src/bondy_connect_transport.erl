@@ -70,6 +70,28 @@ assertion crash.
 -callback handle_data(binary(), state()) ->
     {ok, [inbound()], state()} | {error, term(), state()}.
 
+-doc """
+Interpret a process `info` message delivered by an active transport, so the
+connection process never needs to know a transport's message-tag shapes (raw
+socket `{tcp,_,_}`/`{ssl,_,_}`, gun `gun_*`, in-VM `{$bondy_request,…}`, …).
+
+Returns:
+
+- `{ok, Records, State}` — decoded inbound records; the transport has re-armed
+  its own flow control (e.g. `{active, once}`).
+- `closed` — the peer closed the link cleanly.
+- `{error, Reason, State}` — a transport/decode failure; `Reason` is one of the
+  connection's transport-failure reasons (e.g. `connection_closed`,
+  `{connection_error, _}`, `{protocol_error, _}`).
+- `ignore` — the message is not this transport's; the connection handles it
+  elsewhere.
+""".
+-callback handle_info(Info :: term(), state()) ->
+    {ok, [inbound()], state()}
+    | {error, Reason :: term(), state()}
+    | closed
+    | ignore.
+
 -doc "Set transport/socket options (e.g. toggle active mode).".
 -callback setopts(Opts :: list() | map(), state()) -> ok | {error, term()}.
 

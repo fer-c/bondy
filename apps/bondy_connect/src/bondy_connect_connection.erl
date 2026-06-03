@@ -501,57 +501,74 @@ when is_tuple(Request), element(1, Request) == call;
 handle_common({call, From}, _Request, _StateName, Data) ->
     {keep_state, Data, [{reply, From, {error, badcall}}]};
 
-handle_common(info, {tcp_closed, _}, _StateName, Data) ->
-    on_transport_failure(connection_closed, Data);
-
-handle_common(info, {tcp_error, _, Reason}, _StateName, Data) ->
-    on_transport_failure({connection_error, Reason}, Data);
-
 %% Network monitor signals: while not in connecting/waiting_for_network the
 %% socket status takes priority, so we ignore them here (a real drop arrives as
-%% tcp_closed/tcp_error).
+%% a transport close/error).
 handle_common(info, {network_disconnected, _}, _StateName, Data) ->
     {keep_state, Data};
 
 handle_common(info, {network_connected, _}, _StateName, Data) ->
     {keep_state, Data};
 
+%% A transport `info` message reaching a state that does not actively read the
+%% socket (e.g. handshaking): classify it via the transport so a closed/errored
+%% link still triggers reconnect rather than being silently dropped.
+handle_common(info, Info, _StateName, #data{transport = T} = Data)
+when T =/= undefined ->
+    #data{transport_mod = Mod} = Data,
+    case Mod:handle_info(Info, T) of
+        {ok, _Records, T1} ->
+            {keep_state, Data#data{transport = T1}};
+        {error, Reason, T1} ->
+            on_transport_failure(Reason, Data#data{transport = T1});
+        closed ->
+            on_transport_failure(connection_closed, Data);
+        ignore ->
+            {keep_state, Data}
+    end;
+
 handle_common(_EventType, _Event, _StateName, Data) ->
     {keep_state, Data}.
 
 
-%% @private Process inbound socket bytes into records and route them.
-handle_socket({tcp, _Socket, Bin}, StateName, Data) ->
+%% @private Process an inbound transport `info` message into records and route
+%% them. The transport (not the connection) knows its own message-tag shapes and
+%% re-arms its flow control, so this is transport-agnostic.
+handle_socket(Info, StateName, Data) ->
     #data{transport_mod = Mod, transport = T0} = Data,
-    case Mod:handle_data(Bin, T0) of
+    case Mod:handle_info(Info, T0) of
         {ok, Records, T1} ->
-            Data1 = Data#data{transport = T1},
-            ok = Mod:setopts([{active, once}], T1),
-            process_records(Records, StateName, Data1);
+            process_records(Records, StateName, Data#data{transport = T1});
         {error, Reason, T1} ->
-            on_transport_failure({protocol_error, Reason}, Data#data{transport = T1})
-    end;
-
-handle_socket({tcp_closed, _}, _StateName, Data) ->
-    on_transport_failure(connection_closed, Data);
-
-handle_socket({tcp_error, _, Reason}, _StateName, Data) ->
-    on_transport_failure({connection_error, Reason}, Data);
-
-handle_socket(_Other, StateName, Data) ->
-    {next_state, StateName, Data}.
+            on_transport_failure(Reason, Data#data{transport = T1});
+        closed ->
+            on_transport_failure(connection_closed, Data);
+        ignore ->
+            {next_state, StateName, Data}
+    end.
 
 
-%% @private Process inbound socket bytes in the `established' state and reset the
-%% idle keepalive — inbound traffic proves the link is alive. Protocol-level
-%% stops (GOODBYE/ABORT) and reconnect transitions pass straight through.
+%% @private Process an inbound transport `info` message in the `established'
+%% state and reset the idle keepalive — inbound traffic proves the link is alive.
+%% Protocol-level stops (GOODBYE/ABORT) and reconnect transitions pass straight
+%% through; an `ignore`d (non-transport) message must NOT reset the keepalive.
 handle_established_socket(Info, Data) ->
-    case handle_socket(Info, established, Data) of
-        {next_state, established, Data1} ->
-            Data2 = ping_succeed(Data1),
-            {keep_state, Data2, keepalive_reset_actions(Data2)};
-        Result ->
-            Result
+    #data{transport_mod = Mod, transport = T0} = Data,
+    case Mod:handle_info(Info, T0) of
+        {ok, Records, T1} ->
+            case process_records(Records, established, Data#data{transport = T1}) of
+                {next_state, established, Data1} ->
+                    Data2 = ping_succeed(Data1),
+                    {keep_state, Data2, keepalive_reset_actions(Data2)};
+                Result ->
+                    Result
+            end;
+        {error, Reason, T1} ->
+            on_transport_failure(Reason, Data#data{transport = T1});
+        closed ->
+            on_transport_failure(connection_closed, Data);
+        ignore ->
+            {keep_state, Data}
     end.
 
 
@@ -1793,6 +1810,7 @@ public_status(_, #data{}) -> down.
 
 %% @private
 transport_mod(tcp) -> bondy_connect_transport_tcp;
+transport_mod(tls) -> bondy_connect_transport_tls;
 transport_mod(Other) -> error({unsupported_transport, Other}).
 
 
@@ -1808,7 +1826,8 @@ endpoint(Config) ->
     Endpoint = maps:get(endpoint, Config),
     Opts = #{
         connect_timeout => ?CONNECT_TIMEOUT,
-        max_message_length => maps:get(max_message_length, Config, 16#1000000)
+        max_message_length => maps:get(max_message_length, Config, 16#1000000),
+        tls => maps:get(tls, Config, #{verify => verify_peer})
     },
     {Endpoint, Opts}.
 
