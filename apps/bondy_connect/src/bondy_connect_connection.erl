@@ -1814,6 +1814,7 @@ transport_mod(tls) -> bondy_connect_transport_tls;
 transport_mod(uds) -> bondy_connect_transport_uds;
 transport_mod(ws) -> bondy_connect_transport_ws;
 transport_mod(wss) -> bondy_connect_transport_ws;
+transport_mod(local) -> bondy_connect_transport_local;
 transport_mod(Other) -> error({unsupported_transport, Other}).
 
 
@@ -1834,7 +1835,11 @@ endpoint(Config) ->
         %% Consumed by the WebSocket transport (ignored by the raw transports).
         scheme => maps:get(transport, Config, tcp),
         serializers => maps:get(serializers, Config, [json]),
-        ws_path => maps:get(ws_path, Config, <<"/ws">>)
+        ws_path => maps:get(ws_path, Config, <<"/ws">>),
+        %% Consumed by the local (in-VM) transport, which opens the session
+        %% itself; ignored by the socket transports.
+        realm => maps:get(realm, Config, undefined),
+        roles => maps:get(roles, Config, #{})
     },
     {Endpoint, Opts}.
 
