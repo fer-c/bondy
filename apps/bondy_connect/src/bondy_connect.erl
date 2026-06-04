@@ -19,9 +19,13 @@ Public API for the `bondy_connect` WAMP client.
 ok = bondy_connect:disconnect(Conn).
 ```
 
-`connect/1,2` blocks until the WAMP session is established. A connection handle
-(`conn()`) is the connection pid; a named connection (`connect/2`) can also be
-referenced by its name.
+`connect/1,2` blocks until the WAMP session is established and returns an
+**opaque** connection handle (`conn()`). Treat it as an abstract token — pass it
+back to the API functions, do not inspect it. (Today it wraps the connection
+process pid or, for a named connection, its name; keeping it opaque lets the
+representation evolve — e.g. to a registry reference that survives a process
+restart — without an API break.) A named connection (`connect/2`) can also be
+referenced from elsewhere via `named/1`.
 
 All four client roles — **caller**, **callee**, **publisher**, **subscriber** —
 are supported over the raw TCP transport (M2). Handlers (`handler()`) run in
@@ -29,16 +33,20 @@ isolated, load-regulated worker processes; a crashing handler never affects the
 connection.
 """.
 
--type conn()    ::  pid() | atom().
+-opaque conn()  ::  {bondy_connect, pid() | atom()}.
 -type handler() ::  bondy_connect_handler_spec:handler().
 
 -export_type([conn/0]).
 -export_type([handler/0]).
 
--define(CONNECT_TIMEOUT, 30000).
+%% How long `connect/1,2` waits for the session to *establish* after the manager
+%% spawns the connection (handshake + auth, possibly across reconnects). Distinct
+%% from the connection's per-attempt socket `?CONNECT_TIMEOUT` (5s).
+-define(AWAIT_READY_TIMEOUT, 30000).
 
 -export([connect/1]).
 -export([connect/2]).
+-export([named/1]).
 -export([disconnect/1]).
 -export([status/1]).
 -export([call/2]).
@@ -80,9 +88,9 @@ connect(Spec) ->
 connect(Name, Spec) ->
     case bondy_connect_manager:connect(Name, Spec) of
         {ok, Pid} ->
-            case bondy_connect_connection:await_ready(Pid, ?CONNECT_TIMEOUT) of
+            case bondy_connect_connection:await_ready(Pid, ?AWAIT_READY_TIMEOUT) of
                 ok ->
-                    {ok, Pid};
+                    {ok, {bondy_connect, Pid}};
                 {error, Reason} ->
                     _ = bondy_connect_manager:disconnect(Pid),
                     {error, Reason}
@@ -92,14 +100,25 @@ connect(Name, Spec) ->
     end.
 
 
+-doc """
+A handle for a previously **named** connection (the `Name` passed to
+`connect/2`), so it can be referenced from a process that does not hold the
+original handle. Resolution to a live connection happens lazily on each call.
+""".
+-spec named(atom()) -> conn().
+named(Name) when is_atom(Name) ->
+    {bondy_connect, Name}.
+
+
 -doc "Close a connection.".
 -spec disconnect(conn()) -> ok.
-disconnect(Conn) ->
-    bondy_connect_manager:disconnect(Conn).
+disconnect({bondy_connect, PidOrName}) ->
+    bondy_connect_manager:disconnect(PidOrName).
 
 
 -doc "The connection's status.".
--spec status(conn()) -> connecting | establishing | established | down.
+-spec status(conn()) ->
+    connecting | establishing | established | reconnecting | down.
 status(Conn) ->
     case resolve(Conn) of
         undefined -> down;
@@ -282,8 +301,8 @@ with_conn(Conn, Fun) ->
 
 
 
-%% @private
-resolve(Conn) when is_pid(Conn) ->
-    Conn;
-resolve(Name) when is_atom(Name) ->
+%% @private Resolve an opaque handle to a live connection pid (or `undefined`).
+resolve({bondy_connect, Pid}) when is_pid(Pid) ->
+    Pid;
+resolve({bondy_connect, Name}) when is_atom(Name) ->
     bondy_connect_manager:whereis_name(Name).

@@ -29,6 +29,7 @@ all() ->
         acknowledged_publish,
         ordered_events,
         unordered_events,
+        subscriber_crash_preserves_fifo,
         unsubscribe_stops_events
     ].
 
@@ -130,20 +131,75 @@ unordered_events(_) ->
     ok = bondy_connect:disconnect(Sub).
 
 
+%% A crashing ordered-subscription handler must not wedge the per-subscription
+%% FIFO: the worker DOWN drives `advance_event_down`, which drains the queued
+%% events in publication order. The handler for event 1 sleeps (so events 2..5
+%% queue behind it) then crashes; events 2..5 must still arrive, in order.
+subscriber_crash_preserves_fifo(_) ->
+    Self = self(),
+    Sub = connect(),
+    Handler = fun([Seq], _, _) ->
+        case Seq of
+            1 -> timer:sleep(500), error(boom);
+            _ -> Self ! {seq, Seq}
+        end
+    end,
+    {ok, _} = bondy_connect:subscribe(Sub, <<"com.example.crashfifo">>, Handler),
+
+    Pub = connect(),
+    _ = [
+        {ok, _} = bondy_connect:publish(
+            Pub, <<"com.example.crashfifo">>, [N], #{}, #{acknowledge => true}
+        )
+        || N <- lists:seq(1, 5)
+    ],
+
+    Seqs = [
+        receive {seq, S} -> S after 5000 -> ct:fail(timeout) end
+        || _ <- lists:seq(1, 4)
+    ],
+    ?assertEqual([2, 3, 4, 5], Seqs),
+
+    %% The crash neither wedged the subscription nor dropped the link.
+    ?assertEqual(established, bondy_connect:status(Sub)),
+
+    ok = bondy_connect:disconnect(Pub),
+    ok = bondy_connect:disconnect(Sub).
+
+
 unsubscribe_stops_events(_) ->
     Self = self(),
     Sub = connect(),
     Handler = fun(Args, _, _) -> Self ! {got, Args} end,
     {ok, SubId} = bondy_connect:subscribe(Sub, <<"com.example.unsub">>, Handler),
+    %% A control subscription on the SAME connection that stays subscribed. Its
+    %% event is the deterministic barrier: both publishes are acknowledged and
+    %% sequential, so a (hypothetical) leaked event for the unsubscribed topic is
+    %% framed onto this subscriber's socket *before* the control event and is
+    %% read+dispatched by the connection before the control event is. Replaces a
+    %% blind 1 s window with a positive signal that propagation has completed.
+    Ctrl = fun(Args, _, _) -> Self ! {ctrl, Args} end,
+    {ok, _} = bondy_connect:subscribe(Sub, <<"com.example.unsub.ctrl">>, Ctrl),
     ok = bondy_connect:unsubscribe(Sub, SubId),
 
     Pub = connect(),
     {ok, _} = bondy_connect:publish(
         Pub, <<"com.example.unsub">>, [<<"x">>], #{}, #{acknowledge => true}
     ),
+    {ok, _} = bondy_connect:publish(
+        Pub, <<"com.example.unsub.ctrl">>, [<<"ok">>], #{}, #{acknowledge => true}
+    ),
+    receive
+        {ctrl, _} -> ok
+    after 5000 ->
+        ct:fail(control_event_not_received)
+    end,
+    %% Barrier passed. A short bounded drain covers only the residual scheduling
+    %% gap between the two concurrent per-subscription dispatch workers (the got
+    %% worker, if any, was spawned before the ctrl worker that just fired).
     receive
         {got, _} -> ct:fail(received_after_unsubscribe)
-    after 1000 ->
+    after 200 ->
         ok
     end,
 

@@ -15,8 +15,12 @@ Implementations:
 
 - `bondy_connect_transport_tcp` — WAMP raw socket over TCP (this phase).
 - `_tls` / `_uds` — raw socket over TLS / Unix domain socket (Phase 7).
+  These three are thin shims over `bondy_connect_raw`, which holds the shared
+  raw-socket logic parameterised by socket backend (review D2).
 - `_ws` — WebSocket via gun (Phase 7).
-- `_local` — in-VM peer (Phase 7).
+- `bondy_connect_local` — in-VM peer (Phase 7); dispatches to a router-side
+  handler registered via `bondy_connect_local:register_handler/1`, so it holds
+  no `bondy` dependency (the router app plugs in).
 
 Inbound bytes from an active socket arrive as `info` messages tagged per
 `messages/0`; the connection feeds them to `handle_data/2` to obtain records.
@@ -62,7 +66,17 @@ assertion crash.
 -doc "Send a transport keepalive pong (the reply to an inbound ping).".
 -callback pong(Payload :: binary(), state()) -> ok | {error, term()}.
 
--doc "Read available bytes and decode them (synchronous/passive).".
+-doc """
+Synchronously read available bytes and decode them — a **passive/blocking**
+read used by synchronous flows and tests, **not** the production receive path.
+
+The connection process never calls this: once established it runs the transport
+in active mode and feeds the resulting `info` messages to `handle_info/2`. `recv/2`
+exists for callers that drive a transport synchronously (e.g. `transport_SUITE`
+reading the handshake reply and first messages in one call). A clean
+peer-close is reported as `{error, closed}` (this callback has no bare `closed`
+result, unlike `handle_info/2`).
+""".
 -callback recv(timeout(), state()) ->
     {ok, [inbound()], state()} | {error, term()}.
 

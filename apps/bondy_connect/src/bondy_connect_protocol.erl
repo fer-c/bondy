@@ -134,11 +134,28 @@ start(#state{state_name = Name}) ->
 handle_message(#challenge{} = Msg, #state{state_name = establishing} = St) ->
     handle_challenge(Msg, St);
 
-handle_message(#welcome{} = Msg, #state{state_name = Name} = St)
-when Name == establishing; Name == challenging ->
-    #welcome{session_id = SessionId, details = Details} = Msg,
-    Session = bondy_connect_session:new(SessionId, Details),
-    {established, Session, St#state{state_name = established, session = Session}};
+%% A WELCOME from `challenging` means we answered the router's CHALLENGE — the
+%% configured credential gated the session, so it is always valid.
+handle_message(#welcome{} = Msg, #state{state_name = challenging} = St) ->
+    welcome(Msg, St);
+
+%% A WELCOME straight from `establishing` (no CHALLENGE seen) is only valid for
+%% a method that does not gate the session on a challenge — `anonymous`. For a
+%% credential-bearing method (`cra`/`cryptosign`/`ticket`) the client never got
+%% to present its credential, so silently accepting it would downgrade the
+%% operator's chosen security posture (review B2). Reject it with an ABORT.
+handle_message(#welcome{} = Msg, #state{state_name = establishing} = St) ->
+    Method = bondy_connect_auth:method(St#state.auth),
+    case requires_challenge(Method) of
+        false ->
+            welcome(Msg, St);
+        true ->
+            abort(
+                <<"Router welcomed the session without a challenge.">>,
+                {welcome_without_challenge, Method},
+                St
+            )
+    end;
 
 handle_message(#abort{reason_uri = Reason, details = Details}, St) ->
     %% Router abandoned the handshake; stop without replying.
@@ -254,6 +271,21 @@ handle_challenge(#challenge{auth_method = Method, extra = Extra}, St) ->
     end.
 
 
+%% @private Build the established session from an accepted WELCOME.
+welcome(#welcome{session_id = SessionId, details = Details}, St) ->
+    Session = bondy_connect_session:new(SessionId, Details),
+    {established, Session, St#state{state_name = established, session = Session}}.
+
+
+%% @private Whether the method gates the session on a CHALLENGE/AUTHENTICATE
+%% round before a WELCOME is acceptable. Only `anonymous` may be welcomed
+%% straight from `establishing`; every credential-bearing method (including
+%% `ticket`, which presents its secret in the AUTHENTICATE) must see a CHALLENGE
+%% first, so we default-deny any other method (review B2).
+requires_challenge(?WAMP_ANON_AUTH) -> false;
+requires_challenge(_Other)          -> true.
+
+
 %% @private
 hello_details(Roles, Agent, Auth) ->
     Details0 = #{roles => Roles, agent => Agent},
@@ -292,8 +324,13 @@ abort(ReasonUri, Message, StopReason, St) ->
     {stop, {shutdown, StopReason}, [Abort], St#state{state_name = shutting_down}}.
 
 
-%% @private
+%% @private Scrub the auth `state` for status/crash dumps. Total by design: this
+%% runs on the `format_status` path, so an auth method whose map carries no
+%% `state` key must not crash it (which would mask the real crash reason).
 redact_auth(undefined) ->
     undefined;
 redact_auth(Auth) when is_map(Auth) ->
-    Auth#{state := '******'}.
+    case is_map_key(state, Auth) of
+        true -> Auth#{state := '******'};
+        false -> Auth
+    end.

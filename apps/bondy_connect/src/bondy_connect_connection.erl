@@ -78,30 +78,29 @@ CANCEL/INTERRUPT/progressive arrive in Phases 5–6.
     established_once = false :: boolean(),
     net_monitor = false ::  boolean(),
     network_timeout     ::  pos_integer(),
-    %% Idle keepalive (ping/pong)
-    ping_retry          ::  bondy_retry:t() | undefined,
-    ping_idle_timeout   ::  pos_integer() | undefined,
-    ping_payload        ::  binary() | undefined,
+    %% Idle keepalive (ping/pong) — pure state in bondy_connect_keepalive
+    keepalive           ::  bondy_connect_keepalive:t(),
     next_request_id = 1 ::  pos_integer(),
     %% ReqId => #{type, from, timer, meta}
     pending = #{}       ::  #{pos_integer() => map()},
+    %% async-call token -> ReqId secondary index, kept in lockstep with the
+    %% `call_async' entries in `pending' so cancel/3 is O(1) (review C1).
+    async_index = #{}   ::  #{reference() => pos_integer()},
     handler_sup         ::  pid() | undefined,
     registry            ::  bondy_connect_registry:t(),
-    load                ::  bondy_connect_load:t(),
-    %% in-flight callee invocations: InvReqId => {WorkerPid, MonRef}
-    %% (the pid lets an inbound INTERRUPT kill the servicing worker).
-    invocations = #{}   ::  #{pos_integer() => {pid(), reference()}},
-    %% worker monitor reverse index: MonRef => {invocation, InvReqId}
-    %%                                       | {event, SubId}
-    mons = #{}          ::  #{reference() => term()},
-    %% per-subscription FIFO dispatch: SubId => #{busy, queue, mon}
-    dispatch = #{}      ::  #{pos_integer() => map()}
+    %% Callee invocations, subscriber FIFO dispatch, worker lifecycle and the
+    %% load regulator — pure state in bondy_connect_dispatch.
+    dispatch            ::  bondy_connect_dispatch:t()
 }).
 
 -define(CONNECT_TIMEOUT, 5000).
 -define(ESTABLISH_TIMEOUT, 10000).
 -define(DEFAULT_CALL_TIMEOUT, 30000).
 -define(DEFAULT_ADMIN_TIMEOUT, 15000).
+%% Slack added to the WAMP call timeout when waiting on the gen_statem, so the
+%% inner CALL timeout fires first (returning a proper WAMP error) before the
+%% outer `gen_statem:call` would time out and exit the caller.
+-define(CALL_TIMEOUT_SLACK, 5000).
 
 -export([start_link/2]).
 -export([await_ready/2]).
@@ -151,7 +150,7 @@ await_ready(Pid, Timeout) ->
     {ok, map()} | {error, term()}.
 call(Pid, Uri, Args, KWArgs, Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT),
-    call_safe(Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + 5000).
+    call_safe(Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + ?CALL_TIMEOUT_SLACK).
 
 
 -doc """
@@ -261,14 +260,14 @@ init({Config, ConnSup}) ->
         subprotocol = Sub,
         protocol = Protocol,
         registry = bondy_connect_registry:new(),
-        load = bondy_connect_load:new(maps:get(handler, Config, #{})),
+        dispatch = bondy_connect_dispatch:new(
+            bondy_connect_load:new(maps:get(handler, Config, #{}))
+        ),
         reconnect_retry = init_reconnect_retry(Reconnect),
         retry_initial = maps:get(retry_initial_connect, Reconnect, false),
         net_monitor = enable_net_monitor(),
         network_timeout = maps:get(network_timeout, Config, 60000),
-        ping_retry = init_ping_retry(Ping),
-        ping_idle_timeout = ping_idle_timeout(Ping),
-        ping_payload = ping_payload(Ping)
+        keepalive = bondy_connect_keepalive:new(Ping)
     },
     {ok, connecting, Data}.
 
@@ -390,15 +389,28 @@ established(enter, _Old, Data0) ->
     Data3 = reply_waiters(ok, Data2#data{established_once = true}),
     %% A successful establish resets the reconnect budget and arms keepalive.
     Data4 = reset_reconnect_retry(Data3),
-    {keep_state, Data4, ping_idle_actions(Data4)};
+    {keep_state, Data4, bondy_connect_keepalive:idle_actions(Data4#data.keepalive)};
 
 established({timeout, ping_idle}, ping_idle, Data) ->
-    send_ping(Data);
+    %% The idle timer fired — send a ping (arming its deadline), or reconnect
+    %% once the attempts are exhausted.
+    case bondy_connect_keepalive:on_idle(Data#data.keepalive) of
+        disabled -> {keep_state, Data};
+        give_up -> on_transport_failure(ping_timeout, Data);
+        {ping, Deadline} -> arm_ping(Deadline, Data)
+    end;
 
 established({timeout, ping}, ping_timeout, Data) ->
     %% A ping went unanswered within its deadline — fail it and try again, or
     %% tear the link down (and reconnect) once the attempts are exhausted.
-    ping_failed(Data);
+    case bondy_connect_keepalive:on_ping_timeout(Data#data.keepalive) of
+        disabled ->
+            {keep_state, Data};
+        {give_up, KA1} ->
+            on_transport_failure(ping_timeout, Data#data{keepalive = KA1});
+        {ping, Deadline, KA1} ->
+            arm_ping(Deadline, Data#data{keepalive = KA1})
+    end;
 
 established({call, From}, {call, Uri, Args, KWArgs, Opts}, Data) ->
     do_call({sync, From}, Uri, Args, KWArgs, Opts, Data);
@@ -434,16 +446,22 @@ established({call, From}, await_ready, Data) ->
     {keep_state, Data, [{reply, From, ok}]};
 
 established(info, {handler_done, ReqId, Reply}, Data) ->
-    {keep_state, handle_handler_done(ReqId, Reply, Data)};
+    {keep_state, run_dispatch(
+        bondy_connect_dispatch:handler_done(ReqId, Reply, disp(Data)), Data
+    )};
 
 established(info, {event_done, SubId, _Pid}, Data) ->
-    {keep_state, advance_event(SubId, Data)};
+    {keep_state, run_dispatch(
+        bondy_connect_dispatch:event_done(SubId, disp(Data)), Data
+    )};
 
 established(info, {timeout, TRef, {req_timeout, ReqId}}, Data) ->
     {keep_state, handle_req_timeout(ReqId, TRef, Data)};
 
 established(info, {'DOWN', MonRef, process, _Pid, Reason}, Data) ->
-    {keep_state, handle_worker_down(MonRef, Reason, Data)};
+    {keep_state, run_dispatch(
+        bondy_connect_dispatch:worker_down(MonRef, Reason, disp(Data)), Data
+    )};
 
 established(info, Info, Data) ->
     handle_established_socket(Info, Data);
@@ -465,6 +483,8 @@ terminate(_Reason, StateName, Data) ->
     _ = close_transport(Data),
     _ = reply_pending({error, disconnected}, Data),
     _ = reply_waiters({error, disconnected}, Data),
+    %% Free the rate-limiter's ETS row (no-op when no `rate` is configured).
+    _ = bondy_connect_dispatch:delete(Data#data.dispatch),
     ok.
 
 
@@ -558,8 +578,10 @@ handle_established_socket(Info, Data) ->
         {ok, Records, T1} ->
             case process_records(Records, established, Data#data{transport = T1}) of
                 {next_state, established, Data1} ->
-                    Data2 = ping_succeed(Data1),
-                    {keep_state, Data2, keepalive_reset_actions(Data2)};
+                    KA1 = bondy_connect_keepalive:on_activity(Data1#data.keepalive),
+                    Data2 = Data1#data{keepalive = KA1},
+                    {keep_state, Data2,
+                     bondy_connect_keepalive:reset_actions(KA1)};
                 Result ->
                     Result
             end;
@@ -686,10 +708,14 @@ route_app(#interrupt{request_id = InvReqId, options = Opts}, Data) ->
     %% The router is cancelling an in-flight INVOCATION we are servicing.
     {continue, established, handle_interrupt(InvReqId, Opts, Data)};
 
-route_app(_Other, Data) ->
+route_app(Other, Data) ->
     %% Never-assert backstop: any other inbound application record (e.g. an
     %% advanced feature we do not implement) is ignored rather than crashing
-    %% the connection.
+    %% the connection — but logged so it is observable rather than silent.
+    ?LOG_DEBUG(#{
+        description => "Ignoring unhandled inbound application message.",
+        message => element(1, Other)
+    }),
     {continue, established, Data}.
 
 
@@ -732,23 +758,11 @@ do_cancel(From, Token, Mode, Data) ->
     end.
 
 
-%% @private Resolve a `call_async` token to its pending CALL request id.
-find_async_call(Token, #data{pending = Pending}) ->
-    Found = maps:fold(
-        fun
-            (ReqId, #{type := call, from := {async, _, T}}, acc_none)
-            when T =:= Token ->
-                {ok, ReqId};
-            (_ReqId, _Entry, Acc) ->
-                Acc
-        end,
-        acc_none,
-        Pending
-    ),
-    case Found of
-        {ok, _} = OK -> OK;
-        acc_none -> error
-    end.
+%% @private Resolve a `call_async` token to its pending CALL request id via the
+%% O(1) secondary index (review C1), avoiding an O(n) scan of `pending` on every
+%% cancel/3. The index is maintained in lockstep by store/resolve/timeout/reply.
+find_async_call(Token, #data{async_index = Index}) ->
+    maps:find(Token, Index).
 
 
 %% @private
@@ -927,7 +941,7 @@ confirm_subscription(ReqId, SubId, Data) ->
 confirm_unregister(ReqId, Data) ->
     case peek_pending(ReqId, Data) of
         {ok, #{type := unregister, meta := #{reg_id := RegId}}} ->
-            Reg1 = bondy_connect_registry:forget_registration(
+            Reg1 = bondy_connect_registry:undeclare_registration(
                 RegId, Data#data.registry
             ),
             resolve_pending(ReqId, ok, Data#data{registry = Reg1});
@@ -940,10 +954,12 @@ confirm_unregister(ReqId, Data) ->
 confirm_unsubscribe(ReqId, Data) ->
     case peek_pending(ReqId, Data) of
         {ok, #{type := unsubscribe, meta := #{sub_id := SubId}}} ->
-            Reg1 = bondy_connect_registry:forget_subscription(
+            Reg1 = bondy_connect_registry:undeclare_subscription(
                 SubId, Data#data.registry
             ),
-            Data1 = clear_dispatch(SubId, Data),
+            Data1 = run_dispatch(
+                bondy_connect_dispatch:clear_subscription(SubId, disp(Data)), Data
+            ),
             resolve_pending(ReqId, ok, Data1#data{registry = Reg1});
         _ ->
             Data
@@ -951,8 +967,12 @@ confirm_unsubscribe(ReqId, Data) ->
 
 
 %% @private An unsolicited UNREGISTERED carries the revoked registration id in
-%% its details (`#{registration => RegId}`). Drop it from the registry; inbound
-%% INVOCATIONs for it would then be answered with `no_such_registration`.
+%% its details (`#{registration => RegId}`). Drop only the *established* state
+%% (`forget_registration/2`); the *declared* entry is kept so the registration
+%% re-establishes on the next reconnect. A router revocation is scoped to the
+%% current session — Bondy has no durable sessions — so it must not survive a
+%% reconnect. Until then, inbound INVOCATIONs for it are answered with
+%% `no_such_registration`.
 handle_revocation(Details, Data) when is_map(Details) ->
     case revoked_registration_id(Details) of
         {ok, RegId} ->
@@ -989,7 +1009,9 @@ revoked_registration_id(Details) ->
 
 
 
-%% @private
+%% @private The connection finds the registration and builds the Job; the
+%% dispatch helper charges the load regulator and decides whether to spawn a
+%% worker (or answer the router with `no_such_registration`/`unavailable`).
 handle_invocation(#invocation{} = Msg, Data) ->
     #invocation{
         request_id = ReqId,
@@ -1000,20 +1022,6 @@ handle_invocation(#invocation{} = Msg, Data) ->
     } = Msg,
     case bondy_connect_registry:registration(RegId, Data#data.registry) of
         {ok, #{handler := Handler}} ->
-            admit_invocation(ReqId, Handler, Details, Args, KWArgs, Data);
-        error ->
-            Err = bondy_wamp_message:error(
-                ?INVOCATION, ReqId, #{}, ?WAMP_NO_SUCH_REGISTRATION
-            ),
-            _ = send_msg(Err, Data),
-            Data
-    end.
-
-
-%% @private
-admit_invocation(ReqId, Handler, Details, Args, KWArgs, Data) ->
-    case bondy_connect_load:admit(Data#data.load) of
-        {ok, Load1} ->
             Job = #{
                 kind => invocation,
                 conn => self(),
@@ -1023,75 +1031,28 @@ admit_invocation(ReqId, Handler, Details, Args, KWArgs, Data) ->
                 kwargs => undefined_to(KWArgs, #{}),
                 details => Details
             },
-            {Pid, MonRef} = start_worker(Job, Data),
-            Data#data{
-                load = Load1,
-                invocations =
-                    maps:put(ReqId, {Pid, MonRef}, Data#data.invocations),
-                mons = maps:put(MonRef, {invocation, ReqId}, Data#data.mons)
-            };
-        {error, overloaded} ->
+            run_dispatch(
+                bondy_connect_dispatch:admit_invocation(ReqId, Job, disp(Data)),
+                Data
+            );
+        error ->
             Err = bondy_wamp_message:error(
-                ?INVOCATION, ReqId, #{}, ?WAMP_UNAVAILABLE
+                ?INVOCATION, ReqId, #{}, ?WAMP_NO_SUCH_REGISTRATION
             ),
             _ = send_msg(Err, Data),
             Data
     end.
-
-
-%% @private
-handle_handler_done(ReqId, Reply, Data) ->
-    case maps:take(ReqId, Data#data.invocations) of
-        {{_Pid, MonRef}, Inv1} ->
-            _ = erlang:demonitor(MonRef, [flush]),
-            Out = invocation_reply(ReqId, Reply),
-            _ = send_msg(Out, Data),
-            Data#data{
-                invocations = Inv1,
-                mons = maps:remove(MonRef, Data#data.mons),
-                load = bondy_connect_load:release(Data#data.load)
-            };
-        error ->
-            Data
-    end.
-
-
-%% @private
-invocation_reply(ReqId, {yield, Args, KWArgs}) ->
-    case normalize_payload(Args, KWArgs) of
-        {undefined, undefined} ->
-            bondy_wamp_message:yield(ReqId, #{});
-        {A, K} ->
-            bondy_wamp_message:yield(ReqId, #{}, A, K)
-    end;
-
-invocation_reply(ReqId, {error, Uri, Args, KWArgs}) ->
-    {A, K} = normalize_payload(Args, KWArgs),
-    bondy_wamp_message:error(?INVOCATION, ReqId, #{}, Uri, A, K).
 
 
 %% @private The router asked us to cancel an in-flight INVOCATION (the caller
-%% issued a CANCEL with mode `kill`/`killnowait`). We cancel **forcefully** —
-%% kill the servicing worker and answer the INTERRUPT with an
+%% issued a CANCEL with mode `kill`/`killnowait`). The dispatch helper cancels
+%% **forcefully** — emitting a `{kill, Pid}` for the servicing worker and an
 %% `ERROR(?INTERRUPT, canceled)` (cooperative interruption is future work).
 %% Unknown/already-finished invocations are ignored.
-handle_interrupt(InvReqId, _Opts, Data) ->
-    case maps:take(InvReqId, Data#data.invocations) of
-        {{Pid, MonRef}, Inv1} ->
-            _ = erlang:demonitor(MonRef, [flush]),
-            _ = exit(Pid, kill),
-            Err = bondy_wamp_message:error(
-                ?INTERRUPT, InvReqId, #{}, ?WAMP_CANCELLED
-            ),
-            _ = send_msg(Err, Data),
-            Data#data{
-                invocations = Inv1,
-                mons = maps:remove(MonRef, Data#data.mons),
-                load = bondy_connect_load:release(Data#data.load)
-            };
-        error ->
-            Data
-    end.
+handle_interrupt(InvReqId, Opts, Data) ->
+    run_dispatch(
+        bondy_connect_dispatch:interrupt(InvReqId, Opts, disp(Data)), Data
+    ).
 
 
 
@@ -1101,7 +1062,8 @@ handle_interrupt(InvReqId, _Opts, Data) ->
 
 
 
-%% @private
+%% @private The connection finds the subscription and builds the Job; the
+%% dispatch helper enforces per-subscription FIFO (or fires unordered).
 handle_event(#event{} = Msg, Data) ->
     #event{
         subscription_id = SubId,
@@ -1120,133 +1082,78 @@ handle_event(#event{} = Msg, Data) ->
                 kwargs => undefined_to(KWArgs, #{}),
                 details => Details
             },
-            dispatch_event(SubId, maps:get(ordered, Opts, true), Job, Data);
+            run_dispatch(
+                bondy_connect_dispatch:dispatch_event(
+                    SubId, maps:get(ordered, Opts, true), Job, disp(Data)
+                ),
+                Data
+            );
         error ->
             Data
     end.
 
 
-%% @private Unordered: fire and forget (handler_sup contains any crash).
-dispatch_event(_SubId, false, Job, Data) ->
+
+%% =============================================================================
+%% PRIVATE — dispatch effect interpreter + worker lifecycle
+%% =============================================================================
+
+
+
+%% @private Read/write the opaque dispatch state out of/into the statem data.
+disp(#data{dispatch = D}) -> D.
+
+store_dispatch(D, Data) -> Data#data{dispatch = D}.
+
+
+%% @private Interpret a dispatch step: apply its effects (an event spawn may
+%% recurse to drain the FIFO, mirroring the pre-A2 `next_event/4` recursion) and
+%% store the resulting dispatch state back into the statem data.
+run_dispatch({D, Effects}, Data) ->
+    {D1, Data1} = lists:foldl(fun apply_effect/2, {D, Data}, Effects),
+    store_dispatch(D1, Data1).
+
+
+%% @private
+apply_effect({send, Msg}, {D, Data}) ->
+    _ = send_msg(Msg, Data),
+    {D, Data};
+
+apply_effect({spawn_nomon, Job}, {D, Data}) ->
     _ = start_worker_nomon(Job, Data),
-    Data;
+    {D, Data};
 
-%% @private Ordered: at most one worker per subscription at a time; the rest
-%% queue and run on `{event_done, SubId, _}` (or worker `DOWN`).
-dispatch_event(SubId, true, Job, Data) ->
-    case maps:get(SubId, Data#data.dispatch, undefined) of
-        #{busy := true, queue := Q} = Entry ->
-            Entry1 = Entry#{queue := queue:in(Job, Q)},
-            Data#data{dispatch = maps:put(SubId, Entry1, Data#data.dispatch)};
-        _ ->
-            {_Pid, Mon} = start_worker(Job, Data),
-            Entry = #{busy => true, queue => queue:new(), mon => Mon},
-            Data#data{
-                dispatch = maps:put(SubId, Entry, Data#data.dispatch),
-                mons = maps:put(Mon, {event, SubId}, Data#data.mons)
-            }
-    end.
+apply_effect({kill, Pid}, {D, Data}) ->
+    _ = exit(Pid, kill),
+    {D, Data};
+
+apply_effect({spawn, Tag, Key, Job}, {D0, Data}) ->
+    %% The connection owns the spawn+monitor; feed the result back so the helper
+    %% records the monitor (or releases the load / advances the FIFO on failure).
+    Res = start_worker(Job, Data),
+    {D1, Effects} = bondy_connect_dispatch:worker_started(Tag, Key, Res, D0),
+    lists:foldl(fun apply_effect/2, {D1, Data}, Effects).
 
 
-%% @private The current worker for `SubId` finished cleanly — flush its DOWN and
-%% start the next queued event (or clear the busy flag).
-advance_event(SubId, Data) ->
-    case maps:get(SubId, Data#data.dispatch, undefined) of
-        #{mon := Mon} = Entry ->
-            _ = erlang:demonitor(Mon, [flush]),
-            next_event(SubId, Entry, maps:remove(Mon, Data#data.mons), Data);
-        undefined ->
-            Data
-    end.
-
-
-%% @private The current worker for `SubId` died — its DOWN already removed the
-%% monitor; advance the queue.
-advance_event_down(SubId, Mons1, Data) ->
-    case maps:get(SubId, Data#data.dispatch, undefined) of
-        #{} = Entry ->
-            next_event(SubId, Entry, Mons1, Data);
-        undefined ->
-            Data#data{mons = Mons1}
-    end.
-
-
-%% @private
-next_event(SubId, #{queue := Q} = Entry, Mons, Data) ->
-    case queue:out(Q) of
-        {{value, Job}, Q1} ->
-            {_Pid, Mon2} = start_worker(Job, Data),
-            Entry1 = Entry#{queue := Q1, mon := Mon2},
-            Data#data{
-                dispatch = maps:put(SubId, Entry1, Data#data.dispatch),
-                mons = maps:put(Mon2, {event, SubId}, Mons)
-            };
-        {empty, _} ->
-            Data#data{
-                dispatch = maps:remove(SubId, Data#data.dispatch),
-                mons = Mons
-            }
-    end.
-
-
-%% @private
-clear_dispatch(SubId, Data) ->
-    case maps:get(SubId, Data#data.dispatch, undefined) of
-        #{mon := Mon} ->
-            _ = erlang:demonitor(Mon, [flush]),
-            Data#data{
-                dispatch = maps:remove(SubId, Data#data.dispatch),
-                mons = maps:remove(Mon, Data#data.mons)
-            };
-        undefined ->
-            Data
-    end.
-
-
-
-%% =============================================================================
-%% PRIVATE — worker lifecycle
-%% =============================================================================
-
-
-
-%% @private
+%% @private Start (and monitor) a handler worker. Returns `{error, _}` rather
+%% than crashing on a `start_child` failure — a failed worker start must not take
+%% down the connection (and, via the `one_for_all` conn_sup, every other
+%% in-flight worker). The dispatch helper handles the error like the worker-DOWN
+%% path: release the load token, synthesize an ERROR / advance the FIFO (review
+%% B1).
 start_worker(Job, #data{handler_sup = HSup}) ->
-    {ok, Pid} = bondy_connect_handler_sup:start_worker(HSup, Job),
-    MonRef = erlang:monitor(process, Pid),
-    {Pid, MonRef}.
+    case bondy_connect_handler_sup:start_worker(HSup, Job) of
+        {ok, Pid} ->
+            MonRef = erlang:monitor(process, Pid),
+            {ok, {Pid, MonRef}};
+        {error, _} = Error ->
+            Error
+    end.
 
 
 %% @private
 start_worker_nomon(Job, #data{handler_sup = HSup}) ->
     bondy_connect_handler_sup:start_worker(HSup, Job).
-
-
-%% @private A monitored worker died. For an invocation worker that died before
-%% replying, synthesize an ERROR; for an event worker, advance the FIFO.
-handle_worker_down(MonRef, Reason, Data) ->
-    case maps:take(MonRef, Data#data.mons) of
-        {{invocation, ReqId}, Mons1} ->
-            case maps:take(ReqId, Data#data.invocations) of
-                {{_Pid, MonRef}, Inv1} ->
-                    Err = bondy_wamp_message:error(
-                        ?INVOCATION, ReqId, #{}, ?BONDY_CONNECT_INTERNAL_ERROR
-                    ),
-                    _ = send_msg(Err, Data),
-                    Data#data{
-                        invocations = Inv1,
-                        mons = Mons1,
-                        load = bondy_connect_load:release(Data#data.load)
-                    };
-                _ ->
-                    Data#data{mons = Mons1}
-            end;
-        {{event, SubId}, Mons1} ->
-            _ = Reason,
-            advance_event_down(SubId, Mons1, Data);
-        error ->
-            Data
-    end.
 
 
 
@@ -1260,7 +1167,10 @@ handle_worker_down(MonRef, Reason, Data) ->
 store_pending(ReqId, Entry0, Timeout, Data) ->
     TRef = erlang:start_timer(Timeout, self(), {req_timeout, ReqId}),
     Entry = Entry0#{timer => TRef},
-    Data#data{pending = maps:put(ReqId, Entry, Data#data.pending)}.
+    Data#data{
+        pending = maps:put(ReqId, Entry, Data#data.pending),
+        async_index = index_async(Entry, ReqId, Data#data.async_index)
+    }.
 
 
 %% @private
@@ -1271,10 +1181,13 @@ peek_pending(ReqId, #data{pending = Pending}) ->
 %% @private
 resolve_pending(ReqId, Reply, #data{pending = Pending} = Data) ->
     case maps:take(ReqId, Pending) of
-        {#{from := From, timer := TRef}, Pending1} ->
+        {#{from := From, timer := TRef} = Entry, Pending1} ->
             _ = cancel_timer(TRef),
             _ = dispatch_reply(From, Reply),
-            Data#data{pending = Pending1};
+            Data#data{
+                pending = Pending1,
+                async_index = unindex_async(Entry, Data#data.async_index)
+            };
         error ->
             Data
     end.
@@ -1283,12 +1196,30 @@ resolve_pending(ReqId, Reply, #data{pending = Pending} = Data) ->
 %% @private A per-request timeout fired before its ack/result arrived.
 handle_req_timeout(ReqId, TRef, #data{pending = Pending} = Data) ->
     case maps:find(ReqId, Pending) of
-        {ok, #{timer := TRef, from := From}} ->
+        {ok, #{timer := TRef, from := From} = Entry} ->
             _ = dispatch_reply(From, {error, timeout}),
-            Data#data{pending = maps:remove(ReqId, Pending)};
+            Data#data{
+                pending = maps:remove(ReqId, Pending),
+                async_index = unindex_async(Entry, Data#data.async_index)
+            };
         _ ->
             Data
     end.
+
+
+%% @private Add a `call_async' entry's token to the secondary index (review C1).
+%% Non-async entries (`sync`/`undefined' from) carry no token and are skipped.
+index_async(#{from := {async, _, Token}}, ReqId, Index) ->
+    maps:put(Token, ReqId, Index);
+index_async(_Entry, _ReqId, Index) ->
+    Index.
+
+
+%% @private Drop a removed entry's token from the secondary index (review C1).
+unindex_async(#{from := {async, _, Token}}, Index) ->
+    maps:remove(Token, Index);
+unindex_async(_Entry, Index) ->
+    Index.
 
 
 %% @private
@@ -1310,7 +1241,7 @@ reply_pending(Reply, #data{pending = Pending} = Data) ->
         end
         || E <- maps:values(Pending)
     ],
-    Data#data{pending = #{}}.
+    Data#data{pending = #{}, async_index = #{}}.
 
 
 %% @private
@@ -1428,49 +1359,23 @@ init_reconnect_retry(_) ->
 %% load counter. The protocol/registry-declared/keepalive config survive.
 teardown_session(Data0) ->
     Data1 = reply_pending({error, disconnected}, Data0),
-    _ = kill_invocation_workers(Data1),
-    _ = demonitor_event_workers(Data1),
-    _ = close_transport(Data1),
-    Reg1 = bondy_connect_registry:clear_established(Data1#data.registry),
+    %% Kill in-flight invocation workers + demonitor event workers, then clear
+    %% the dispatch maps and reset (not re-create) the load token bucket — a
+    %% fresh `new/1` would orphan a bondy_regulator ETS row each time (review B4).
+    Data2 = run_dispatch(bondy_connect_dispatch:kill_all(disp(Data1)), Data1),
+    Data3 = store_dispatch(bondy_connect_dispatch:reset(disp(Data2)), Data2),
+    _ = close_transport(Data3),
+    Reg1 = bondy_connect_registry:clear_established(Data3#data.registry),
     %% The protocol layer is a stateful machine that has been driven to its
     %% terminal `established' state; a reconnect needs a fresh handshake, so
     %% re-initialise it (this also clears any auth material).
-    {ok, Protocol1} = bondy_connect_protocol:init(Data1#data.config),
-    Data1#data{
+    {ok, Protocol1} = bondy_connect_protocol:init(Data3#data.config),
+    Data3#data{
         protocol = Protocol1,
         registry = Reg1,
         session = undefined,
-        transport = undefined,
-        invocations = #{},
-        mons = #{},
-        dispatch = #{},
-        load = bondy_connect_load:new(maps:get(handler, Data1#data.config, #{}))
+        transport = undefined
     }.
-
-
-%% @private
-kill_invocation_workers(#data{invocations = Inv}) ->
-    maps:foreach(
-        fun(_ReqId, {Pid, MonRef}) ->
-            _ = erlang:demonitor(MonRef, [flush]),
-            _ = exit(Pid, kill)
-        end,
-        Inv
-    ).
-
-
-%% @private Event workers carry no reply; demonitor them so their late DOWN is
-%% ignored and let them run to completion under the (temporary) handler_sup.
-demonitor_event_workers(#data{dispatch = Disp}) ->
-    maps:foreach(
-        fun(_SubId, Entry) ->
-            case maps:get(mon, Entry, undefined) of
-                undefined -> ok;
-                Mon -> _ = erlang:demonitor(Mon, [flush]), ok
-            end
-        end,
-        Disp
-    ).
 
 
 %% @private Replay the declared REGISTER/SUBSCRIBE set after a reconnect. Each
@@ -1589,84 +1494,21 @@ is_netdown_posix(_) -> false.
 %% =============================================================================
 
 
-%% @private
-init_ping_retry(#{enabled := true} = Ping) ->
-    bondy_retry:init(ping_timeout, #{
-        deadline => 0,
-        interval => maps:get(timeout, Ping),
-        max_retries => maps:get(max_attempts, Ping),
-        backoff_enabled => false
-    });
-init_ping_retry(_) ->
-    undefined.
-
-
-%% @private
-ping_idle_timeout(#{enabled := true, idle_timeout := T}) -> T;
-ping_idle_timeout(_) -> undefined.
-
-
-%% @private A stable per-connection ping payload (echoed in the pong). No crypto
-%% dependency — uniqueness across connections is not required.
-ping_payload(#{enabled := true}) ->
-    <<(erlang:phash2(self())):32, (erlang:unique_integer([positive])):64>>;
-ping_payload(_) ->
-    undefined.
-
-
-%% @private Arm the idle timer (or nothing when ping is disabled).
-ping_idle_actions(#data{ping_idle_timeout = undefined}) ->
-    [];
-ping_idle_actions(#data{ping_idle_timeout = T}) ->
-    [{{timeout, ping_idle}, T, ping_idle}].
-
-
-%% @private Any inbound traffic proves the link alive: cancel the ping deadline
-%% and re-arm the idle timer.
-keepalive_reset_actions(#data{ping_idle_timeout = undefined}) ->
-    [];
-keepalive_reset_actions(#data{ping_idle_timeout = T}) ->
-    [{{timeout, ping}, cancel}, {{timeout, ping_idle}, T, ping_idle}].
-
-
-%% @private The idle timer fired — send a ping and arm its deadline, or give up
-%% (reconnect) when the attempts are exhausted.
-send_ping(#data{ping_retry = undefined} = Data) ->
-    {keep_state, Data};
-send_ping(#data{ping_retry = R} = Data) ->
-    case bondy_retry:get(R) of
-        Time when is_integer(Time) ->
-            case ping_send(Data) of
-                ok ->
-                    {keep_state, Data, [{{timeout, ping}, Time, ping_timeout}]};
-                {error, Reason} ->
-                    on_transport_failure({ping_send_error, Reason}, Data)
-            end;
-        Limit when Limit == deadline; Limit == max_retries ->
-            on_transport_failure(ping_timeout, Data)
+%% @private Send a ping and arm its deadline, or reconnect if the send fails.
+%% The keepalive budget/decision lives in `bondy_connect_keepalive'; the statem
+%% owns the transport send and the `{timeout, ping}' deadline.
+arm_ping(Deadline, Data) ->
+    case ping_send(Data) of
+        ok ->
+            {keep_state, Data, [{{timeout, ping}, Deadline, ping_timeout}]};
+        {error, Reason} ->
+            on_transport_failure({ping_send_error, Reason}, Data)
     end.
 
 
-%% @private A ping deadline elapsed with no answer: count the failure and try
-%% another ping (or give up via `send_ping/1`).
-ping_failed(#data{ping_retry = undefined} = Data) ->
-    {keep_state, Data};
-ping_failed(#data{ping_retry = R} = Data) ->
-    {_, R1} = bondy_retry:fail(R),
-    send_ping(Data#data{ping_retry = R1}).
-
-
 %% @private
-ping_succeed(#data{ping_retry = undefined} = Data) ->
-    Data;
-ping_succeed(#data{ping_retry = R} = Data) ->
-    {_, R1} = bondy_retry:succeed(R),
-    Data#data{ping_retry = R1}.
-
-
-%% @private
-ping_send(#data{transport_mod = Mod, transport = T, ping_payload = P}) ->
-    Mod:ping(P, T).
+ping_send(#data{transport_mod = Mod, transport = T, keepalive = KA}) ->
+    Mod:ping(bondy_connect_keepalive:payload(KA), T).
 
 
 %% @private
@@ -1765,23 +1607,6 @@ undefined_to(undefined, Default) -> Default;
 undefined_to(Value, _Default) -> Value.
 
 
-%% @private Normalise a (Args, KWArgs) payload for the WAMP constructors: empty
-%% kwargs collapse to `undefined`; non-empty kwargs require a (possibly empty)
-%% args list.
-normalize_payload(undefined, undefined) ->
-    {undefined, undefined};
-normalize_payload(undefined, K) when is_map(K), map_size(K) == 0 ->
-    {undefined, undefined};
-normalize_payload(undefined, K) ->
-    {[], K};
-normalize_payload(A, undefined) ->
-    {A, undefined};
-normalize_payload(A, K) when is_map(K), map_size(K) == 0 ->
-    {A, undefined};
-normalize_payload(A, K) ->
-    {A, K}.
-
-
 %% @private
 result_payload(#result{args = Args, kwargs = KWArgs}) ->
     #{args => undefined_to(Args, []), kwargs => undefined_to(KWArgs, #{})}.
@@ -1814,7 +1639,7 @@ transport_mod(tls) -> bondy_connect_transport_tls;
 transport_mod(uds) -> bondy_connect_transport_uds;
 transport_mod(ws) -> bondy_connect_transport_ws;
 transport_mod(wss) -> bondy_connect_transport_ws;
-transport_mod(local) -> bondy_connect_transport_local;
+transport_mod(local) -> bondy_connect_local;
 transport_mod(Other) -> error({unsupported_transport, Other}).
 
 

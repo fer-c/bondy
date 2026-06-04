@@ -9,16 +9,14 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_retry).
 
--include("bondy.hrl").
-
 -record(bondy_retry, {
     id                  ::  any(),
     deadline            ::  non_neg_integer(),
     max_retries = 0     ::  non_neg_integer(),
     interval            ::  pos_integer(),
     count = 0           ::  non_neg_integer(),
-    backoff             ::  optional(backoff:backoff()),
-    start_ts            ::  optional(pos_integer())
+    backoff             ::  backoff:backoff() | undefined,
+    start_ts            ::  pos_integer() | undefined
 }).
 
 -type t()               ::  #bondy_retry{}.

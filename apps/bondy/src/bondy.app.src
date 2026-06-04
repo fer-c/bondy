@@ -45,11 +45,15 @@
         jobs,
         uuid,
         lrw,
+        key_value,
         %% 1st-party deps
         mops,
         bondy_wamp,
         bondy_stdlib,
-        bondy_regulator
+        bondy_regulator,
+        %% bondy implements bondy_connect_local's handler behaviour and
+        %% registers it at boot (the in-VM WAMP transport for co-located clients)
+        bondy_connect
         %% plum_db and tuplespace are started manually by bondy_app
     ]},
     {env, []},

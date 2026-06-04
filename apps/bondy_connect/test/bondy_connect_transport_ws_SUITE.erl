@@ -40,7 +40,8 @@ all() ->
         ws_pubsub_round_trip,
         ws_msgpack_round_trip,
         wss_verify_peer_round_trip,
-        ws_upgrade_bad_path_fails
+        ws_upgrade_bad_path_fails,
+        ws_inbound_message_too_large_rejected
     ].
 
 
@@ -143,6 +144,39 @@ ws_upgrade_bad_path_fails(_) ->
         ws_path => <<"/this-path-has-no-ws-handler">>
     }),
     ?assertMatch({error, _}, Result).
+
+
+%% An inbound WebSocket message larger than the negotiated `max_message_length`
+%% is rejected before it is decoded into terms, rather than materialized
+%% (asymmetric DoS protection — review B3). Callee `A` runs with the default
+%% limit and returns a large result; caller `B` dials with a small limit and
+%% must see its call fail instead of decoding the oversized RESULT. The
+%% handshake WELCOME still fits comfortably under B's limit (asserted via
+%% `established`), so the failure is attributable to the RESULT, not the
+%% handshake.
+ws_inbound_message_too_large_rejected(_) ->
+    Proc = <<"com.example.res.ws.big">>,
+    Big = binary:copy(<<"x">>, 200000),
+
+    A = connect([json]),
+    {ok, _} = bondy_connect:register(A, Proc, fun(_, _, _) -> {reply, [Big]} end),
+
+    {ok, B} = bondy_connect:connect(#{
+        transport => ws,
+        endpoint => {?HOST, ?PORT},
+        realm => ?REALM,
+        auth => #{method => ?WAMP_ANON_AUTH},
+        serializers => [json],
+        max_message_length => 32768
+    }),
+    ?assertEqual(established, bondy_connect:status(B)),
+
+    %% The ~200 KB RESULT exceeds B's 32 KB inbound limit, so the call fails
+    %% rather than returning the oversized payload.
+    ?assertMatch({error, _}, bondy_connect:call(B, Proc, [<<>>])),
+
+    ok = bondy_connect:disconnect(A),
+    _ = catch bondy_connect:disconnect(B).
 
 
 

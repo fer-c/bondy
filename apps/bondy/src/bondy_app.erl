@@ -334,6 +334,11 @@ start_public_listeners() ->
     %% WAMP Unix domain socket listener (opt-in; no-op unless configured)
     ok = bondy_wamp_uds:start_listeners(),
 
+    %% WAMP in-VM (local) transport: register the router-side adapter so a
+    %% co-located bondy_connect client can use `transport => local'. On a peer
+    %% node (no bondy app) no handler is registered and local is unavailable.
+    ok = bondy_connect_local:register_handler(bondy_connect_local_handler),
+
     %% WAMP Websocket and REST Gateway HTTP listeners
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_http_gateway:start_listeners(),
@@ -469,6 +474,7 @@ stop_listeners() ->
     }),
     ok = bondy_wamp_tcp:stop_listeners(),
     ok = bondy_wamp_uds:stop_listeners(),
+    ok = bondy_connect_local:unregister_handler(),
 
     ?LOG_NOTICE(#{
         description => "Terminating all Bridge Relay connections."

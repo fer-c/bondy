@@ -13,8 +13,8 @@ layers).
 This phase validates the **protocol-relevant** fields strictly — `realm`
 (a valid WAMP URI), `roles`, `agent`, and `auth` — and supplies defaults for
 the transport-related fields (`transport`, `serializers`, `reconnect`, `ping`,
-`max_message_length`, `tls`) which are exercised in later phases. TLS defaults
-are secure-by-default (`verify_peer`).
+`max_message_length`, `handler`, `tls`) which are exercised in later phases. TLS
+defaults are secure-by-default (`verify_peer`).
 """.
 
 -include("bondy_connect.hrl").
@@ -113,6 +113,7 @@ validate(Spec) when is_map(Spec) ->
             ws_path => maps:get(ws_path, Spec, <<"/ws">>),
             max_message_length =>
                 maps:get(max_message_length, Spec, ?DEFAULT_MAX_MESSAGE_LENGTH),
+            handler => validate_handler(Spec),
             reconnect => validate_reconnect(Spec),
             ping => validate_ping(Spec),
             network_timeout => validate_network_timeout(Spec),
@@ -200,6 +201,37 @@ validate_ping(Spec) ->
             _ -> is_pos_int(V) orelse bad(ping, K, V)
         end
     end).
+
+
+%% @private Validate the optional `handler' load-regulation config (Decision 5),
+%% consumed by `bondy_connect_load:new/1'. Recognised keys:
+%%
+%% - `max_concurrency' — the per-connection in-flight cap (non-neg int; `0' =
+%%   unlimited).
+%% - `rate' — a `bondy_regulator_rate_limit' token-bucket spec (a map; its
+%%   contents are validated by the regulator when the bucket is built).
+%%
+%% Both are optional; an absent `handler' means unlimited concurrency and no rate
+%% limit. Unknown keys are rejected so typos surface early.
+validate_handler(#{handler := H}) when is_map(H) ->
+    _ = maps:foreach(
+        fun
+            (max_concurrency, V) ->
+                is_non_neg_int(V) orelse bad(handler, max_concurrency, V);
+            (rate, V) ->
+                is_map(V) orelse bad(handler, rate, V);
+            (K, _V) ->
+                throw({unknown_option, handler, K})
+        end,
+        H
+    ),
+    H;
+
+validate_handler(#{handler := Other}) ->
+    throw({invalid_option, handler, Other});
+
+validate_handler(_) ->
+    #{}.
 
 
 %% @private

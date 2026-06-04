@@ -32,11 +32,23 @@ pings, so we drop them here to avoid a double pong.
 
 gun pushes frames as `{gun_ws, …}` messages with `flow => infinity`, so there is
 no per-message re-arm (the `{active, once}` cycle of the raw transports).
+
+## Message size
+
+Both directions are bounded by `max_message_length`: outbound in `send/2`,
+inbound in `decode_payload/2` (checked before the payload is decoded into
+terms). gun exposes no WebSocket max-frame-size option, so this application-level
+check is what protects against an oversized inbound frame.
+
+## TLS (wss)
+
+`wss` TLS options are built by the shared `bondy_connect_tls` module, so they are
+**secure by default** (`verify_peer`) and carry the same mutual-TLS
+(`certfile`/`keyfile`) and `ciphers` support as the raw `tls` transport.
 """.
 
 -behaviour(bondy_connect_transport).
 
--include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -record(state, {
@@ -53,8 +65,6 @@ no per-message re-arm (the `{active, once}` cycle of the raw transports).
 -define(DEFAULT_CONNECT_TIMEOUT, 5000).
 -define(DEFAULT_HANDSHAKE_TIMEOUT, 5000).
 -define(DEFAULT_PATH, <<"/ws">>).
--define(DEFAULT_VERSIONS, ['tlsv1.3', 'tlsv1.2']).
--define(DEFAULT_DEPTH, 10).
 
 -export([connect/2]).
 -export([handshake/2]).
@@ -282,15 +292,28 @@ handle_frame({close, _Code, _Reason}, _St) ->
 %% @private Decode one WebSocket message payload into a WAMP record. Each WS
 %% message carries exactly one WAMP message, so there is no buffering. A decode
 %% failure is surfaced as a protocol error, never an assertion crash.
-decode_payload(Payload, #state{encoding = Enc} = St) when Enc =/= undefined ->
-    Sub = subprotocol_tuple(St),
-    Opts = [{partial_decode, false} | bondy_wamp_encoding:opts(Enc, decode)],
-    try bondy_wamp_encoding:decode(Sub, Payload, Opts) of
-        {Msgs, _Ignored} ->
-            {ok, Msgs, St}
-    catch
-        Class:Reason ->
-            {error, {protocol_error, {decode_failed, Class, Reason}}, St}
+%%
+%% The inbound payload is bounded by `max_message_length` **before** decoding:
+%% gun has no WebSocket max-frame-size option, so a hostile/slow router could
+%% otherwise force decode of an arbitrarily large frame into terms (an
+%% asymmetric DoS). This mirrors the raw transports, which reject oversized
+%% frames pre-materialization in `bondy_connect_framing` (review B3).
+decode_payload(Payload, #state{encoding = Enc, max_message_length = Max} = St)
+when Enc =/= undefined ->
+    Size = byte_size(Payload),
+    case Size =< Max of
+        true ->
+            Sub = subprotocol_tuple(St),
+            Opts = [{partial_decode, false} | bondy_wamp_encoding:opts(Enc, decode)],
+            try bondy_wamp_encoding:decode(Sub, Payload, Opts) of
+                {Msgs, _Ignored} ->
+                    {ok, Msgs, St}
+            catch
+                Class:Reason ->
+                    {error, {protocol_error, {decode_failed, Class, Reason}}, St}
+            end;
+        false ->
+            {error, {protocol_error, {message_too_large, Size, Max}}, St}
     end.
 
 
@@ -317,64 +340,17 @@ negotiated(Headers) ->
     end.
 
 
-%% @private Assemble the `gun:open/3' options. ws ⇒ tcp, wss ⇒ tls (secure by
-%% default). `protocols => [http]' forces HTTP/1.1, required for the ws upgrade;
+%% @private Assemble the `gun:open/3' options. ws ⇒ tcp, wss ⇒ tls. The TLS
+%% options are the shared, secure-by-default set (`bondy_connect_tls`), giving
+%% wss the same mTLS/cipher support as the raw `tls` transport (review D1).
+%% `protocols => [http]' forces HTTP/1.1, required for the ws upgrade;
 %% `retry => 0' leaves reconnection to the connection's own backoff.
 gun_opts(Host, Opts) ->
     Base = #{protocols => [http], retry => 0},
     case maps:get(scheme, Opts, ws) of
         wss ->
             TLS = maps:get(tls, Opts, #{}),
-            Base#{transport => tls, tls_opts => tls_opts(Host, TLS)};
+            Base#{transport => tls, tls_opts => bondy_connect_tls:options(Host, TLS)};
         _ ->
             Base#{transport => tcp}
     end.
-
-
-%% @private Secure-by-default TLS options for wss (mirrors the tls transport).
-tls_opts(Host, TLS) ->
-    Verify = maps:get(verify, TLS, verify_peer),
-    Versions = maps:get(versions, TLS, ?DEFAULT_VERSIONS),
-    [{versions, Versions}] ++ verify_opts(Verify, Host, TLS).
-
-
-%% @private
-verify_opts(verify_none, _Host, _TLS) ->
-    ?LOG_WARNING(#{
-        description =>
-            "TLS peer verification is disabled (verify_none) for the wss "
-            "transport; the server certificate will not be validated."
-    }),
-    [{verify, verify_none}];
-
-verify_opts(verify_peer, Host, TLS) ->
-    [{verify, verify_peer}, {depth, maps:get(depth, TLS, ?DEFAULT_DEPTH)}]
-        ++ ca_opts(TLS)
-        ++ hostname_opts(Host, TLS).
-
-
-%% @private
-ca_opts(#{cacerts := CAs}) -> [{cacerts, CAs}];
-ca_opts(#{cacertfile := File}) -> [{cacertfile, File}];
-ca_opts(_) -> [{cacerts, public_key:cacerts_get()}].
-
-
-%% @private
-hostname_opts(Host, TLS) ->
-    case maps:get(server_name_indication, TLS, default) of
-        disable ->
-            [{server_name_indication, disable}];
-        default when is_list(Host) ->
-            [{server_name_indication, Host} | hostname_check()];
-        default ->
-            hostname_check();
-        Name ->
-            [{server_name_indication, Name} | hostname_check()]
-    end.
-
-
-%% @private
-hostname_check() ->
-    [{customize_hostname_check, [
-        {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
-    ]}].

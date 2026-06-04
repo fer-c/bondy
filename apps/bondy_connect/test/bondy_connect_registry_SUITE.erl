@@ -19,8 +19,10 @@ all() ->
         declare_then_confirm_subscription,
         confirm_without_declare_is_noop,
         lookup_by_id_and_uri,
-        forget_registration,
-        forget_subscription,
+        forget_registration_keeps_declared,
+        forget_subscription_keeps_declared,
+        undeclare_registration,
+        undeclare_subscription,
         declared_lists,
         clear_established_keeps_declared
     ].
@@ -73,25 +75,66 @@ lookup_by_id_and_uri(_) ->
     ?assertEqual(error, bondy_connect_registry:registration_id(<<"p.3">>, R)).
 
 
-forget_registration(_) ->
+%% forget_registration/2 is the session-scoped router-revocation path: it drops
+%% the established id but KEEPS the declared entry, so a reconnect replays it.
+forget_registration_keeps_declared(_) ->
+    H = fun(_, _, _) -> ok end,
+    R0 = bondy_connect_registry:new(),
+    R1 = bondy_connect_registry:declare_registration(<<"p">>, H, #{x => 1}, R0),
+    R2 = bondy_connect_registry:confirm_registration(<<"p">>, 5, R1),
+    R3 = bondy_connect_registry:forget_registration(5, R2),
+    %% Established routing is gone (by id and by uri).
+    ?assertEqual(error, bondy_connect_registry:registration(5, R3)),
+    ?assertEqual(error, bondy_connect_registry:registration_id(<<"p">>, R3)),
+    %% Declared/desired entry survives for replay.
+    ?assertEqual(
+        [{<<"p">>, H, #{x => 1}}],
+        bondy_connect_registry:declared_registrations(R3)
+    ),
+    %% Re-confirming with a fresh id (as reconnect replay does) re-establishes.
+    R4 = bondy_connect_registry:confirm_registration(<<"p">>, 6, R3),
+    ?assertEqual({ok, 6}, bondy_connect_registry:registration_id(<<"p">>, R4)).
+
+
+forget_subscription_keeps_declared(_) ->
+    H = fun(_, _, _) -> ok end,
+    R0 = bondy_connect_registry:new(),
+    R1 = bondy_connect_registry:declare_subscription(<<"t">>, H, #{y => 2}, R0),
+    R2 = bondy_connect_registry:confirm_subscription(<<"t">>, 3, R1),
+    R3 = bondy_connect_registry:forget_subscription(3, R2),
+    ?assertEqual(error, bondy_connect_registry:subscription(3, R3)),
+    ?assertEqual(error, bondy_connect_registry:subscription_id(<<"t">>, R3)),
+    ?assertEqual(
+        [{<<"t">>, H, #{y => 2}}],
+        bondy_connect_registry:declared_subscriptions(R3)
+    ),
+    R4 = bondy_connect_registry:confirm_subscription(<<"t">>, 4, R3),
+    ?assertEqual({ok, 4}, bondy_connect_registry:subscription_id(<<"t">>, R4)).
+
+
+%% undeclare_registration/2 is the client-driven unregister path: a permanent
+%% removal that drops BOTH established and declared, so a reconnect does NOT
+%% replay it.
+undeclare_registration(_) ->
     H = fun(_, _, _) -> ok end,
     R0 = bondy_connect_registry:new(),
     R1 = bondy_connect_registry:declare_registration(<<"p">>, H, #{}, R0),
     R2 = bondy_connect_registry:confirm_registration(<<"p">>, 5, R1),
-    R3 = bondy_connect_registry:forget_registration(5, R2),
+    R3 = bondy_connect_registry:undeclare_registration(5, R2),
     ?assertEqual(error, bondy_connect_registry:registration(5, R3)),
     ?assertEqual(error, bondy_connect_registry:registration_id(<<"p">>, R3)),
     ?assertEqual([], bondy_connect_registry:declared_registrations(R3)).
 
 
-forget_subscription(_) ->
+undeclare_subscription(_) ->
     H = fun(_, _, _) -> ok end,
     R0 = bondy_connect_registry:new(),
     R1 = bondy_connect_registry:declare_subscription(<<"t">>, H, #{}, R0),
     R2 = bondy_connect_registry:confirm_subscription(<<"t">>, 3, R1),
-    R3 = bondy_connect_registry:forget_subscription(3, R2),
+    R3 = bondy_connect_registry:undeclare_subscription(3, R2),
     ?assertEqual(error, bondy_connect_registry:subscription(3, R3)),
-    ?assertEqual(error, bondy_connect_registry:subscription_id(<<"t">>, R3)).
+    ?assertEqual(error, bondy_connect_registry:subscription_id(<<"t">>, R3)),
+    ?assertEqual([], bondy_connect_registry:declared_subscriptions(R3)).
 
 
 declared_lists(_) ->

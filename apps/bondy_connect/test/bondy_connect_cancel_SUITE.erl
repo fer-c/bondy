@@ -44,6 +44,7 @@ all() ->
         cancel_skip,
         cancel_killnowait,
         cancel_kill_interrupts_callee,
+        cancel_specific_among_many,
         cancel_unknown_token
     ].
 
@@ -124,6 +125,46 @@ cancel_kill_interrupts_callee(_) ->
         Caller, <<"com.example.cancel.ok">>, [<<"alive">>]
     ),
     ?assertEqual([<<"alive">>], maps:get(args, R)),
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+
+%% Cancelling one token among several in-flight async calls must cancel exactly
+%% that call and leave the others in flight — proving the token->ReqId secondary
+%% index (review C1) resolves each token to its own request, not just "some"
+%% pending call.
+cancel_specific_among_many(_) ->
+    Callee = connect(),
+    {ok, _} = bondy_connect:register(
+        Callee, <<"com.example.cancel.many">>, slow()
+    ),
+
+    Caller = connect(),
+    [T1, T2, T3] = [
+        begin
+            {ok, T} = bondy_connect:call_async(
+                Caller, <<"com.example.cancel.many">>, []
+            ),
+            T
+        end
+        || _ <- lists:seq(1, 3)
+    ],
+
+    %% Cancel only the middle one.
+    ok = bondy_connect:cancel(Caller, T2, killnowait),
+    assert_canceled(T2),
+
+    %% The other two are untouched: still in flight, so no reply within a window
+    %% the slow handler runs well past (only T1/T3 are matched here).
+    receive
+        {bondy_connect, T1, _} -> ct:fail(t1_unexpectedly_replied);
+        {bondy_connect, T3, _} -> ct:fail(t3_unexpectedly_replied)
+    after 500 ->
+        ok
+    end,
+
+    ?assertEqual(established, bondy_connect:status(Callee)),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).

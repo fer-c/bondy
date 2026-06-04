@@ -3,6 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
+
 -module(bondy_connect_transport_uds).
 
 -moduledoc """
@@ -13,7 +14,9 @@ Identical on the wire to `bondy_connect_transport_tcp` — the same 4-octet
 handshake and `bondy_connect_framing` frames, and the same `{tcp, _, _}` active
 message tags (a UDS stream socket is still a `gen_tcp` socket) — but it dials a
 filesystem path instead of a host/port. The endpoint is `{local, Path}` where
-`Path` is the socket file the router listens on.
+`Path` is the socket file the router listens on. Only `connect/2` is specific to
+this transport; everything else is shared via `bondy_connect_raw` (review D2,
+using the `tcp` backend).
 
 There is no transport-level security (UDS is constrained by filesystem
 permissions), so unlike `_tls` there are no certificate options.
@@ -21,15 +24,8 @@ permissions), so unlike `_tls` there are no certificate options.
 
 -behaviour(bondy_connect_transport).
 
--record(state, {
-    socket              ::  gen_tcp:socket(),
-    codec               ::  bondy_connect_codec:t() | undefined,
-    max_message_length  ::  pos_integer()
-}).
-
 -define(DEFAULT_MAX_MESSAGE_LENGTH, 16#1000000).    %% 16 MB
 -define(DEFAULT_CONNECT_TIMEOUT, 5000).
--define(DEFAULT_HANDSHAKE_TIMEOUT, 5000).
 
 -export([connect/2]).
 -export([handshake/2]).
@@ -53,7 +49,7 @@ permissions), so unlike `_tls` there are no certificate options.
 
 
 -spec connect(bondy_connect_transport:endpoint(), map()) ->
-    {ok, #state{}} | {error, term()}.
+    {ok, bondy_connect_raw:t()} | {error, term()}.
 
 connect({local, Path}, Opts) ->
     Timeout = maps:get(connect_timeout, Opts, ?DEFAULT_CONNECT_TIMEOUT),
@@ -61,157 +57,84 @@ connect({local, Path}, Opts) ->
     SockOpts = [binary, {packet, 0}, {active, false}],
     case gen_tcp:connect({local, Path}, 0, SockOpts, Timeout) of
         {ok, Socket} ->
-            {ok, #state{socket = Socket, max_message_length = Max}};
+            {ok, bondy_connect_raw:new(tcp, Socket, Max)};
         {error, _} = Error ->
             Error
     end.
 
 
--spec handshake(bondy_connect_transport:subprotocol(), #state{}) ->
-    {ok, bondy_connect_transport:subprotocol(), #state{}} | {error, term()}.
+-spec handshake(bondy_connect_transport:subprotocol(), bondy_connect_raw:t()) ->
+    {ok, bondy_connect_transport:subprotocol(), bondy_connect_raw:t()}
+    | {error, term()}.
 
-handshake({raw, binary, Enc}, #state{socket = Socket, max_message_length = Max} = St) ->
-    Code = bondy_connect_framing:serializer_code(Enc),
-    Exp = bondy_connect_framing:length_exponent(Max),
-    Request = bondy_connect_framing:handshake_request(Exp, Code),
-    case gen_tcp:send(Socket, Request) of
-        ok ->
-            case gen_tcp:recv(Socket, 4, ?DEFAULT_HANDSHAKE_TIMEOUT) of
-                {ok, Reply} ->
-                    negotiate(Reply, Enc, Exp, St);
-                {error, _} = Error ->
-                    Error
-            end;
-        {error, _} = Error ->
-            Error
-    end.
+handshake(Sub, St) ->
+    bondy_connect_raw:handshake(Sub, St).
 
 
--spec send(bondy_wamp_message:t(), #state{}) -> ok | {error, term()}.
+-spec send(bondy_wamp_message:t(), bondy_connect_raw:t()) -> ok | {error, term()}.
 
-send(Msg, #state{socket = Socket, codec = Codec}) when Codec =/= undefined ->
-    case bondy_connect_codec:encode(Msg, Codec) of
-        {ok, Frame} ->
-            gen_tcp:send(Socket, Frame);
-        {error, _} = Error ->
-            Error
-    end.
+send(Msg, St) ->
+    bondy_connect_raw:send(Msg, St).
 
 
--spec ping(binary(), #state{}) -> ok | {error, term()}.
+-spec ping(binary(), bondy_connect_raw:t()) -> ok | {error, term()}.
 
-ping(Payload, #state{socket = Socket}) ->
-    gen_tcp:send(Socket, bondy_connect_framing:ping_frame(Payload)).
-
-
--spec pong(binary(), #state{}) -> ok | {error, term()}.
-
-pong(Payload, #state{socket = Socket}) ->
-    gen_tcp:send(Socket, bondy_connect_framing:pong_frame(Payload)).
+ping(Payload, St) ->
+    bondy_connect_raw:ping(Payload, St).
 
 
--spec recv(timeout(), #state{}) ->
-    {ok, [bondy_connect_transport:inbound()], #state{}} | {error, term()}.
+-spec pong(binary(), bondy_connect_raw:t()) -> ok | {error, term()}.
 
-recv(Timeout, #state{socket = Socket} = St) ->
-    case gen_tcp:recv(Socket, 0, Timeout) of
-        {ok, Data} ->
-            case handle_data(Data, St) of
-                {ok, Msgs, St1} ->
-                    {ok, Msgs, St1};
-                {error, Reason, _St1} ->
-                    {error, Reason}
-            end;
-        {error, _} = Error ->
-            Error
-    end.
+pong(Payload, St) ->
+    bondy_connect_raw:pong(Payload, St).
 
 
--spec handle_data(binary(), #state{}) ->
-    {ok, [bondy_connect_transport:inbound()], #state{}}
-    | {error, term(), #state{}}.
+-spec recv(timeout(), bondy_connect_raw:t()) ->
+    {ok, [bondy_connect_transport:inbound()], bondy_connect_raw:t()}
+    | {error, term()}.
 
-handle_data(Data, #state{codec = Codec} = St) when Codec =/= undefined ->
-    case bondy_connect_codec:decode(Data, Codec) of
-        {ok, Msgs, Codec1} ->
-            {ok, Msgs, St#state{codec = Codec1}};
-        {error, Reason, Codec1} ->
-            {error, Reason, St#state{codec = Codec1}}
-    end.
+recv(Timeout, St) ->
+    bondy_connect_raw:recv(Timeout, St).
 
 
--spec handle_info(term(), #state{}) ->
-    {ok, [bondy_connect_transport:inbound()], #state{}}
-    | {error, term(), #state{}}
+-spec handle_data(binary(), bondy_connect_raw:t()) ->
+    {ok, [bondy_connect_transport:inbound()], bondy_connect_raw:t()}
+    | {error, term(), bondy_connect_raw:t()}.
+
+handle_data(Data, St) ->
+    bondy_connect_raw:handle_data(Data, St).
+
+
+-spec handle_info(term(), bondy_connect_raw:t()) ->
+    {ok, [bondy_connect_transport:inbound()], bondy_connect_raw:t()}
+    | {error, term(), bondy_connect_raw:t()}
     | closed
     | ignore.
 
-handle_info({tcp, Socket, Bin}, #state{socket = Socket} = St) ->
-    case handle_data(Bin, St) of
-        {ok, Msgs, St1} ->
-            %% Re-arm the socket for the next message (the connection only arms
-            %% the first `{active, once}` after the handshake).
-            _ = inet:setopts(Socket, [{active, once}]),
-            {ok, Msgs, St1};
-        {error, Reason, St1} ->
-            {error, Reason, St1}
-    end;
-
-handle_info({tcp_closed, Socket}, #state{socket = Socket}) ->
-    closed;
-
-handle_info({tcp_error, Socket, Reason}, #state{socket = Socket} = St) ->
-    {error, {connection_error, Reason}, St};
-
-handle_info(_Info, _St) ->
-    ignore.
+handle_info(Info, St) ->
+    bondy_connect_raw:handle_info(Info, St).
 
 
--spec setopts(list() | map(), #state{}) -> ok | {error, term()}.
+-spec setopts(list() | map(), bondy_connect_raw:t()) -> ok | {error, term()}.
 
-setopts(Opts, #state{socket = Socket}) when is_list(Opts) ->
-    inet:setopts(Socket, Opts);
-
-setopts(_, _) ->
-    {error, badarg}.
+setopts(Opts, St) ->
+    bondy_connect_raw:setopts(Opts, St).
 
 
 -spec messages() -> {tcp, tcp_closed, tcp_error}.
+
 messages() ->
-    {tcp, tcp_closed, tcp_error}.
+    bondy_connect_raw:messages(tcp).
 
 
--spec peername(#state{}) ->
+-spec peername(bondy_connect_raw:t()) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
-peername(#state{socket = Socket}) ->
-    inet:peername(Socket).
+
+peername(St) ->
+    bondy_connect_raw:peername(St).
 
 
--spec close(#state{}) -> ok.
-close(#state{socket = Socket}) ->
-    gen_tcp:close(Socket).
+-spec close(bondy_connect_raw:t()) -> ok.
 
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-
-%% @private
-negotiate(Reply, Enc, OurExp, St) ->
-    case bondy_connect_framing:parse_handshake(Reply) of
-        {ok, TheirExp, TheirCode} ->
-            case bondy_connect_framing:code_to_encoding(TheirCode) of
-                Enc ->
-                    SendMax = bondy_connect_framing:exponent_to_bytes(TheirExp),
-                    RecvMax = bondy_connect_framing:exponent_to_bytes(OurExp),
-                    Codec = bondy_connect_codec:new(Enc, SendMax, RecvMax),
-                    {ok, {raw, binary, Enc}, St#state{codec = Codec}};
-                Other ->
-                    {error, {serializer_mismatch, Other}}
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
+close(St) ->
+    bondy_connect_raw:close(St).

@@ -34,6 +34,7 @@ all() ->
         cryptosign_derives_pubkey_from_privkey,
         ticket_sends_secret,
         welcome_after_challenge,
+        welcome_without_challenge_aborts,
 
         %% Termination paths
         router_abort_stops,
@@ -310,6 +311,31 @@ welcome_after_challenge(_) ->
         bondy_connect_protocol:handle_message(Welcome, St2),
     ?assertEqual(established, bondy_connect_protocol:state_name(St3)),
     ?assertEqual(7, bondy_connect_session:id(Session)).
+
+
+%% A WELCOME arriving straight from `establishing` (no prior CHALLENGE) must be
+%% rejected for every credential-bearing method — silently accepting it would
+%% downgrade the operator's configured security posture (review B2). Anonymous
+%% is the only method that may be welcomed un-challenged (anonymous_welcome).
+welcome_without_challenge_aborts(_) ->
+    #{secret := Secret} = bondy_wamp_cryptosign:generate_key(),
+    PrivHex = bondy_wamp_cryptosign:encode_hex(Secret),
+    Configs = [
+        #{method => <<"cryptosign">>, authid => <<"alice">>, privkey => PrivHex},
+        #{method => <<"wampcra">>, authid => <<"alice">>, password => ?PASSWORD},
+        #{method => <<"ticket">>, authid => <<"bob">>, ticket => <<"s3cr3t">>}
+    ],
+    Welcome = #welcome{session_id = 99, details = #{authid => <<"alice">>}},
+    lists:foreach(
+        fun(AuthConfig) ->
+            St1 = establishing(AuthConfig),
+            ?assertMatch(
+                {stop, {shutdown, {welcome_without_challenge, _}}, [#abort{}], _},
+                bondy_connect_protocol:handle_message(Welcome, St1)
+            )
+        end,
+        Configs
+    ).
 
 
 

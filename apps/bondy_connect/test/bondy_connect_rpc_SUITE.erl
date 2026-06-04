@@ -31,7 +31,8 @@ all() ->
         unregister_stops_routing,
         handler_error_propagates,
         handler_crash_isolation,
-        per_call_timeout
+        per_call_timeout,
+        load_rejection_under_burst
     ].
 
 
@@ -155,6 +156,44 @@ per_call_timeout(_) ->
 
 
 
+%% A callee capped at a single in-flight invocation rejects concurrent
+%% invocations at admission with ERROR(wamp.error.unavailable) — the
+%% `bondy_connect_load' backpressure arm (Decision 5), relayed by the router to
+%% each caller. This drives the `{error, overloaded}' path end-to-end (the unit
+%% suite only exercises the pure counter) and proves the `handler' load config is
+%% reachable through the public connect spec.
+load_rejection_under_burst(_) ->
+    Proc = <<"com.example.capped">>,
+    {ok, Callee} = bondy_connect:connect(spec(#{handler => #{max_concurrency => 1}})),
+    %% Holds the only slot long enough for the burst to pile up behind it (well
+    %% under the 30s default call timeout, so the admitted call still succeeds).
+    Slow = fun(_, _, _) -> timer:sleep(1500), {reply, [<<"done">>]} end,
+    {ok, _} = bondy_connect:register(Callee, Proc, Slow),
+
+    Caller = connect(),
+    %% Burst of three concurrent calls: one takes the slot, the other two are
+    %% rejected immediately while it is in flight.
+    Tokens = [
+        begin {ok, T} = bondy_connect:call_async(Caller, Proc, []), T end
+        || _ <- lists:seq(1, 3)
+    ],
+    %% Selective receive per (bound) token collects every reply regardless of
+    %% arrival order — the admitted reply lands ~1.5s after the two rejections.
+    Replies = [
+        receive {bondy_connect, Tk, R} -> R after 5000 -> ct:fail(no_reply) end
+        || Tk <- Tokens
+    ],
+    Oks = [R || {ok, _} = R <- Replies],
+    Unavail =
+        [R || {error, #{uri := <<"wamp.error.unavailable">>}} = R <- Replies],
+    ?assertEqual(1, length(Oks)),
+    ?assertEqual(2, length(Unavail)),
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -169,13 +208,19 @@ connect() ->
 
 %% @private
 spec() ->
-    #{
+    spec(#{}).
+
+
+%% @private
+spec(Extra) when is_map(Extra) ->
+    Base = #{
         transport => tcp,
         endpoint => {?HOST, ?PORT},
         realm => ?REALM,
         auth => #{method => ?WAMP_ANON_AUTH},
         serializers => [json]
-    }.
+    },
+    maps:merge(Base, Extra).
 
 
 %% @private

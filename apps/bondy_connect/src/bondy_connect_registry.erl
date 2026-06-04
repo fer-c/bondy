@@ -51,6 +51,8 @@ instance in its `gen_statem` data.
 -export([subscription_id/2]).
 -export([forget_registration/2]).
 -export([forget_subscription/2]).
+-export([undeclare_registration/2]).
+-export([undeclare_subscription/2]).
 -export([declared_registrations/1]).
 -export([declared_subscriptions/1]).
 -export([clear_established/1]).
@@ -138,9 +140,56 @@ subscription_id(Uri, #registry{sub_uri = Index}) ->
     maps:find(Uri, Index).
 
 
--doc "Drop a registration (declared + established) by its established id.".
+-doc """
+Drop the *established* state of a registration by its server-assigned id,
+**keeping** the *declared* entry so a reconnect can replay it.
+
+Used for a router-driven `registration_revocation` (advanced profile): the
+revocation is scoped to the current session — Bondy has no durable sessions —
+so the declared/desired registration is retained and re-established on the next
+reconnect. For a permanent, client-driven removal use `undeclare_registration/2`
+instead. A no-op if `RegId` is unknown.
+""".
 -spec forget_registration(id(), t()) -> t().
 forget_registration(RegId, #registry{regs = Regs} = R) ->
+    case maps:find(RegId, Regs) of
+        {ok, #{uri := Uri}} ->
+            R#registry{
+                regs = maps:remove(RegId, Regs),
+                reg_uri = maps:remove(Uri, R#registry.reg_uri)
+            };
+        error ->
+            R
+    end.
+
+
+-doc """
+As `forget_registration/2` (established-only), for a subscription. For a
+router-driven `subscription_revocation` whose effect is session-scoped.
+""".
+-spec forget_subscription(id(), t()) -> t().
+forget_subscription(SubId, #registry{subs = Subs} = R) ->
+    case maps:find(SubId, Subs) of
+        {ok, #{uri := Uri}} ->
+            R#registry{
+                subs = maps:remove(SubId, Subs),
+                sub_uri = maps:remove(Uri, R#registry.sub_uri)
+            };
+        error ->
+            R
+    end.
+
+
+-doc """
+Drop a registration entirely — both the *declared* (desired) entry and the
+*established* (server-confirmed) state — by its server-assigned id.
+
+Used for a client-driven `unregister`, a permanent removal: a reconnect must
+**not** replay it. Contrast `forget_registration/2`, which keeps the declared
+entry for a session-scoped router revocation. A no-op if `RegId` is unknown.
+""".
+-spec undeclare_registration(id(), t()) -> t().
+undeclare_registration(RegId, #registry{regs = Regs} = R) ->
     case maps:find(RegId, Regs) of
         {ok, #{uri := Uri}} ->
             R#registry{
@@ -153,9 +202,9 @@ forget_registration(RegId, #registry{regs = Regs} = R) ->
     end.
 
 
--doc "Drop a subscription (declared + established) by its established id.".
--spec forget_subscription(id(), t()) -> t().
-forget_subscription(SubId, #registry{subs = Subs} = R) ->
+-doc "As `undeclare_registration/2` (declared + established), for a subscription.".
+-spec undeclare_subscription(id(), t()) -> t().
+undeclare_subscription(SubId, #registry{subs = Subs} = R) ->
     case maps:find(SubId, Subs) of
         {ok, #{uri := Uri}} ->
             R#registry{

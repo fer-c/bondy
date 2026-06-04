@@ -23,8 +23,13 @@ handler. The handler supervisor governs *execution*; this module governs
 *admission*.
 
 A pure value (`t()`) — the rate limiter's mutable counters live in the
-`bondy_regulator` runtime (atomics), so copying the value is safe.
+`bondy_regulator` runtime (atomics), so copying the value is safe. The bucket
+itself is a row in the `bondy_regulator` ETS table, so it must be **reused
+across reconnects** (`reset/1`, not a fresh `new/1` each time) and **deleted on
+teardown** (`delete/1`); otherwise a row leaks per reconnect (review B4).
 """.
+
+-include_lib("kernel/include/logger.hrl").
 
 -record(load, {
     max = 0         ::  non_neg_integer(),
@@ -40,6 +45,8 @@ A pure value (`t()`) — the rate limiter's mutable counters live in the
 -export([admit/1]).
 -export([release/1]).
 -export([in_flight/1]).
+-export([reset/1]).
+-export([delete/1]).
 
 
 
@@ -95,6 +102,29 @@ in_flight(#load{in_flight = N}) ->
     N.
 
 
+-doc """
+Reset for a reconnect: zero the in-flight count (the previous session's handler
+workers have been torn down) while **keeping the same token bucket**. The bucket
+must be reused — creating a fresh one on every reconnect would orphan a
+`bondy_regulator` ETS row each time (review B4). The bucket's own token counters
+are time-based and intentionally survive the reconnect.
+""".
+-spec reset(t()) -> t().
+reset(#load{} = L) ->
+    L#load{in_flight = 0}.
+
+
+-doc """
+Delete the token bucket (if any) on connection teardown, freeing its
+`bondy_regulator` ETS row. A no-op when no rate limit is configured.
+""".
+-spec delete(t()) -> ok.
+delete(#load{limiter = undefined}) ->
+    ok;
+delete(#load{limiter = T}) ->
+    bondy_regulator_rate_limit:delete(T).
+
+
 
 %% =============================================================================
 %% PRIVATE
@@ -109,6 +139,18 @@ make_limiter(undefined) ->
 make_limiter(Opts) when is_map(Opts) ->
     Key = {?MODULE, self(), erlang:unique_integer([positive])},
     case bondy_regulator_rate_limit:new(token_bucket, Key, Opts) of
-        {ok, T} -> T;
-        {error, _} -> undefined
+        {ok, T} ->
+            T;
+        {error, Reason} ->
+            %% The operator configured a `rate' but the limiter could not be
+            %% built: fall back to in-flight-only admission, but say so loudly —
+            %% otherwise the rate limit is silently inert.
+            ?LOG_WARNING(#{
+                description =>
+                    "Rate limiter could not be created; "
+                    "falling back to in-flight-cap admission only.",
+                rate => Opts,
+                reason => Reason
+            }),
+            undefined
     end.

@@ -106,13 +106,16 @@ connect_call_disconnect(_) ->
 
 
 named_connection(_) ->
-    {ok, _Conn} = bondy_connect:connect(m1_named, spec()),
-    ?assertEqual(established, bondy_connect:status(m1_named)),
-    {ok, _} = bondy_connect:call(m1_named, <<"bondy.session.self">>, []),
-    ok = bondy_connect:disconnect(m1_named),
+    {ok, Conn} = bondy_connect:connect(m1_named, spec()),
+    %% A named connection can be referenced from its name via named/1 (yielding
+    %% an opaque handle), not just from the handle connect/2 returned.
+    Named = bondy_connect:named(m1_named),
+    ?assertEqual(established, bondy_connect:status(Named)),
+    {ok, _} = bondy_connect:call(Named, <<"bondy.session.self">>, []),
+    ok = bondy_connect:disconnect(Conn),
     %% Name is freed and can be reused.
-    {ok, _} = bondy_connect:connect(m1_named, spec()),
-    ok = bondy_connect:disconnect(m1_named).
+    {ok, Conn2} = bondy_connect:connect(m1_named, spec()),
+    ok = bondy_connect:disconnect(Conn2).
 
 
 multiple_calls(_) ->

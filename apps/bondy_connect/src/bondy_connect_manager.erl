@@ -68,7 +68,18 @@ connect(Name, Spec) ->
 -doc "Stop a connection (by pid or registered name).".
 -spec disconnect(pid() | atom()) -> ok.
 disconnect(Conn) ->
-    gen_server:call(?SERVER, {disconnect, Conn}).
+    try
+        gen_server:call(?SERVER, {disconnect, Conn})
+    catch
+        %% The manager is unavailable because the application is stopping; the
+        %% connection is therefore already gone, so the disconnect has
+        %% effectively succeeded. Honour the `-> ok` contract rather than
+        %% exiting in the caller's teardown code (review B6).
+        exit:{noproc, _} -> ok;
+        exit:{normal, _} -> ok;
+        exit:{shutdown, _} -> ok;
+        exit:{{shutdown, _}, _} -> ok
+    end.
 
 
 -doc "Resolve a registered name to a connection pid.".

@@ -737,9 +737,13 @@ stop_nodes(Nodes) ->
 %% @private
 start_disterl() ->
     {ok, Hostname} = inet:gethostname(),
-    Nodename = [list_to_atom("runner@" ++ Hostname), shortnames],
-
-    case net_kernel:start(Nodename) of
+    Nodename = list_to_atom("runner@" ++ Hostname),
+    %% OTP 24+ `net_kernel:start/2' options-map API (the legacy
+    %% `net_kernel:start([Name, shortnames])' list form is deprecated and behaves
+    %% inconsistently on OTP 28). Always return `ok' — the epmd-retry branch must
+    %% not leak `{ok, Pid}'.
+    Opts = #{name_domain => shortnames},
+    case net_kernel:start(Nodename, Opts) of
         {ok, _} ->
             ok;
 
@@ -753,7 +757,8 @@ start_disterl() ->
             }
         } ->
             os:cmd(os:find_executable("epmd") ++ " -daemon"),
-            {ok, _} = net_kernel:start(Nodename)
+            {ok, _} = net_kernel:start(Nodename, Opts),
+            ok
     end.
 
 
