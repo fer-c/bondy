@@ -3,45 +3,44 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module implements a distributed load balancer, providing the
-%% different load balancing strategies used by bondy_dealer to choose
-%% the Callee and Procedure to invoke when handling a WAMP Call.
-%%
-%% At the moment the load balancing state is local and not replicated
-%% across the nodes in the cluster. However, each node has access to a local
-%% replica of the global registry and thus can load balance between local and
-%% remote Callees.
-%%
-%% ## Supported Load Balancing Strategies
-%%
-%% Bondy supports all WAMP Basic and Advanced Profile load balancing
-%% strategies for Shared Registrations and extends those with additional
-%% strategies.
-%%
-%% ### Single
-%%
-%% ### First
-%%
-%% ### Last
-%%
-%% ### Random
-%%
-%% ### Round Robin
-%%
-%% ### Jump Consistent Hash
-%%
-%% ### Queue Least Loaded
-%%
-%% ### Queue Least Loaded Sample
-%%
-%%
-%% In the future we will explore implementing distributed load balancing
-%% algorithms such as Ant Colony, Particle Swarm Optimization and Biased Random
-%% Sampling [See references](https://pdfs.semanticscholar.org/b9a9/52ed1b8bfae2e976b5c0106e894bd4c41d89.pdf)
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_rpc_load_balancer).
+-moduledoc """
+This module implements a distributed load balancer, providing the
+different load balancing strategies used by bondy_dealer to choose
+the Callee and Procedure to invoke when handling a WAMP Call.
+
+At the moment the load balancing state is local and not replicated
+across the nodes in the cluster. However, each node has access to a local
+replica of the global registry and thus can load balance between local and
+remote Callees.
+
+## Supported Load Balancing Strategies
+
+Bondy supports all WAMP Basic and Advanced Profile load balancing
+strategies for Shared Registrations and extends those with additional
+strategies.
+
+### Single
+
+### First
+
+### Last
+
+### Random
+
+### Round Robin
+
+### Jump Consistent Hash
+
+### Queue Least Loaded
+
+### Queue Least Loaded Sample
+
+
+In the future we will explore implementing distributed load balancing
+algorithms such as Ant Colony, Particle Swarm Optimization and Biased Random
+Sampling [See references](https://pdfs.semanticscholar.org/b9a9/52ed1b8bfae2e976b5c0106e894bd4c41d89.pdf)
+""".
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
@@ -130,10 +129,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec select(entries(), opts()) ->
     {ok, bondy_registry_entry:t()} | {error, noproc | map()}.
 
@@ -141,10 +136,6 @@ select(Entries, Opts) when is_list(Entries) ->
     do_select(iterate(Entries, Opts)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec iterate(entries(), opts()) ->
     {bondy_registry_entry:t(), iterator()}
     | '$end_of_table'
@@ -160,10 +151,6 @@ iterate(Entries, Opts0) when is_list(Entries) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec iterate(iterator()) ->
     {bondy_registry_entry:t(), iterator()} | {error, noproc} | 'end_of_table'.
 
@@ -248,10 +235,12 @@ maybe_sort_by_locality(false, L) ->
 
 
 %% @private
-%% @doc No synchronous liveness check on the chosen entry: the registry
-%% removes entries on session death and `bondy_dealer:flush/2' fast-fails
-%% any in-flight promises for the dead callee, so the narrow TOCTOU race
-%% that a check would have covered is bounded by the same failure path.
+-doc """
+No synchronous liveness check on the chosen entry: the registry
+removes entries on session death and `bondy_dealer:flush/2` fast-fails
+any in-flight promises for the dead callee, so the narrow TOCTOU race
+that a check would have covered is bounded by the same failure path.
+""".
 do_select('$end_of_table') ->
     {error, noproc};
 
@@ -262,11 +251,7 @@ do_select({Entry, _Iter}) ->
     {ok, Entry}.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec next(iterator()) ->
     {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
@@ -277,11 +262,7 @@ next(#iterator{entries = []}) ->
     '$end_of_table'.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 % @TODO take into consideration force_locality
 -spec next_round_robin(iterator()) ->
     {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
@@ -317,11 +298,7 @@ next_round_robin(#iterator{entries = []}, undefined) ->
     '$end_of_table'.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec next_consistent_hash(Iter :: iterator(), Algo :: atom()) ->
     {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
@@ -342,11 +319,7 @@ next_consistent_hash(Iter, Algo) ->
     {Entry, NewIter}.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec next_queue_least_loaded(iterator(), SampleSize :: integer()) ->
     {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
@@ -400,21 +373,15 @@ next_queue_least_loaded(#iterator{entries = []}, _, _, Entry) ->
     Entry.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% A table that persists calls and maintains the state of the load
-%% balancing of invocations
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A table that persists calls and maintains the state of the load
+balancing of invocations.
+""".
 rpc_state_table(RealmUri, Uri) ->
     tuplespace:locate_table(?RPC_STATE_TABLE, {RealmUri, Uri}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec last_invocation(uri(), uri()) -> bondy_registry_entry:t() | undefined.
 
 last_invocation(RealmUri, Uri) ->

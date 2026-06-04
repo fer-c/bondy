@@ -3,12 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module encapsulates several operations on the ranch library and it
-%% is used by all other modules to setup and manage TCP and TLS listeners.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_ranch_listener).
+-moduledoc """
+This module encapsulates several operations on the ranch library and it is used
+by all other modules to setup and manage TCP and TLS listeners.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -27,11 +26,10 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Conditionally starts a listener with reference `Ref'.
-%% References for each listener is defined by the bondy.schema file.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Conditionally starts a listener with reference `Ref`.
+References for each listener is defined by the bondy.schema file.
+""".
 -spec start(
     Ref :: ranch:ranch_ref(), Protocol :: module(), ProtocolOpts :: any()) ->
     ok | {error, any()}.
@@ -64,10 +62,6 @@ start(Ref, Protocol, ProtocolOpts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec stop(Ref :: ranch:ranch_ref()) -> ok.
 
 stop(Ref) ->
@@ -75,10 +69,6 @@ stop(Ref) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec suspend(Ref :: ranch:ranch_ref()) -> ok.
 
 suspend(Ref) ->
@@ -86,10 +76,6 @@ suspend(Ref) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec resume(Ref :: ranch:ranch_ref()) -> ok.
 
 resume(Ref) ->
@@ -98,42 +84,35 @@ resume(Ref) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 connections(Ref) ->
     ranch:procs(Ref, connections).
 
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the transport and transport options to be used with listener
-%% `Ref'.
-%%
-%% The definition of the listeners in bondy.schema MUST match this structure.
-%% - Ref
-%%     - ip
-%%     - port
-%%     - num_acceptors
-%%     - max_connections
-%%     - backlog
-%%     - max_connections
-%%     - max_connections
-%%     - socket_opts
-%%            - keepalive
-%%            - nodelay
-%%            - sndbuf
-%%            - recbuf
-%%            - buffer
-%%            - certfile (TLS)
-%%            - keyfile (TLS)
-%%            - keyfile (TLS)
-%%            - versions (TLS)
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the transport and transport options to be used with listener `Ref`.
 
+The definition of the listeners in bondy.schema MUST match this structure.
+- Ref
+    - ip
+    - port
+    - num_acceptors
+    - max_connections
+    - backlog
+    - max_connections
+    - max_connections
+    - socket_opts
+        - keepalive
+        - nodelay
+        - sndbuf
+        - recbuf
+        - buffer
+        - certfile (TLS)
+        - keyfile (TLS)
+        - keyfile (TLS)
+        - versions (TLS)
+""".
 transport_opts(Ref) ->
     bondy_config:listener_transport_opts(Ref).
 

@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_auth_scope).
+-moduledoc """
+Represents an authentication scope, constraining a session to a realm, client
+and device. Provides constructors, accessors and helpers to classify
+(`local`, `sso`, `client_local`, `client_sso`) and match scopes.
+""".
 
 -include("bondy.hrl").
 
@@ -33,8 +38,6 @@
 
 
 
--doc """
-""".
 -spec new(optional(binary()), optional(binary()), optional(binary())) -> t().
 
 new(RealmUri, ClientId, DeviceId)
@@ -80,8 +83,6 @@ matches(A, B) ->
      type(A) =:= type(B).
 
 
--doc """
-""".
 matches_realm(#{realm := all}, _) ->
     true;
 
@@ -89,8 +90,6 @@ matches_realm(#{realm := Val}, RealmUri) ->
     Val == RealmUri.
 
 
--doc """
-""".
 -spec normalize(map()) -> t().
 
 normalize(Map) when is_map(Map) ->
@@ -102,24 +101,18 @@ normalize(Map) when is_map(Map) ->
     maps:merge(Default, maps:with([client_id, device_id, realm], Map)).
 
 
--doc """
-""".
 -spec realm(t()) -> binary() | all.
 
 realm(#{realm := Val}) ->
     Val.
 
 
--doc """
-""".
 -spec client_id(t()) -> binary() | all.
 
 client_id(#{client_id := Val}) ->
     Val.
 
 
--doc """
-""".
 -spec device_id(t()) -> binary() | all.
 
 device_id(#{device_id := Val}) ->

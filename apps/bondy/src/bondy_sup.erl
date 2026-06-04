@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_sup).
+-moduledoc """
+The top-level supervisor for the `bondy` application, starting and supervising
+its core processes and sub-supervisors.
+""".
 -behaviour(supervisor).
 -include("bondy.hrl").
 

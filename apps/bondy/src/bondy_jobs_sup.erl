@@ -3,11 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_jobs_sup).
+-moduledoc """
+Supervisor for the Bondy jobs worker pool. Starts one `bondy_jobs_worker` per
+shard and registers them in a `gproc_pool`.
+""".
 -behaviour(supervisor).
 
 -include("bondy.hrl").
@@ -28,10 +28,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

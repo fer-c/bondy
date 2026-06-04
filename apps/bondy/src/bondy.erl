@@ -4,11 +4,12 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy).
+-moduledoc """
+Top-level façade for sending and relaying WAMP messages between local and
+remote peers, issuing blocking and non-blocking calls, and managing
+per-process Bondy and Logger metadata.
+""".
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -68,30 +69,21 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the N top set of connected nodes sorted in increasing order of
-%% their weight for a given key according to the Lowest Random Weight hashing
-%% algorithm (a.k.a Rendezvous hashing).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the N top set of connected nodes sorted in increasing order of
+their weight for a given key according to the Lowest Random Weight hashing
+algorithm (a.k.a Rendezvous hashing).
+""".
 -spec lrw_nodes(Key :: any(), N :: non_neg_integer()) -> [node()].
 
 lrw_nodes(Key, N) ->
     lrw:top(Key, partisan:nodes(), N).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 aae_exchanges() ->
     partisan_plumtree_broadcast:exchanges().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec request(Pid :: pid(), RealmUri :: uri(), M :: bondy_wamp_message:t()) ->
     tuple().
 
@@ -99,12 +91,10 @@ request(Pid, RealmUri, M) ->
     {?BONDY_REQ, Pid, RealmUri, M}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sends a message to a WAMP peer.
-%% It calls `send/3' with a an empty map for Options.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sends a message to a WAMP peer.
+It calls `send/3` with a an empty map for Options.
+""".
 -spec send(RealmUri :: uri(), bondy_ref:t(), wamp_message()) ->
     ok | no_return().
 
@@ -112,21 +102,18 @@ send(RealmUri, Ref, M) ->
     send(RealmUri, Ref, M, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sends a message to a local WAMP peer.
-%% If the transport is not open it fails with an exception.
-%% This function is used by the router (dealer | broker) to send WAMP messages
-%% to local peers.
-%% Opts is a map with the following keys:
-%%
-%% * timeout - timeout in milliseconds (defaults to 10000)
-%% * enqueue (boolean) - if the peer is not reachable and this value is true,
-%% bondy will enqueue the message so that the peer can resume the session and
-%% consume all enqueued messages.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sends a message to a local WAMP peer.
+If the transport is not open it fails with an exception.
+This function is used by the router (dealer | broker) to send WAMP messages
+to local peers.
+Opts is a map with the following keys:
+
+- `timeout` - timeout in milliseconds (defaults to 10000)
+- `enqueue` (boolean) - if the peer is not reachable and this value is true,
+bondy will enqueue the message so that the peer can resume the session and
+consume all enqueued messages.
+""".
 -spec send(
     RealmUri :: uri(),
     Ref :: bondy_ref:t(),
@@ -181,10 +168,6 @@ send(RealmUri, To, Msg, Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec prepare_send(To :: bondy_ref:t(), Opts :: map()) ->
     {bondy_ref:t(), map()}.
 
@@ -195,10 +178,6 @@ prepare_send(Ref, Opts) ->
     prepare_send(Ref, undefined, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec prepare_send(
     To :: bondy_ref:t(),
     Origin :: optional(bondy_ref:client() | bondy_ref:internal()),
@@ -217,10 +196,6 @@ prepare_send(Ref, Origin, Opts) ->
     {Origin, add_via(Ref, Opts)}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 add_via(Relay, #{via := undefined} = Opts) ->
     add_via(Relay, Opts#{via => queue:new()});
 
@@ -239,10 +214,9 @@ add_via(Relay, Opts) ->
     add_via(Relay, Opts#{via => queue:new()}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes and returns the first relay reference of the 'via' option stack.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes and returns the first relay reference of the 'via' option stack.
+""".
 take_via(#{via := Term} = Opts) ->
     case queue:is_queue(Term) of
         true ->
@@ -260,12 +234,11 @@ take_via(Opts) ->
     {undefined, Opts}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the last relay reference of the 'via' option stack. This
-%% reference represents the final relay the message will need to go through to
-%% be send using {@link send/3}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the last relay reference of the 'via' option stack. This
+reference represents the final relay the message will need to go through to
+be send using `send/3`.
+""".
 peek_via(#{via := undefined}) ->
     undefined;
 
@@ -287,26 +260,21 @@ peek_via(_) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec set_process_metadata(Meta :: metadata()) -> ok.
 
 set_process_metadata(Meta) ->
     set_process_metadata(Meta, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Set metadata on the process dictionary.
-%% If `LogKeys' is a list of keys found in `Meta' then Logger shall
-%% automatically insert those keys and their values in all log events produced
-%% on the current process.
-%% Subsequent calls to this function overwrites previous data set. To update
-%% existing data instead of overwriting it, see
-%% {@link update_process_metadata/2}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Set metadata on the process dictionary.
+If `LogKeys` is a list of keys found in `Meta` then Logger shall
+automatically insert those keys and their values in all log events produced
+on the current process.
+Subsequent calls to this function overwrites previous data set. To update
+existing data instead of overwriting it, see
+`update_process_metadata/2`.
+""".
 -spec set_process_metadata(Meta :: metadata(), LogKeys :: [atom()]) -> ok.
 
 set_process_metadata(Meta0, LogKeys0) when is_map(Meta0), is_list(LogKeys0) ->
@@ -330,10 +298,6 @@ set_process_metadata(Meta, LogKeys) ->
     erlang:error(badarg, [Meta, LogKeys]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec update_process_metadata(Meta :: metadata(), LogKeys :: [atom()]) -> ok.
 
 update_process_metadata(Meta0, LogKeys0)
@@ -368,11 +332,10 @@ update_process_metadata(Meta, LogKeys) ->
     erlang:error(badarg, [Meta, LogKeys]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Retrieve data set with {@link set_process_metadata/1},
-%% {@link set_process_metadata/2} or {@link update_process_metadata/2}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Retrieve data set with `set_process_metadata/1`,
+`set_process_metadata/2` or `update_process_metadata/2`.
+""".
 -spec get_process_metadata() -> Meta :: metadata() | undefined.
 
 get_process_metadata() ->
@@ -391,11 +354,10 @@ get_process_metadata() ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Delete data set with {@link set_process_metadata/1},
-%% {@link set_process_metadata/2} or {@link update_process_metadata/2}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Delete data set with `set_process_metadata/1`,
+`set_process_metadata/2` or `update_process_metadata/2`.
+""".
 -spec unset_process_metadata() -> ok.
 
 unset_process_metadata() ->
@@ -410,13 +372,11 @@ unset_process_metadata() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Acknowledges the reception of a WAMP message. This function should be used by
-%% the peer transport module to acknowledge the reception of a message sent with
-%% {@link send/3}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Acknowledges the reception of a WAMP message. This function should be used by
+the peer transport module to acknowledge the reception of a message sent with
+`send/3`.
+""".
 -spec ack(pid(), reference()) -> ok.
 
 ack(Pid, _) when Pid =:= self()  ->
@@ -432,12 +392,10 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% API - CALLER ROLE
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% A blocking call.
-%% Notice this decodes payload partials to Erlang terms, returning a `map()`.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A blocking call.
+Notice this decodes payload partials to Erlang terms, returning a `map()`.
+""".
 -spec call(
     binary(),
     map(),
@@ -503,11 +461,9 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% A non-blocking call.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A non-blocking call.
+""".
 -spec cast(
     binary(),
     map(),
@@ -573,11 +529,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 relay_message(RealmUri, Node, To, Msg, Opts) ->
     From = maps:get(from, Opts, undefined),
     RelayMsg = {forward, To, Msg, Opts#{realm_uri => RealmUri}},
@@ -593,11 +545,7 @@ relay_message(RealmUri, Node, To, Msg, Opts) ->
     bondy_relay:forward(Node, RelayMsg, RelayOpts).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
     Pid = bondy_ref:pid(To),
 

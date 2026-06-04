@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_ticket_api).
+-moduledoc """
+Implements the `m:bondy_wamp_api` behaviour for the authentication ticket WAMP
+API, handling ticket issuance and revocation procedures.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -18,10 +22,6 @@
 %% API
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(
     Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
@@ -68,11 +68,6 @@ handle_call(_, #call{} = M, _) ->
     {reply, E}.
 
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 
 handle_event(_, _) ->
     ok.

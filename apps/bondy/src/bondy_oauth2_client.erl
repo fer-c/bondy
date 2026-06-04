@@ -3,11 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_oauth2_client).
+-moduledoc """
+Manages OAuth2 API clients, which are represented as RBAC users belonging
+to the `api_clients` group.
+""".
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_oauth.hrl").
 
@@ -82,12 +82,10 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Adds an API client to realm RealmUri.
-%% Creates a new user adding it to the `api_clients' group.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds an API client to realm RealmUri.
+Creates a new user adding it to the `api_clients` group.
+""".
 -spec add(uri(), map()) -> {ok, map()} | {error, atom() | map()}.
 
 add(RealmUri, Data) ->
@@ -95,10 +93,6 @@ add(RealmUri, Data) ->
     bondy_rbac_user:add(RealmUri, User).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec update(uri(), binary(), map()) ->
     {ok , t()} | {error, term()} | no_return().
 
@@ -107,20 +101,12 @@ update(RealmUri, ClientId, Data0) ->
     bondy_rbac_user:update(RealmUri, ClientId, Data).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(uri(), binary()) -> ok.
 
 remove(RealmUri, ClientId) ->
     bondy_rbac_user:remove(RealmUri, ClientId).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec to_external(t()) -> map().
 
 to_external(Client) ->

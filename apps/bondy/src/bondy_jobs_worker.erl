@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_jobs_worker).
+-moduledoc """
+A jobs pool worker. Each worker owns a dedicated `m:jobs` queue and continuously
+dequeues and executes enqueued zero-arity functions, providing load regulation
+for asynchronous Bondy jobs.
+""".
 -behaviour(gen_server).
 
 -include("bondy.hrl").

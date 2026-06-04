@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_api).
+-moduledoc """
+Handles the administrative WAMP procedures for bridge relays, dispatching calls
+to `m:bondy_bridge_relay_manager` to add, remove, start, stop, get, list and
+report the status of router bridges.
+""".
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
@@ -16,10 +17,6 @@
 -export([handle_call/3]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(
     Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok

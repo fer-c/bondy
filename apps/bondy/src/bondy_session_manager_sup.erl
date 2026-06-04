@@ -4,6 +4,9 @@
 %% =============================================================================
 
 -module(bondy_session_manager_sup).
+-moduledoc """
+Supervisor for the pool of `bondy_session_manager` workers.
+""".
 -behaviour(supervisor).
 
 
@@ -22,10 +25,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

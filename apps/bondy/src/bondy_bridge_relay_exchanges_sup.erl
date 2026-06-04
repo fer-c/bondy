@@ -4,11 +4,12 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_exchanges_sup).
+-moduledoc """
+A `simple_one_for_one` supervisor for bridge relay exchange processes
+(`bondy_bridge_relay_exchange_statem`), enforcing the configured
+`aae_concurrency` limit when starting new exchanges.
+""".
 
 -behaviour(supervisor).
 
@@ -40,20 +41,15 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Starts a new exchange provided we would not reach the limit set by the
-%% `aae_concurrency' config parameter.
-%% If the limit is reached returns the error tuple `{error, concurrency_limit}'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Starts a new exchange provided we would not reach the limit set by the
+`aae_concurrency` config parameter. If the limit is reached returns the error
+tuple `{error, concurrency_limit}`.
+""".
 -spec start_exchange(
     Conn :: pid(), Sessions :: [bondy_bridge_relay_session:t()], Opts :: map()) ->
     {ok, pid()} | {error, any()}.
@@ -70,10 +66,6 @@ start_exchange(Conn, Sessions, Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 stop_exchange(Pid) when is_pid(Pid)->
     supervisor:terminate_child(?MODULE, Pid).
 

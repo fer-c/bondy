@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_humanized).
+-moduledoc """
+Utilities for rendering lists of terms as human-readable strings, quoting each
+item and joining them with a conjunction (e.g. `'a', 'b' and 'c'`).
+""".
 
 
 -export([join/1]).
@@ -27,15 +31,15 @@ join(Items) ->
 
 -doc """
 Converts a list of items into a human-readable string where each item is
-enclosed in single quotes
-and the last item is preceded by the conjunction (defaults to "and").
+enclosed in single quotes and the last item is preceded by the conjunction
+(defaults to "and").
 
 Examples:
-```
-  > bondy_humanized:join([~"apple", banana, 100], ~"and").
-  ~"'apple', 'banana' and '100'"
-  > bondy_humanized:join([~"apple"]).
-  ~"'apple'"
+```erlang
+> bondy_humanized:join([~"apple", banana, 100], ~"and").
+~"'apple', 'banana' and '100'"
+> bondy_humanized:join([~"apple"]).
+~"'apple'"
 ```
 """.
 -spec join([any()], Conjunction :: binary()) -> binary().

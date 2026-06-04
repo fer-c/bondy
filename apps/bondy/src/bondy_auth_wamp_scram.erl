@@ -17,11 +17,12 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_auth_wamp_scram).
+-moduledoc """
+Implements the WAMP SCRAM authentication method as a `bondy_auth` callback
+module, performing the SCRAM challenge/response exchange and verifying the
+client proof against the user's stored SCRAM password.
+""".
 -behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
@@ -42,10 +43,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
@@ -68,10 +65,6 @@ init(Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec requirements() -> map().
 
 requirements() ->
@@ -82,10 +75,6 @@ requirements() ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
     {true, Extra :: map(), NewState :: state()}
@@ -121,10 +110,6 @@ challenge(Details, Ctxt, State0) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),

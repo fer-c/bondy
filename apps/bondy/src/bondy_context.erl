@@ -3,17 +3,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
-%% @doc
-%% A Bondy Context lets you access information that defines the state of an
-%% interaction. In a typical interacion, several actors or objects have a hand
-%% in what is going on e.g. bondy_session, wamp_realm, etc.
-%%
-%% The Bondy Context is passed as an argument through the whole request-response
-%%  loop to provide access to that information.
-%% @end
-%% =============================================================================
 -module(bondy_context).
+-moduledoc """
+A Bondy Context lets you access information that defines the state of an
+interaction. In a typical interacion, several actors or objects have a hand
+in what is going on e.g. `bondy_session`, `wamp_realm`, etc.
+
+The Bondy Context is passed as an argument through the whole request-response
+loop to provide access to that information.
+""".
 -behaviour(bondy_sensitive).
 -include("bondy.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -119,11 +117,7 @@ format_status(Ctxt0) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Initialises a new context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Initialises a new context.".
 -spec new() -> t().
 new() ->
     #{
@@ -135,20 +129,12 @@ new() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(bondy_session:peer(), subprotocol_2()) -> t().
 
 new(Peer, Subprotocol) ->
     new(set_peer(new(), Peer), Subprotocol, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(bondy_session:peer(), subprotocol_2(), Props :: map()) -> t().
 
 new(Peer, Subprotocol, Props) ->
@@ -156,10 +142,6 @@ new(Peer, Subprotocol, Props) ->
     set_properties(Props, Ctxt).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 local_context(RealmUri) when is_binary(RealmUri) ->
     Ctxt = new(),
 
@@ -181,10 +163,6 @@ local_context(RealmUri) when is_binary(RealmUri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 local_context(RealmUri, Ref) when is_binary(RealmUri) ->
     Ctxt0 = local_context(RealmUri),
 
@@ -198,34 +176,26 @@ local_context(RealmUri, Ref) when is_binary(RealmUri) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Resets the context. Returns a copy of Ctxt where the following attributes
-%% have been reset: request_details.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Resets the context. Returns a copy of `Ctxt` where the following attributes
+have been reset: `request_details`.
+""".
 -spec reset(t()) -> t().
 
 reset(Ctxt) ->
     Ctxt#{request_details => undefined}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Closes the context. This function calls close/2 with `normal' as reason.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Closes the context. This function calls `close/2` with `normal` as reason.
+""".
 -spec close(t()) -> ok.
 
 close(Ctxt0) ->
     close(Ctxt0, normal).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Closes the context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Closes the context.".
 -spec close(t(), Reason :: normal | crash | shutdown) -> ok.
 
 close(Ctxt, _Reason) ->
@@ -239,12 +209,9 @@ close(Ctxt, _Reason) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the sessionId of the provided context or 'undefined'
-%% if there is none.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the sessionId of the provided context or `undefined` if there is none.
+""".
 -spec session_id(t()) -> optional(id()).
 
 session_id(#{session := S}) ->
@@ -259,12 +226,10 @@ session_id(#{ref := Ref}) ->
 session_id(_) ->
     undefined.
 
-%% -----------------------------------------------------------------------------
-%% @doc Sets the `session_id`.
-%% Fails if a session was already set and its session_id doesn't match
-%% `SessionId`.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sets the `session_id`. Fails if a session was already set and its `session_id`
+doesn't match `SessionId`.
+""".
 -spec set_session_id(t(), bondy_session_id:t()) -> t() | no_return().
 
 set_session_id(Ctxt, SessionId) ->
@@ -277,11 +242,7 @@ set_session_id(Ctxt, SessionId) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the source_ip of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the `source_ip` of the provided context.".
 -spec source_ip(t()) -> inet:ip_address().
 
 source_ip(#{source_ip := Val}) ->
@@ -290,31 +251,19 @@ source_ip(#{source_ip := Val}) ->
 source_ip(#{peer := {Val, _}}) ->
     Val.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec set_source_ip(t(), inet:ip_address()) -> t() | no_return().
 
 set_source_ip(Ctxt, IPAddress) when ?IS_IP(IPAddress) ->
     Ctxt#{source_ip => IPAddress}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the peer of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the peer of the provided context.".
 -spec peer(t()) -> bondy_session:peer().
 
 peer(#{peer := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Set the peer to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Set the peer to the provided context.".
 -spec set_peer(t(), bondy_session:peer()) -> t().
 
 set_peer(Ctxt, {IPAddr, _Port} = Peer) when is_map(Ctxt) ->
@@ -325,95 +274,64 @@ set_peer(Ctxt, {IPAddr, _Port} = Peer) when is_map(Ctxt) ->
     Ctxt#{peer => Peer}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the peer of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the peer of the provided context.".
 -spec peername(t()) -> binary().
 
 peername(#{peer := Val}) ->
     inet_utils:peername_to_binary(Val).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the subprotocol of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the subprotocol of the provided context.".
 -spec subprotocol(t()) -> subprotocol_2().
 
 subprotocol(#{subprotocol := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Set the peer to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Set the peer to the provided context.".
 -spec set_subprotocol(t(), subprotocol_2()) -> t().
 
 set_subprotocol(Ctxt, {_, _, _} = S) when is_map(Ctxt) ->
     Ctxt#{subprotocol => S}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the encoding used by the peer of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the encoding used by the peer of the provided context.".
 -spec encoding(t()) -> encoding().
 
 encoding(#{subprotocol := {_, _, Val}}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the roles of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the roles of the provided context.".
 -spec roles(t()) -> map().
 
 roles(Ctxt) ->
     bondy_session:roles(session(Ctxt)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the features that the session's owner supports for role `Role'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the features that the session's owner supports for role `Role`.".
 -spec features(t(), bondy_session:peer_role()) -> map().
 
 features(Ctxt, Role) ->
     bondy_session:features(session(Ctxt), Role).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns those features in list `With' that the session's owner supports
-%% for role `Role'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns those features in list `With` that the session's owner supports for
+role `Role`.
+""".
 -spec features(t(), bondy_session:peer_role(), With :: [atom()]) -> map().
 
 features(Ctxt, Role, With) ->
     bondy_session:features(session(Ctxt), Role, With).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns true if the feature Feature is enabled for role Role.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns true if the feature `Feature` is enabled for role `Role`.".
 -spec is_feature_enabled(t(), atom(), binary()) -> boolean().
 
 is_feature_enabled(Ctxt, Role, Feature) ->
     key_value:get([Role, features, Feature], roles(Ctxt), false).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the realm uri of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the realm uri of the provided context.".
 -spec realm_uri(t()) -> optional(uri()).
 
 realm_uri(#{session := S}) ->
@@ -426,10 +344,7 @@ realm_uri(_) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sets the realm uri of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Sets the realm uri of the provided context.".
 -spec set_realm_uri(t(), uri()) -> t() | no_return().
 
 set_realm_uri(Ctxt, Uri) ->
@@ -442,11 +357,9 @@ set_realm_uri(Ctxt, Uri) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the agent of the provided context or 'undefined'
-%% if there is none.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the agent of the provided context or `undefined` if there is none.
+""".
 -spec agent(t()) -> binary() | undefined.
 
 agent(#{session := S}) ->
@@ -456,10 +369,6 @@ agent(#{}) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_security_enabled(t()) -> boolean().
 
 is_security_enabled(#{session := Session}) when Session =/= undefined ->
@@ -472,10 +381,7 @@ is_security_enabled(#{security_enabled := Val}) when is_boolean(Val) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sets the realm uri of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Sets the realm uri of the provided context.".
 -spec set_security_enabled(t(), boolean()) -> t() | no_return().
 
 set_security_enabled(Ctxt, Bool) when is_boolean(Bool) ->
@@ -489,10 +395,6 @@ set_security_enabled(Ctxt, Bool) when is_boolean(Bool) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authid(t()) -> binary() | anonymous | undefined.
 
 authid(#{session := Session}) ->
@@ -504,10 +406,6 @@ authid(#{authid := Val}) ->
 authid(#{}) ->
     undefined.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec set_authid(t(), binary()) -> t().
 
 set_authid(Ctxt, Val)
@@ -520,11 +418,10 @@ when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
             maps:put(authid, Val, Ctxt)
     end.
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns an ID based on scope. If context does not have a session the
-%% global sceop is used.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns an ID based on scope. If context does not have a session the global
+scope is used.
+""".
 -spec gen_message_id(Ctxt :: t(), Scope :: global | router | session) -> id().
 
 gen_message_id(_, global) ->
@@ -541,24 +438,19 @@ gen_message_id(_, session) ->
     bondy_message_id:global().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns true if the context is associated with a session,
-%% false otherwise.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true if the context is associated with a session, false otherwise.
+""".
 -spec has_session(t()) -> boolean().
 
 has_session(#{session := _}) -> true;
 has_session(#{}) -> false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the sessionId to the provided context.
-%% It also removes realm_uri and session_id from the context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sets the sessionId to the provided context. It also removes `realm_uri` and
+`session_id` from the context.
+""".
 -spec set_session(t(), bondy_session:t()) -> t().
 
 set_session(Ctxt, S) ->
@@ -573,10 +465,6 @@ set_session(Ctxt, S) ->
     maps:without(Keys, Ctxt#{session => S}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec ref(t()) -> bondy_ref:t().
 
 ref(#{session := S}) ->
@@ -586,11 +474,7 @@ ref(#{ref := Ref}) ->
     Ref.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Fetches and returns the bondy_session for the associated sessionId.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Fetches and returns the `bondy_session` for the associated sessionId.".
 -spec session(t()) -> bondy_session:t() | no_return().
 
 session(#{session := S}) ->
@@ -598,21 +482,13 @@ session(#{session := S}) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the current request details
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the current request details.".
 -spec request_details(t()) -> map().
 request_details(#{request_details := Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the current request details to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Sets the current request details to the provided context.".
 -spec set_request_details(t(), map()) -> t().
 
 set_request_details(Ctxt, Details) when is_map(Details) ->
@@ -620,44 +496,31 @@ set_request_details(Ctxt, Details) when is_map(Details) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the current WAMP call timeout.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the current WAMP call timeout.".
 -spec call_timeout(t()) -> non_neg_integer().
 
 call_timeout(#{call_timeout := Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the current WAMP call timeout to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Sets the current WAMP call timeout to the provided context.".
 -spec set_call_timeout(t(), non_neg_integer()) -> t().
 
 set_call_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{call_timeout => Timeout}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the current WAMP call request timeout to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Sets the current WAMP call request timeout to the provided context.".
 -spec set_request_timeout(t(), non_neg_integer()) -> t().
 
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns a copy of `Details` where the disclose_caller feature
-%% properties have been added from context `Ctxt'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a copy of `Details` where the `disclose_caller` feature properties have
+been added from context `Ctxt`.
+""".
 -spec caller_details(Ctxt :: t(), Details :: map()) -> map().
 
 caller_details(#{authid := '$internal'}, Details) ->
@@ -673,11 +536,10 @@ caller_details(#{session := Session} = Ctxt, Details) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns a copy of `Details` where the disclose_publisher feature
-%% properties have been added from context `Ctxt'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a copy of `Details` where the `disclose_publisher` feature properties
+have been added from context `Ctxt`.
+""".
 -spec publisher_details(Ctxt :: t(), Details :: map()) -> map().
 
 publisher_details(#{authid := '$internal'}, Details) ->
@@ -692,12 +554,10 @@ publisher_details(#{session := Session} = Ctxt, Details) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns true if the user is anonymous. In that case authid would be a random
-%% identifier assigned by Bondy.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true if the user is anonymous. In that case `authid` would be a random
+identifier assigned by Bondy.
+""".
 -spec is_anonymous(t()) -> boolean().
 
 is_anonymous(#{session := Session}) ->
@@ -707,10 +567,6 @@ is_anonymous(Ctxt) ->
     maps:get(is_anonymous, Ctxt, false).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec set_is_anonymous(t(), boolean()) -> t().
 
 set_is_anonymous(Ctxt, Value) when is_boolean(Value) ->

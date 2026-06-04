@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_wamp_tcp).
+-moduledoc """
+Manages the lifecycle of the WAMP raw socket listeners over TCP and TLS,
+providing functions to start, stop, suspend and resume them and to query
+their active connections.
+""".
 
 
 -define(TCP, wamp_tcp).
@@ -26,11 +31,9 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Starts the tcp and tls raw socket listeners
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Starts the tcp and tls raw socket listeners.
+""".
 -spec start_listeners() -> ok | {error, any()}.
 
 start_listeners() ->
@@ -39,10 +42,6 @@ start_listeners() ->
     bondy_ranch_listener:start(?TLS, Protocol, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec stop_listeners() -> ok.
 
 stop_listeners() ->
@@ -50,10 +49,6 @@ stop_listeners() ->
     bondy_ranch_listener:stop(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec suspend_listeners() -> ok.
 
 suspend_listeners() ->
@@ -61,10 +56,6 @@ suspend_listeners() ->
     bondy_ranch_listener:suspend(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec resume_listeners() -> ok.
 
 resume_listeners() ->
@@ -72,26 +63,14 @@ resume_listeners() ->
     bondy_ranch_listener:resume(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 connections() ->
     bondy_ranch_listener:connections(?TCP)
         ++ bondy_ranch_listener:connections(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 tls_connections() ->
     bondy_ranch_listener:connections(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 tcp_connections() ->
     bondy_ranch_listener:connections(?TCP).

@@ -3,49 +3,46 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module is used by Bondy to manage event handlers and notify them of
-%% events.
-%%
-%% It implements both an event manager and a universal event
-%% handler (when used with {@link add_callback/1} and
-%% {@link add_sup_callback/1}) and the "watched" handler capability i.e.
-%% `add_watched_handler/2,3', `swap_watched_handler/2,3'.
-%%
-%% In addition, this module mirrors most of the gen_event API and adds variants
-%% with two arguments were the first argument is the default event manager
-%% (`bondy_event_manager').
-%%
-%% ```
-%%      +---------------------------------------+
-%%      |                                       |
-%%      |          bondy_event_manager          |
-%%      |                                       |
-%%      +---------------------------------------+
-%%                          |
-%%                          |
-%%                          v
-%%      +---------------------------------------+
-%%      |                                       |
-%%      |    bondy_event_handler_watcher_sup    |
-%%      |                                       |
-%%      +---------------------------------------+
-%%                          |
-%%                          +--------------------------------+
-%%                          |                                |
-%%       +---------------------------------------+       +---+---+
-%%       |                                       |       |       |
-%%       |     bondy_event_handler_watcher 1     |       |   N   |
-%%       |                                       |       |       |
-%%       +---------------------------------------+       +-------+
-%%
-%%                       simple_one_for_one
-%% '''
-%%
-%% @end
-%% -----------------------------------------------------------------------------
-
 -module(bondy_event_manager).
+-moduledoc """
+This module is used by Bondy to manage event handlers and notify them of
+events.
+
+It implements both an event manager and a universal event
+handler (when used with `add_callback/1` and
+`add_sup_callback/1`) and the "watched" handler capability i.e.
+`add_watched_handler/2,3`, `swap_watched_handler/2,3`.
+
+In addition, this module mirrors most of the gen_event API and adds variants
+with two arguments were the first argument is the default event manager
+(`bondy_event_manager`).
+
+```
+     +---------------------------------------+
+     |                                       |
+     |          bondy_event_manager          |
+     |                                       |
+     +---------------------------------------+
+                         |
+                         |
+                         v
+     +---------------------------------------+
+     |                                       |
+     |    bondy_event_handler_watcher_sup    |
+     |                                       |
+     +---------------------------------------+
+                         |
+                         +--------------------------------+
+                         |                                |
+      +---------------------------------------+       +---+---+
+      |                                       |       |       |
+      |     bondy_event_handler_watcher 1     |       |   N   |
+      |                                       |       |       |
+      +---------------------------------------+       +-------+
+
+                      simple_one_for_one
+```
+""".
 
 -behaviour(gen_event).
 
@@ -101,12 +98,12 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a callback function.
-%% The function needs to have a single argument representing the event that has
-%% been fired.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a callback function.
+
+The function needs to have a single argument representing the event that has
+been fired.
+""".
 -spec add_callback(Fun :: fun((any()) -> any())) -> {ok, handler()}.
 
 add_callback(Fun) when is_function(Fun, 1) ->
@@ -115,11 +112,11 @@ add_callback(Fun) when is_function(Fun, 1) ->
     {ok, Handler}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a callback function.
-%% The function will be called by prepending the event to the list `Args'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a callback function.
+
+The function will be called by prepending the event to the list `Args`.
+""".
 -spec add_callback(Fun :: fun((any()) -> any()), Args ::  [term()]) ->
     {ok, reference()}.
 
@@ -132,11 +129,11 @@ add_callback(Fun, Args) when is_function(Fun, length(Args) + 1) ->
     {ok, Handler}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a callback MFA
-%% The function will be called by prepending the event to the list `Args'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a callback MFA.
+
+The function will be called by prepending the event to the list `Args`.
+""".
 -spec add_callback(M :: module(), F :: atom(), Args :: [term()]) ->
     {ok, reference()}.
 
@@ -146,12 +143,12 @@ add_callback(M, F, Args) when is_atom(M), is_atom(F), is_list(Args) ->
     {ok, Ref}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a supervised callback function.
-%% The function needs to have a single argument representing the event that has
-%% been fired.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a supervised callback function.
+
+The function needs to have a single argument representing the event that has
+been fired.
+""".
 -spec add_sup_callback(fun((any()) -> any())) -> {ok, reference()}.
 
 add_sup_callback(Fn) when is_function(Fn, 1) ->
@@ -160,140 +157,130 @@ add_sup_callback(Fn) when is_function(Fn, 1) ->
     {ok, Ref}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds an event handler.
-%% Calls `gen_event:add_handler(?MODULE, Handler, Args)'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds an event handler.
+
+Calls `gen_event:add_handler(?MODULE, Handler, Args)`.
+""".
 add_handler(Handler, Args) ->
     add_handler(?MODULE, Handler, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds an event handler.
-%% Calls `gen_event:add_handler(Manager, Handler, Args)'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds an event handler.
+
+Calls `gen_event:add_handler(Manager, Handler, Args)`.
+""".
 add_handler(Manager, Handler, Args) ->
     gen_event:add_handler(Manager, Handler, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a supervised event handler, but also supervises the connection
-%% between the event handler and the calling process.
-%% Calls `gen_event:add_sup_handler(?MODULE, Handler, Args)'.
-%% Use this call if you want the event manager to remove the handler when the
-%% calling process terminates.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a supervised event handler, but also supervises the connection
+between the event handler and the calling process.
+
+Calls `gen_event:add_sup_handler(?MODULE, Handler, Args)`.
+Use this call if you want the event manager to remove the handler when the
+calling process terminates.
+""".
 add_sup_handler(Handler, Args) ->
     add_sup_handler(?MODULE, Handler, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a supervised event handler, but also supervises the connection
-%% between the event handler and the calling process.
-%% Calls `gen_event:add_sup_handler(?MODULE, Handler, Args)'.
-%% Use this call if you want the event manager to remove the handler when the
-%% calling process terminates.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a supervised event handler, but also supervises the connection
+between the event handler and the calling process.
+
+Calls `gen_event:add_sup_handler(?MODULE, Handler, Args)`.
+Use this call if you want the event manager to remove the handler when the
+calling process terminates.
+""".
 add_sup_handler(Manager, Handler, Args) ->
     gen_event:add_sup_handler(Manager, Handler, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a watched event handler.
-%% As opposed to `add_sup_handler/2' which supervises the calling process,
-%% this function calls
-%% `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)' which
-%% spawns a supervised process (`bondy_event_handler_watcher') which calls
-%% `add_sup_handler/2'. If the handler crashes, `bondy_event_handler_watcher'
-%% will re-install it in the event manager.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a watched event handler.
+
+As opposed to `add_sup_handler/2` which supervises the calling process,
+this function calls
+`bondy_event_handler_watcher_sup:start_watcher(Handler, Args)` which
+spawns a supervised process (`bondy_event_handler_watcher`) which calls
+`add_sup_handler/2`. If the handler crashes, `bondy_event_handler_watcher`
+will re-install it in the event manager.
+""".
 add_watched_handler(Handler, Args) ->
     add_watched_handler(?MODULE, Handler, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a supervised event handler.
-%% As opposed to `add_sup_handler/2' which monitors the calling process,
-%% this function calls
-%% `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)' which
-%% spawns a supervised process (`bondy_event_handler_watcher') which calls
-%% `add_sup_handler/2'. If the handler crashes, `bondy_event_handler_watcher'
-%% will re-install it in the event manager.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a supervised event handler.
+
+As opposed to `add_sup_handler/2` which monitors the calling process,
+this function calls
+`bondy_event_handler_watcher_sup:start_watcher(Handler, Args)` which
+spawns a supervised process (`bondy_event_handler_watcher`) which calls
+`add_sup_handler/2`. If the handler crashes, `bondy_event_handler_watcher`
+will re-install it in the event manager.
+""".
 add_watched_handler(Manager, Handler, Args) ->
     bondy_event_handler_watcher_sup:start_watcher(Manager, Handler, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling
-%% `swap_handler(bondy_event_manager, OldHandler, NewHandler)'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling
+`swap_handler(bondy_event_manager, OldHandler, NewHandler)`.
+""".
 swap_handler(OldHandler, NewHandler) ->
     swap_handler(?MODULE, OldHandler, NewHandler).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling `gen_event:swap_handler/3'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling `gen_event:swap_handler/3`.
+""".
 swap_handler(Manager, {_, _} = OldHandler, {_, _} = NewHandler) ->
     gen_event:swap_handler(Manager, OldHandler, NewHandler).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling
-%% `swap_sup_handler(bondy_event_manager, OldHandler, NewHandler)'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling
+`swap_sup_handler(bondy_event_manager, OldHandler, NewHandler)`.
+""".
 swap_sup_handler(OldHandler, NewHandler) ->
     swap_sup_handler(?MODULE, OldHandler, NewHandler).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling `gen_event:swap_sup_handler/3'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling `gen_event:swap_sup_handler/3`.
+""".
 swap_sup_handler(Manager, OldHandler, NewHandler) ->
     gen_event:swap_sup_handler(Manager, OldHandler, NewHandler).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling
-%% `swap_watched_handler(bondy_event_manager, OldHandler, NewHandler)'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling
+`swap_watched_handler(bondy_event_manager, OldHandler, NewHandler)`.
+""".
 swap_watched_handler(OldHandler, NewHandler) ->
     swap_watched_handler(?MODULE, OldHandler, NewHandler).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Replaces an event handler in event manager `Manager' in the same way as
-%% `swap_sup_handler/3'. However, this function
-%% calls `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)' which
-%% spawns a supervised process (`bondy_event_handler_watcher') which is the one
-%% calling calls `swap_sup_handler/2'.
-%% If the handler crashes or terminates with a reason other than `normal' or
-%% `shutdown', `bondy_event_handler_watcher' will re-install it in
-%% the event manager.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Replaces an event handler in event manager `Manager` in the same way as
+`swap_sup_handler/3`. However, this function
+calls `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)` which
+spawns a supervised process (`bondy_event_handler_watcher`) which is the one
+calling calls `swap_sup_handler/2`.
+If the handler crashes or terminates with a reason other than `normal` or
+`shutdown`, `bondy_event_handler_watcher` will re-install it in
+the event manager.
+""".
 swap_watched_handler(Manager, OldHandler, NewHandler) ->
     bondy_event_handler_watcher_sup:start_watcher(
         Manager, {swap, OldHandler, NewHandler}
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec delete_callback(Ref :: reference(), Args :: term()) ->
     term() | {error, module_not_found} | {'EXIT', Reason :: any()}.
 
@@ -301,10 +288,6 @@ delete_callback(Ref, Args) ->
     delete_handler({?MODULE, Ref}, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec delete_handler(
     Handler :: module() | {module(), term()}, Args :: term()) ->
     term() | {error, module_not_found} | {'EXIT', Reason :: any()}.
@@ -313,48 +296,40 @@ delete_handler(Handler, Args) ->
     gen_event:delete_handler(?MODULE, Handler, Args).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec delete_watched_handler(Watcher :: pid()) -> ok | {error, not_found}.
 
 delete_watched_handler(Watcher) ->
     bondy_event_handler_watcher_sup:terminate_watcher(Watcher).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling
-%% `notify(bondy_event_manager, Event)'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling
+`notify(bondy_event_manager, Event)`.
+""".
 notify(Event) ->
     notify(?MODULE, Event).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling
-%% `gen_event:notify(bondy_event_manager, Event)'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling
+`gen_event:notify(bondy_event_manager, Event)`.
+""".
 notify(Manager, Event) ->
     gen_event:notify(Manager, Event).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling
-%% `sync_notify(bondy_event_manager, Event)'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling
+`sync_notify(bondy_event_manager, Event)`.
+""".
 sync_notify(Event) ->
     sync_notify(?MODULE, Event).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A util function. Equivalent to calling
-%% `gen_event:sync_notify(bondy_event_manager, Event)'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A util function. Equivalent to calling
+`gen_event:sync_notify(bondy_event_manager, Event)`.
+""".
 sync_notify(Manager, Event) ->
     gen_event:sync_notify(Manager, Event).
 

@@ -4,13 +4,12 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc This module implements the {@link bondy_auth} behaviour to allow access
-%% to clients which connect without credentials assigning them the 'anonymous'
-%% group.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_auth_anonymous).
+-moduledoc """
+This module implements the `bondy_auth` behaviour to allow access
+to clients which connect without credentials assigning them the `anonymous`
+group.
+""".
 -behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
@@ -36,11 +35,9 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @throws invalid_context
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Raises `invalid_context`.
+""".
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
@@ -63,10 +60,6 @@ init(Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec requirements() -> map().
 
 requirements() ->
@@ -78,10 +71,6 @@ requirements() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
     {false, NewState :: state()}
@@ -93,10 +82,6 @@ challenge(_, _, State) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),

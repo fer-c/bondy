@@ -3,26 +3,22 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
-%% @doc
-%% A Session (wamp session) is a transient conversation between two
-%% WAMP Peers attached to a Realm and running over a Transport.
-%%
-%% Bondy implementation ties the lifetime of the underlying transport connection
-%% for a WAMP connection to that of a WAMP Session
-%% i.e. establish a new transport-layer connection as part of each new
-%% session establishment.
-%%
-%% A Bondy Session is a not an application Session and is not a store for
-%% application specific content (an application session store should be
-%% implemented as a service i.e. a Callee).
-%%
-%% Currently sessions are not persistent i.e. if the connection closes the
-%% session data will be lost.
-%%
-%% @end
-%% =============================================================================
 -module(bondy_session).
+-moduledoc """
+A Session (wamp session) is a transient conversation between two WAMP Peers
+attached to a Realm and running over a Transport.
+
+Bondy implementation ties the lifetime of the underlying transport connection
+for a WAMP connection to that of a WAMP Session i.e. establish a new
+transport-layer connection as part of each new session establishment.
+
+A Bondy Session is a not an application Session and is not a store for
+application specific content (an application session store should be implemented
+as a service i.e. a Callee).
+
+Currently sessions are not persistent i.e. if the connection closes the session
+data will be lost.
+""".
 -behaviour(bondy_sensitive).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -234,10 +230,9 @@ format_status(#session{} = S) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new transient session (not persisted)
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new transient session (not persisted).
+""".
 -spec new(uri() | bondy_realm:t(), properties()) ->
     t() | no_return().
 
@@ -248,10 +243,6 @@ new(Realm, Opts) when is_map(Opts) ->
     new(bondy_session_id:new(), Realm, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(bondy_session_id:t(), uri() | bondy_realm:t(), properties()) ->
     t() | no_return().
 
@@ -278,20 +269,15 @@ new(Id, Realm, Opts) when is_binary(Id) andalso is_map(Opts) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec type(t()) -> bondy_ref:type().
 
 type(#session{type = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the transport type for this session, or `undefined` if not set.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the transport type for this session, or `undefined` if not set.
+""".
 -spec transport_type(t_or_id()) -> optional(transport_type()).
 
 transport_type(#session{transport_type = Val}) ->
@@ -301,10 +287,9 @@ transport_type(Id) when is_binary(Id) ->
     lookup_field(Id, #session.transport_type).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the transport id for this session, or `undefined` if not set.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the transport id for this session, or `undefined` if not set.
+""".
 -spec transport_id(t_or_id()) -> optional(binary()).
 
 transport_id(#session{transport_id = Val}) ->
@@ -314,13 +299,11 @@ transport_id(Id) when is_binary(Id) ->
     lookup_field(Id, #session.transport_id).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Creates a new session provided the RealmUri exists or can be dynamically
-%% created.
-%% It calls {@link bondy_utils:get_realm/1} which will fail with an exception
-%% if the realm does not exist or cannot be created
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new session provided the RealmUri exists or can be dynamically
+created. It calls `bondy_utils:get_realm/1` which will fail with an exception if
+the realm does not exist or cannot be created.
+""".
 -spec store(t()) -> {ok, t()} | no_return().
 
 store(#session{} = S0) ->
@@ -353,10 +336,6 @@ store(#session{} = S0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec update(t()) -> ok.
 
 update(#session{id = Id} = S) ->
@@ -365,11 +344,10 @@ update(#session{id = Id} = S) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Updates the `authmethod_details` for the session identified by `Id`
-%% directly in ETS.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Updates the `authmethod_details` for the session identified by `Id` directly in
+ETS.
+""".
 -spec update_authmethod_details(
     bondy_session_id:t(), authmethod_details()
 ) -> ok.
@@ -381,10 +359,6 @@ when is_binary(Id) andalso is_map(Details) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec close(t(), Reason :: optional(uri())) -> ok.
 
 close(#session{} = S, Reason)
@@ -422,28 +396,27 @@ when is_binary(Reason) orelse Reason == undefined ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the value used on session storage. The keys is a Id-sortable
-%% unique ID (globally unique, collision free without coordination) across a
-%% Bondy cluster. This differs from the session's `id' property which is a
-%% random integer as defined by the WAMP protocol.
-%%
-%% Whereas the chances of collision using the WAMP `id' are minimal, there is
-%% still is a possibility that a collision can occur in a big cluster with
-%% millions of connections.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value used on session storage. The keys is a Id-sortable unique ID
+(globally unique, collision free without coordination) across a Bondy cluster.
+This differs from the session's `id` property which is a random integer as
+defined by the WAMP protocol.
+
+Whereas the chances of collision using the WAMP `id` are minimal, there is still
+is a possibility that a collision can occur in a big cluster with millions of
+connections.
+""".
 -spec id(t()) -> bondy_session_id:t().
 
 id(#session{id = Id}) ->
     Id.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the WAMP session identifier.
-%% This is the id exposed to WAMP clients via the protocol interactions.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the WAMP session identifier.
+
+This is the id exposed to WAMP clients via the protocol interactions.
+""".
 -spec external_id(t_or_id()) -> id().
 
 external_id(#session{external_id = Id}) ->
@@ -453,10 +426,6 @@ external_id(Id) when is_binary(Id) ->
     lookup_field(Id, #session.external_id).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec realm_uri(t_or_id()) -> uri().
 
 realm_uri(#session{realm_uri = Val}) ->
@@ -466,10 +435,6 @@ realm_uri(Id) when is_binary(Id) ->
     lookup_field(Id, #session.realm_uri).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec roles(t_or_id()) -> map().
 
 roles(#session{roles = Val}) ->
@@ -479,10 +444,6 @@ roles(Id) when is_binary(Id) ->
     lookup_field(Id, #session.roles).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec features(Session :: t_or_id(), Role :: peer_role()) -> map().
 
 features(Session, Role)
@@ -496,10 +457,6 @@ when Role == caller; Role == callee; Role == subscriber; Role == published ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec features(t_or_id(), Role :: peer_role(), With :: [atom()]) ->
     map().
 
@@ -507,107 +464,79 @@ features(Session, Role, With) when is_list(With) ->
     maps:with(With, features(Session, Role)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the identifier for the owner of this session
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the identifier for the owner of this session.
+""".
 -spec ref(Session :: t_or_id()) -> bondy_ref:client() | bondy_ref:relay().
 
 ref(Session) ->
     lookup_field(Session, #session.ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the pid of the process managing the transport that the session
-%% identified by Id runs on.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the pid of the process managing the transport that the session
+identified by Id runs on.
+""".
 -spec pid(Session :: t_or_id()) -> optional(pid()).
 
 pid(Session) ->
     bondy_ref:pid(ref(Session)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the node of the process managing the transport that the session
-%% identified by Id runs on.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the node of the process managing the transport that the session
+identified by Id runs on.
+""".
 -spec node(Session :: t_or_id()) -> atom().
 
 node(Session) ->
     bondy_ref:node(ref(Session)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the node of the process managing the transport that the session
-%% identified by Id runs on.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the node of the process managing the transport that the session
+identified by Id runs on.
+""".
 -spec nodestring(t_or_id()) -> nodestring().
 
 nodestring(Session) ->
     bondy_ref:nodestring(ref(Session)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the time at which the session was created, Its value is a
-%% timestamp in seconds.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the time at which the session was created, Its value is a timestamp in
+seconds.
+""".
 -spec created(Session :: t()) -> pos_integer().
 
 created(Session) ->
     lookup_field(Session, #session.created).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec agent(t_or_id()) -> binary() | undefined.
 
 agent(Session) ->
     lookup_field(Session, #session.agent).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec peer(t_or_id()) -> peer().
 
 peer(Session) ->
     lookup_field(Session, #session.peer).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authrealm(t_or_id()) -> uri().
 
 authrealm(Session) ->
     lookup_field(Session, #session.authrealm).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authid(t_or_id()) -> bondy_rbac_user:username().
 
 authid(Session) ->
     lookup_field(Session, #session.authid).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authrole(t()) -> binary().
 
 authrole(#session{authrole = undefined, authroles = []}) ->
@@ -628,40 +557,24 @@ authrole(Id) when is_binary(Id) ->
     authrole(fetch(Id)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authroles(t_or_id()) -> [bondy_rbac_group:name()].
 
 authroles(Session) ->
     lookup_field(Session, #session.authroles).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authmethod(t_or_id()) -> binary().
 
 authmethod(Session) ->
     lookup_field(Session, #session.authmethod).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authmethod_details(t_or_id()) -> optional(authmethod_details()).
 
 authmethod_details(Session) ->
     lookup_field(Session, #session.authmethod_details).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec user(t()) -> bondy_rbac_user:t().
 
 user(#session{realm_uri = Uri, authid = Id}) ->
@@ -671,10 +584,6 @@ user(Id) when is_binary(Id) ->
     user(fetch(Id)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec rbac_context(t_or_id()) -> bondy_rbac:context().
 
 rbac_context(#session{id = Id} = Session) ->
@@ -702,10 +611,6 @@ rbac_context(Id) when is_binary(Id) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec rbac_metadata(t_or_id()) -> map().
 
 rbac_metadata(#session{id = Id} = Session) ->
@@ -732,10 +637,6 @@ rbac_metadata(Id) when is_binary(Id) ->
             Meta
     end.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec refresh_rbac_context(t_or_id()) -> bondy_rbac:context().
 
 refresh_rbac_context(#session{id = Id} = Session) ->
@@ -746,10 +647,9 @@ refresh_rbac_context(Id) when is_binary(Id) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the number of sessions in the tuplespace.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the number of sessions in the tuplespace.
+""".
 -spec size() -> non_neg_integer().
 
 size() ->
@@ -758,10 +658,6 @@ size() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_security_enabled(t()) -> boolean().
 
 is_security_enabled(#session{security_enabled = Val}) ->
@@ -771,10 +667,6 @@ is_security_enabled(Id) ->
     lookup_field(Id, #session.security_enabled).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_persistent(t()) -> boolean().
 
 is_persistent(#session{is_persistent = Val}) ->
@@ -785,10 +677,6 @@ is_persistent(Id) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_anonymous(t()) -> boolean().
 
 is_anonymous(#session{is_anonymous = Val}) ->
@@ -798,24 +686,20 @@ is_anonymous(Id) ->
     lookup_field(Id, #session.is_anonymous).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Retrieves the session identified by Id from the tuplespace or 'not_found'
-%% if it doesn't exist.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Retrieves the session identified by Id from the tuplespace or `not_found` if it
+doesn't exist.
+""".
 -spec lookup(bondy_session_id:t()) -> {ok, t()} | {error, not_found}.
 
 lookup(Id) when is_binary(Id) ->
     do_lookup(Id).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Retrieves the session identified by Id from the tuplespace or 'not_found'
-%% if it doesn't exist.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Retrieves the session identified by Id from the tuplespace or `not_found` if it
+doesn't exist.
+""".
 -spec lookup(RealmUri :: uri(), ExtId :: id()) ->
     {ok, t()} | {error, not_found}.
 
@@ -828,12 +712,10 @@ lookup(RealmUri, ExtId) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Retrieves the session identified by Id from the tuplespace. If the session
-%% does not exist it fails with reason '{badarg, Id}'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Retrieves the session identified by Id from the tuplespace. If the session does
+not exist it fails with reason `{badarg, Id}`.
+""".
 -spec fetch(bondy_session_id:t()) -> t() | no_return().
 
 fetch(Id) ->
@@ -845,18 +727,10 @@ fetch(Id) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 list() ->
     list(#{return => object}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 list(?EOT) ->
     ?EOT;
 
@@ -867,10 +741,6 @@ list(Opts) when is_map(Opts) ->
     match(#{}, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 match(?EOT) ->
     ?EOT;
 
@@ -878,10 +748,6 @@ match(#{continuation := _} = Cont) ->
     do_match(Cont).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(Bindings :: #{atom() => '_' | term()}, Opts :: match_opts()) ->
     match_ret().
 
@@ -891,10 +757,6 @@ match(Bindings, Opts) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec to_external(t()) -> external().
 
 to_external(#session{} = S) ->
@@ -928,11 +790,10 @@ to_external(#session{} = S) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Called by -on_load() directive.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Called by `-on_load()` directive.
+""".
 on_load() ->
     Size = record_info(size, session),
     Pattern = erlang:make_tuple(Size, '_', [{1, session}]),
@@ -1053,14 +914,12 @@ parse_properties(_, _, Session) ->
     Session.
 
 
-%% ------------------------------------------------------------------------
-%% private
-%% @doc Merges the client provided role features with the ones provided by
-%% the router. This will become the feature set used by the router on
-%% every session request.
-%% This is a capability negotiation between client and router.
-%% @end
-%% ------------------------------------------------------------------------
+%% @private
+-doc """
+Merges the client provided role features with the ones provided by the router.
+This will become the feature set used by the router on every session request.
+This is a capability negotiation between client and router.
+""".
 parse_roles(Roles) ->
     maps:map(
         fun
@@ -1075,11 +934,7 @@ parse_roles(Roles) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 merge_feature_flags(Router, Req) when is_map(Router) andalso is_map(Req) ->
     Combiner = fun
         (_, true, true) -> true;

@@ -3,11 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_prometheus_collector).
+-moduledoc """
+A `prometheus_collector` implementation that exposes Bondy's own metrics to
+Prometheus, collecting them only when the `bondy` application is running.
+""".
 -behaviour(prometheus_collector).
 
 -export([deregister_cleanup/1]).

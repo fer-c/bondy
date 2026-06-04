@@ -3,11 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_event_handler_watcher_sup).
+-moduledoc """
+A `simple_one_for_one` supervisor for `bondy_event_handler_watcher` processes.
+""".
 -behaviour(supervisor).
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
@@ -38,18 +37,10 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec start_watcher(
     Manager :: module(),
     {swap, OldHandler :: {module(), any()}, NewHandler :: {module(), any()}}) ->
@@ -59,10 +50,6 @@ start_watcher(Manager, {swap, {_, _}, {_, _}} = Cmd) ->
     supervisor:start_child(?MODULE, [Manager, Cmd]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec start_watcher(Manager :: module(), Handler :: module(), Args :: any()) ->
     ok | {error, any()}.
 
@@ -71,10 +58,6 @@ start_watcher(Manager, Handler, Args) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 terminate_watcher(Watcher) when is_pid(Watcher)->
     supervisor:terminate_child(?MODULE, Watcher).
 

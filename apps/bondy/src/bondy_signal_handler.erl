@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_signal_handler).
+-moduledoc """
+A `gen_event` handler for OS signals that initiates an orderly shutdown on
+`SIGTERM` and delegates all other signals to the default OTP signal handler.
+""".
 -behaviour(gen_event).
 
 -include_lib("kernel/include/logger.hrl").

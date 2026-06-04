@@ -6,7 +6,7 @@
 -module(bondy_registry).
 -behaviour(gen_server).
 
--doc("""
+-moduledoc """
 An in-memory registry for PubSub subscriptions and Routed RPC registrations,
 providing pattern matching capabilities including support for WAMP's
 version 2.0 match policies (exact, prefix and wildcard).
@@ -21,7 +21,7 @@ from the plum_db tables on startup.
 
 The registry consists of this server and a pool of `bondy_registry_partition`
 workers; each partition owns its own slice of the indices.
-""").
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -172,7 +172,7 @@ add(Entry) ->
     bondy_registry_partition:add(Partition, Entry).
 
 
--doc "@see add/5".
+-doc "See `add/5`.".
 -spec add(
     Type :: entry_type(),
     RegUri :: uri(),
@@ -237,7 +237,6 @@ remove(Entry) ->
     bondy_registry_partition:remove(pick_partition(Entry), Entry).
 
 
--doc "".
 -spec remove(entry_type(), id(), bondy_context:t()) ->
     ok | {error, not_found}.
 
@@ -245,7 +244,6 @@ remove(Type, EntryId, Ctxt) ->
     remove(Type, EntryId, Ctxt, undefined).
 
 
--doc "".
 -spec remove(
     Type :: entry_type(),
     EntryId :: id(),
@@ -288,10 +286,10 @@ remove_all(Type, Ctxt) ->
 
 
 -doc """
-Removes all entries of type `Type' matching the context's realm and
+Removes all entries of type `Type` matching the context's realm and
 session_id.
 
-If `Task' is defined, it executes the task passing the removed entry as
+If `Task` is defined, it executes the task passing the removed entry as
 argument.
 """.
 -spec remove_all(entry_type(), bondy_context:t(), task() | undefined) -> ok.
@@ -358,7 +356,6 @@ lookup(Type, EntryKey) ->
     bondy_registry_partition:lookup(Partition, Type, EntryKey).
 
 
--doc "".
 lookup(Type, RealmUri, EntryId) when is_integer(EntryId) ->
     Partition = pick_partition(RealmUri),
     bondy_registry_partition:lookup(Partition, Type, RealmUri, EntryId).
@@ -395,7 +392,7 @@ entries(Cont0) ->
 -doc """
 Returns the list of entries owned by the active session.
 
-This function is equivalent to calling {@link entries/2} with the RealmUri
+This function is equivalent to calling `entries/2` with the RealmUri
 and SessionId extracted from the Context.
 """.
 -spec entries(entry_type(), bondy_context:t()) -> [entry()].
@@ -410,7 +407,7 @@ entries(Type, Ctxt) ->
 Returns the complete list of entries owned by a session matching
 RealmUri and SessionId.
 
-Use {@link entries/3} and {@link entries/1} to limit the number
+Use `entries/3` and `entries/1` to limit the number
 of entries returned.
 """.
 -spec entries(Type :: entry_type(), RealmUri :: uri(), SessionId :: id()) ->
@@ -605,7 +602,6 @@ find_matches(Type, RealmUri, Uri, Opts) ->
     end.
 
 
--doc "".
 format_error(Reason, [{_M, _F, _As, Info} | _]) ->
     ErrorInfo = proplists:get_value(error_info, Info, #{}),
     ErrorMap = maps:get(cause, ErrorInfo),
@@ -622,7 +618,6 @@ format_error(Reason, [{_M, _F, _As, Info} | _]) ->
 
 
 
--doc "".
 will_merge(_PKey, _New, undefined) ->
     %% [Case 1] If New is an entry rooted in this node we need to delete and
     %% broadcast to the cluster members.
@@ -760,27 +755,18 @@ on_merge({{_, RealmUri}, _} = PKey, New, Old)  ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local update
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local update".
 on_update(_PKey, _New, _Old) ->
     %% ?LOG_DEBUG(#{description => "On update called", new => New, old => Old}),
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local delete
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local delete".
 on_delete(_PKey, _Old) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local erase
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local erase".
 on_erase(_PKey, _Old) ->
     ok.
 
@@ -1448,11 +1434,7 @@ do_find_matches(Type, RealmUri, Uri, Opts0) ->
     bondy_registry_partition:find_matches(Partition, Type, RealmUri, Uri, Opts).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 init_indices(State) ->
     ?LOG_NOTICE(#{
         description =>
@@ -1581,11 +1563,7 @@ do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Opts, Acc) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 prune(Node) when is_atom(Node) ->
     Nodestring = atom_to_binary(Node, utf8),
     %% We prune all entries from the trie and plum_db
@@ -1597,11 +1575,7 @@ prune(Node) when is_atom(Node) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 do_prune(Index, Node, From) when is_atom(Node) ->
     case bondy_registry_remote_index:match(Index, Node, 100) of
         ?EOT ->
@@ -1617,11 +1591,7 @@ do_prune(Index, Node, From) when is_atom(Node) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 do_prune(_Index, _Node, _From, L) when is_list(L) ->
     %% Delete them from Plum_db
     lists:foreach(
@@ -1672,9 +1642,11 @@ do_prune(Index, Node, From, ETSCont0) ->
 
 
 %% @private
-%% @doc Fast-fails in-flight callers whose callee was on the pruned
-%% node's registration, so they don't wait for the call timeout.
-%% Subscriptions have no promise table to reap.
+-doc """
+Fast-fails in-flight callers whose callee was on the pruned
+node's registration, so they don't wait for the call timeout.
+Subscriptions have no promise table to reap.
+""".
 maybe_flush_callee_promises(registration, Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Ref = bondy_registry_entry:ref(Entry),

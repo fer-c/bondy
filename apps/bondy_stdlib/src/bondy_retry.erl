@@ -3,11 +3,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_retry).
+-moduledoc """
+Retry state with optional exponential backoff and an overall deadline.
+
+A `t/0` value tracks an attempt counter, a per-attempt interval (or a `m:backoff`
+curve when backoff is enabled) and a deadline. `fail/1` advances the state after
+a failed attempt, returning the next delay — or `deadline` / `max_retries` once
+the budget is exhausted; `succeed/1` resets it.
+""".
 
 -record(bondy_retry, {
     id                  ::  any(),
@@ -60,11 +64,9 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Set deadline to zero to disable dealine and rely on max_retries only.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Set `deadline` to zero to disable the deadline and rely on `max_retries` only.
+""".
 -spec init(Id :: any(), Opts :: opts()) -> t().
 
 init(Id, Opts) ->
@@ -87,10 +89,7 @@ init(Id, Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the current timer value.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the current timer value.".
 -spec get(State :: t()) -> integer() | deadline | max_retries.
 
 get(#bondy_retry{start_ts = undefined, backoff = undefined} = State) ->
@@ -125,10 +124,6 @@ get(#bondy_retry{} = State) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec fail(State :: t()) ->
     {Time :: integer(), NewState :: t()}
     | {deadline | max_retries, NewState :: t()}.
@@ -156,10 +151,6 @@ fail(#bondy_retry{backoff = B0} = State0) ->
     {get(State), State}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec succeed(State :: t()) -> {Time :: integer(), NewState :: t()}.
 
 succeed(#bondy_retry{backoff = undefined} = State0) ->
@@ -181,10 +172,6 @@ succeed(#bondy_retry{backoff = B0} = State0) ->
     {get(State), State}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec fire(State :: t()) -> Ref :: reference() | no_return().
 
 fire(#bondy_retry{} = State) ->
@@ -196,10 +183,6 @@ fire(#bondy_retry{} = State) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec count(State :: t()) -> non_neg_integer().
 
 count(#bondy_retry{count = Val}) ->

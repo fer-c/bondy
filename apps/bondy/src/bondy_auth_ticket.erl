@@ -4,11 +4,12 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_auth_ticket).
+-moduledoc """
+This module implements the `bondy_auth` behaviour for ticket-based
+authentication, verifying a client-supplied ticket against the realm and user
+via `bondy_ticket`.
+""".
 -behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
@@ -30,10 +31,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
@@ -49,10 +46,6 @@ init(Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec requirements() -> bondy_auth:requirements().
 
 requirements() ->
@@ -66,10 +59,6 @@ requirements() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
     {false, NewState :: state()}
@@ -81,10 +70,6 @@ challenge(_, _, State) ->
     {true, #{}, State}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(
     Ticket :: binary(),
     DataIn :: map(),

@@ -3,12 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%%%-------------------------------------------------------------------
-%% @doc wamp top level supervisor.
-%% @end
-%%%-------------------------------------------------------------------
-
 -module(bondy_wamp_sup).
+-moduledoc """
+WAMP top level supervisor.
+""".
 -behaviour(supervisor).
 
 %% API

@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_oauth2_api).
+-moduledoc """
+Implements the `bondy_wamp_api` behaviour for the OAuth2 administration
+WAMP procedures (client and resource owner management, and token
+revocation).
+""".
 -behaviour(bondy_wamp_api).
 
 
@@ -25,10 +26,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(
     Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok

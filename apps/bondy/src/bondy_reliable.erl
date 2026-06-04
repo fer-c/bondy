@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_reliable).
+-moduledoc """
+Enqueues a term (an `{M, F, A}` tuple, a nullary function or a list) onto a
+named queue for reliable, asynchronous execution.
+""".
 
 
 -export([enqueue/2]).

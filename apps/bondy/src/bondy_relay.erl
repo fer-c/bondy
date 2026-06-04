@@ -3,68 +3,67 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A gen_server that forwards INVOCATION (their RESULT or ERROR), INTERRUPT
-%% and EVENT messages between WAMP clients connected to different Bondy peers
-%% (nodes).
-%%
-%% ```
-%% +-------------------------+                    +-------------------------+
-%% |         node_1          |                    |         node_2          |
-%% |                         |                    |                         |
-%% |                         |                    |                         |
-%% | +---------------------+ |    cast_message    | +---------------------+ |
-%% | |partisan_peer_service| |                    | |partisan_peer_service| |
-%% | |      _manager       |<+--------------------+>|      _manager       | |
-%% | |                     | |                    | |                     | |
-%% | +---------------------+ |                    | +---------------------+ |
-%% |    ^          |         |                    |         |          ^    |
-%% |    |          v         |                    |         v          |    |
-%% |    |  +---------------+ |                    | +---------------+  |    |
-%% |    |  |  bondy_router | |                    | |  bondy_router |  |    |
-%% |    |  |    _relay     | |                    | |    _relay     |  |    |
-%% |    |  |               | |                    | |               |  |    |
-%% |    |  +---------------+ |                    | +---------------+  |    |
-%% |    |          |         |                    |         |          |    |
-%% |    |          |         |                    |         |          |    |
-%% |    |          |         |                    |         |          |    |
-%% |    |          v         |                    |         v          |    |
-%% | +---------------------+ |                    | +---------------------+ |
-%% | | bondy_router_worker | |                    | | bondy_router_worker | |
-%% | |    (router_pool)    | |                    | |    (router_pool)    | |
-%% | |                     | |                    | |                     | |
-%% | |                     | |                    | |                     | |
-%% | |                     | |                    | |                     | |
-%% | |                     | |                    | |                     | |
-%% | |                     | |                    | |                     | |
-%% | |                     | |                    | |                     | |
-%% | |                     | |                    | |                     | |
-%% | +---------------------+ |                    | +---------------------+ |
-%% |         ^    |          |                    |          |   ^          |
-%% |         |    |          |                    |          |   |          |
-%% |         |    v          |                    |          v   |          |
-%% | +---------------------+ |                    | +---------------------+ |
-%% | |bondy_wamp_*_handler | |                    | |bondy_wamp_*_handler | |
-%% | |                     | |                    | |                     | |
-%% | |                     | |                    | |                     | |
-%% | +---------------------+ |                    | +---------------------+ |
-%% |         ^    |          |                    |          |   ^          |
-%% |         |    |          |                    |          |   |          |
-%% +---------+----+----------+                    +----------+---+----------+
-%%           |    |                                          |   |
-%%           |    |                                          |   |
-%%      CALL |    | RESULT | ERROR                INVOCATION |   | YIELD
-%%           |    |                                          |   |
-%%           |    v                                          v   |
-%% +-------------------------+                    +-------------------------+
-%% |         Caller          |                    |         Callee          |
-%% |                         |                    |                         |
-%% |                         |                    |                         |
-%% +-------------------------+                    +-------------------------+
-%% '''
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_relay).
+-moduledoc """
+A gen_server that forwards INVOCATION (their RESULT or ERROR), INTERRUPT
+and EVENT messages between WAMP clients connected to different Bondy peers
+(nodes).
+
+```
++-------------------------+                    +-------------------------+
+|         node_1          |                    |         node_2          |
+|                         |                    |                         |
+|                         |                    |                         |
+| +---------------------+ |    cast_message    | +---------------------+ |
+| |partisan_peer_service| |                    | |partisan_peer_service| |
+| |      _manager       |<+--------------------+>|      _manager       | |
+| |                     | |                    | |                     | |
+| +---------------------+ |                    | +---------------------+ |
+|    ^          |         |                    |         |          ^    |
+|    |          v         |                    |         v          |    |
+|    |  +---------------+ |                    | +---------------+  |    |
+|    |  |  bondy_router | |                    | |  bondy_router |  |    |
+|    |  |    _relay     | |                    | |    _relay     |  |    |
+|    |  |               | |                    | |               |  |    |
+|    |  +---------------+ |                    | +---------------+  |    |
+|    |          |         |                    |         |          |    |
+|    |          |         |                    |         |          |    |
+|    |          |         |                    |         |          |    |
+|    |          v         |                    |         v          |    |
+| +---------------------+ |                    | +---------------------+ |
+| | bondy_router_worker | |                    | | bondy_router_worker | |
+| |    (router_pool)    | |                    | |    (router_pool)    | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| +---------------------+ |                    | +---------------------+ |
+|         ^    |          |                    |          |   ^          |
+|         |    |          |                    |          |   |          |
+|         |    v          |                    |          v   |          |
+| +---------------------+ |                    | +---------------------+ |
+| |bondy_wamp_*_handler | |                    | |bondy_wamp_*_handler | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| +---------------------+ |                    | +---------------------+ |
+|         ^    |          |                    |          |   ^          |
+|         |    |          |                    |          |   |          |
++---------+----+----------+                    +----------+---+----------+
+          |    |                                          |   |
+          |    |                                          |   |
+     CALL |    | RESULT | ERROR                INVOCATION |   | YIELD
+          |    |                                          |   |
+          |    v                                          v   |
++-------------------------+                    +-------------------------+
+|         Caller          |                    |         Callee          |
+|                         |                    |                         |
+|                         |                    |                         |
++-------------------------+                    +-------------------------+
+```
+""".
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
@@ -98,10 +97,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec start_link() -> {'ok', pid()} | 'ignore' | {'error', term()}.
 
 start_link() ->
@@ -114,26 +109,20 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], SpawnOpts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec forward(Node :: node() | [node()], Msg :: any()) -> ok.
 
 forward(Node, Msg) ->
     forward(Node, Msg, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Forwards a wamp message to a peer (cluster node).
-%% It returns `ok'.
-%%
-%% This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT WAMP
-%% message types. It will fail with an exception if another type is passed
-%% as the third argument.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Forwards a wamp message to a peer (cluster node).
+It returns `ok`.
+
+This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT WAMP
+message types. It will fail with an exception if another type is passed
+as the third argument.
+""".
 -spec forward(Node :: node() | [node()], Msg :: any(), Opts :: map()) -> ok.
 
 forward(Node, Msg, Opts0) when is_atom(Node) ->

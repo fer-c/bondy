@@ -4,6 +4,13 @@
 %% =============================================================================
 
 -module(bondy_sysmon_handler).
+-moduledoc """
+A `m:gen_event` handler for `riak_sysmon` system monitor events.
+
+Installed on the `riak_sysmon_handler` event manager, it logs `long_gc`,
+`large_heap` and `long_schedule` monitor events together with relevant process
+information.
+""".
 
 -behaviour(gen_event).
 
@@ -30,10 +37,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 add_handler() ->
     Handlers = gen_event:which_handlers(riak_sysmon_handler),
     case lists:member(?MODULE, Handlers) of
@@ -51,25 +54,20 @@ add_handler() ->
 
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Whenever a new event handler is added to an event manager,
-%% this function is called to initialize the event handler.
-%%
-%% @end
-%%--------------------------------------------------------------------
+-doc """
+Whenever a new event handler is added to an event manager, this function is
+called to initialize the event handler.
+""".
 init([]) ->
     State = #state{},
     {ok, State, hibernate}.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Whenever an event manager receives an event sent using
-%% gen_event:notify/2 or gen_event:sync_notify/2, this function is
-%% called for each installed event handler to handle the event.
-%% @end
-%%--------------------------------------------------------------------
+-doc """
+Whenever an event manager receives an event sent using `gen_event:notify/2` or
+`gen_event:sync_notify/2`, this function is called for each installed event
+handler to handle the event.
+""".
 handle_event({monitor, Pid, Type, Info}, #state{} = State)
 when Type == long_gc; Type == large_heap; Type == long_schedule ->
     PInfo = process_info(Pid, [
@@ -102,46 +100,34 @@ handle_event(_Event, #state{} = State) ->
     {ok, State}.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Whenever an event manager receives a request sent using
-%% gen_event:call/3,4, this function is called for the specified
-%% event handler to handle the request.
-%%
-%% @end
-%%--------------------------------------------------------------------
+-doc """
+Whenever an event manager receives a request sent using `gen_event:call/3,4`,
+this function is called for the specified event handler to handle the request.
+""".
 handle_call(_Msg, State) ->
     {ok, {error, unknown_call}, State}.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% This function is called for each installed event handler when
-%% an event manager receives any other message than an event or a
-%% synchronous request (or a system message).
-%%
-%% @end
-%%--------------------------------------------------------------------
+-doc """
+This function is called for each installed event handler when an event manager
+receives any other message than an event or a synchronous request (or a system
+message).
+""".
 handle_info(_Info, State) ->
     {ok, State}.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Whenever an event handler is deleted from an event manager, this
-%% function is called. It should be the opposite of Module:init/1 and
-%% do any necessary cleaning up.
-%% @end
-%%--------------------------------------------------------------------
+-doc """
+Whenever an event handler is deleted from an event manager, this function is
+called. It should be the opposite of `Module:init/1` and do any necessary
+cleaning up.
+""".
 terminate(_Reason, _State) ->
     ok.
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @end
-%%--------------------------------------------------------------------
+-doc """
+Convert process state when code is changed.
+""".
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

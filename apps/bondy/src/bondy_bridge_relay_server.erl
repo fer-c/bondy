@@ -4,36 +4,34 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc EARLY DRAFT implementation of the server-side connection between and
-%% client node ({@link bondy_bridge_relay_client}) and a remote/core node
-%% (this module).
-%%
-%% <pre><code class="mermaid">
-%% stateDiagram-v2
-%%     %%{init:{'state':{'nodeSpacing': 50, 'rankSpacing': 200}}}%%
-%%    [*] --> connected
-%%    connected --> active: session_opened
-%%    connected --> [*]: auth_timeout
-%%    active --> active: rcv(data|ping) | snd(data|pong)
-%%    active --> idle: ping_idle_timeout
-%%    active --> [*]: error
-%%    idle --> idle: snd(ping|pong) | rcv(ping|pong)
-%%    idle --> active: snd(data)
-%%    idle --> active: rcv(data)
-%%    idle --> [*]: error
-%%    idle --> [*]: ping_timeout
-%%    idle --> [*]: idle_timeout
-%% </code></pre>
-%%
-%% == Configuration Options ==
-%% <ul>
-%% <li>auth_timeout - once the connection is established how long to wait for
-%% the client to send the HELLO message.</li>
-%% </ul>
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_server).
+-moduledoc """
+EARLY DRAFT implementation of the server-side connection between and
+client node (`bondy_bridge_relay_client`) and a remote/core node
+(this module).
+
+```mermaid
+stateDiagram-v2
+    %%{init:{'state':{'nodeSpacing': 50, 'rankSpacing': 200}}}%%
+   [*] --> connected
+   connected --> active: session_opened
+   connected --> [*]: auth_timeout
+   active --> active: rcv(data|ping) | snd(data|pong)
+   active --> idle: ping_idle_timeout
+   active --> [*]: error
+   idle --> idle: snd(ping|pong) | rcv(ping|pong)
+   idle --> active: snd(data)
+   idle --> active: rcv(data)
+   idle --> [*]: error
+   idle --> [*]: ping_timeout
+   idle --> [*]: idle_timeout
+```
+
+## Configuration Options
+
+- auth_timeout - once the connection is established how long to wait for
+  the client to send the HELLO message.
+""".
 -behaviour(gen_statem).
 -behaviour(ranch_protocol).
 
@@ -97,19 +95,11 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link(RanchRef, Transport, Opts) ->
     gen_statem:start_link(?MODULE, {RanchRef, Transport, Opts}, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% This will be deprecated with Ranch 2.0
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "This will be deprecated with Ranch 2.0.".
 start_link(RanchRef, _, Transport, Opts) ->
     start_link(RanchRef, Transport, Opts).
 
@@ -121,18 +111,10 @@ start_link(RanchRef, _, Transport, Opts) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 callback_mode() ->
     [state_functions, state_enter].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 init({Ref, Transport, Opts}) ->
     ok = logger:update_process_metadata(#{
         listener => Ref,
@@ -165,10 +147,6 @@ init({Ref, Transport, Opts}) ->
     {ok, connecting, State, Actions}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 terminate({shutdown, Info}, StateName, #state{socket = undefined} = State) ->
     ok = remove_all_registry_entries(State),
     ?LOG_INFO(Info#{
@@ -194,10 +172,6 @@ terminate(Reason, StateName, #state{} = State) ->
     terminate(Reason, StateName, State#state{socket = undefined}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
 
@@ -208,10 +182,6 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 connecting(enter, connecting, State0) ->
     Ref = State0#state.ranch_ref,
     Transport = State0#state.transport,
@@ -292,10 +262,6 @@ connecting(EventType, EventContent, State) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 active(enter, active, _) ->
     keep_state_and_data;
 
@@ -474,10 +440,6 @@ active(EventType, EventContent, State) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 idle(enter, active, State) ->
     %% We use an event timeout meaning any event received will cancel it
     IdleTimeout = State#state.idle_timeout,
@@ -539,10 +501,7 @@ idle(EventType, EventContent, State) ->
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Handle events common to all states
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Handle events common to all states.".
 
 %% TODO forward_message or forward?
 handle_event({call, From}, Request, _, _) ->
@@ -794,11 +753,8 @@ send_message(Message, State) ->
     (State#state.transport):send(State#state.socket, Data).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Handles inbound session messages
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Handles inbound session messages.".
 handle_in({registration_created, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
     Actions = [
@@ -934,11 +890,7 @@ handle_in(Other, SessionId, State) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 handle_out(#goodbye{} = M, RealmUri, _From, State) ->
     Details = M#goodbye.details,
     ReasonUri = M#goodbye.reason_uri,
@@ -1049,13 +1001,13 @@ full_sync(SessionId, RealmUri, Opts, State) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc A temporary POC of full sync, not elegant at all.
-%% This should be resolved at the plum_db layer and not here, but we are
-%% interested in having a POC ASAP.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A temporary POC of full sync, not elegant at all.
+
+This should be resolved at the plum_db layer and not here, but we are
+interested in having a POC ASAP.
+""".
 do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
     %% TODO we should spawn an exchange statem for this
     Me = self(),

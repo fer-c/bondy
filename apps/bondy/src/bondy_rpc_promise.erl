@@ -3,14 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A promise is used to implement a capability and a feature:
-%% - the capability to match the callee response (wamp_yield() or wamp_error())
-%% back to the origin wamp_call() and Caller
-%% - the call_timeout feature at the dealer level
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_rpc_promise).
+-moduledoc """
+A promise is used to implement a capability and a feature:
+- the capability to match the callee response (`wamp_yield()` or `wamp_error()`)
+back to the origin `wamp_call()` and Caller
+- the call_timeout feature at the dealer level
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -107,10 +106,9 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new promise.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new promise.
+""".
 -spec new_call(
     RealmUri :: uri(),
     Caller :: bondy_ref:t(),
@@ -178,10 +176,9 @@ new_call(RealmUri, Caller, CallId, Opts) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new promise.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new promise.
+""".
 -spec new_invocation(
     RealmUri :: uri(),
     Caller :: bondy_ref:t(),
@@ -259,153 +256,107 @@ when is_binary(RealmUri), is_integer(InvocationId), is_integer(CallId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the realm of the promise
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the realm of the promise.".
 -spec key(t()) -> key().
 
 key(#bondy_rpc_promise{key = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the promise type
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the promise type.".
 -spec type(t()) -> call | invocation.
 
 type(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.type.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the realm of the promise
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the realm of the promise.".
 -spec realm_uri(t()) -> uri().
 
 realm_uri(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.realm_uri.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the invocation request identifier
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the invocation request identifier.".
 -spec invocation_id(t()) -> optional(id()).
 
 invocation_id(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.invocation_id.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the call request identifier
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the call request identifier.".
 -spec call_id(t()) -> optional(id()).
 
 call_id(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.call_id.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the callee (`bondy_ref:t()') that is the target of this
-%% promise.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the callee (`bondy_ref:t()`) that is the target of this
+promise.
+""".
 -spec callee(t()) -> optional(bondy_ref:t()).
 
 callee(#bondy_rpc_promise{callee = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the caller (`bondy_ref:t()') who made the call request
-%% associated with this invocation promise.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the caller (`bondy_ref:t()`) who made the call request
+associated with this invocation promise.
+""".
 -spec caller(t()) -> bondy_ref:t().
 
 caller(#bondy_rpc_promise{caller = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the queue of relays that are needed to forward an invocation
-%% result to the caller.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the queue of relays that are needed to forward an invocation
+result to the caller.
+""".
 -spec via(t()) -> queue:queue(bondy_ref:relay() | bondy_ref:bridge_relay()).
 
 via(#bondy_rpc_promise{via = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec procedure_uri(t()) -> optional(uri()).
 
 procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec timeout(t()) -> optional(timeout()).
 
 timeout(#bondy_rpc_promise{timeout = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec info(t()) -> info().
 
 info(#bondy_rpc_promise{info = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Key :: any(), t()) -> any() | no_return().
 
 get(Key, #bondy_rpc_promise{info = Info}) ->
     maps:get(Key, Info).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Key :: any(), t(), Default :: any()) -> any().
 
 get(Key, #bondy_rpc_promise{info = Info}, Default) ->
     maps:get(Key, Info, Default).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec expiry(t()) -> optional(timeout()).
 
 expiry(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.expiry.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec timestamp(t()) -> pos_integer().
 
 timestamp(#bondy_rpc_promise{timestamp = Val}) ->
@@ -413,10 +364,9 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Pattern for looking up promises on the promise table.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Pattern for looking up promises on the promise table.
+""".
 -spec call_key_pattern(
     RealmUri :: uri(),
     Caller :: wildcard(bondy_ref:t()),
@@ -448,10 +398,9 @@ call_key_pattern(RealmUri, Caller, CallId) when is_binary(RealmUri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Pattern for looking up promises on the promise table.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Pattern for looking up promises on the promise table.
+""".
 -spec invocation_key_pattern(
     RealmUri :: uri(),
     Caller :: wildcard(bondy_ref:t()),
@@ -501,13 +450,12 @@ when is_binary(RealmUri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds the promise `P' to the promise table.
-%%
-%% If the promise is not taken before `Timeout' milliseconds, the caller
-%% will receive an error with reason "wamp.error.timeout".
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds the promise `P` to the promise table.
+
+If the promise is not taken before `Timeout` milliseconds, the caller
+will receive an error with reason `wamp.error.timeout`.
+""".
 -spec add(t() | [t()]) -> ok | no_return().
 
 add(#bondy_rpc_promise{} = T) ->
@@ -535,20 +483,18 @@ add([#bondy_rpc_promise{key = Key} | _] = L) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Return and removes the promise that matches key pattern.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Return and removes the promise that matches key pattern.
+""".
 -spec take(Pattern :: key()) -> {ok, t()} | error.
 
 take(Pattern) ->
     take(Pattern, active).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Return and removes the promise that matches key pattern.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Return and removes the promise that matches key pattern.
+""".
 -spec take(Pattern :: key(), Status :: status()) -> {ok, t()} | error.
 
 take(#bondy_rpc_promise_key{} = Pattern, Status)
@@ -564,24 +510,22 @@ when Status == all orelse Status == active orelse Status == expired ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Reads the active promise that matches the key pattern
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Reads the active promise that matches the key pattern.
+""".
 -spec find(key()) -> {ok, t()} | error.
 
 find(#bondy_rpc_promise_key{} = Key) ->
     do_find(Key, active).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all expired items.
-%% If the option `on_evict` was set, the bound function will be called passing
-%% the expired item as argument.
-%% An expired item is one for which its expiry (millisecs) has been reached.
-%% Returns the atom 'ok'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all expired items.
+If the option `on_evict` was set, the bound function will be called passing
+the expired item as argument.
+An expired item is one for which its expiry (millisecs) has been reached.
+Returns the atom `ok`.
+""".
 -spec evict_expired(
     Opts :: #{parallel => boolean(), on_evict => evict_fun()}) -> ok.
 
@@ -599,31 +543,29 @@ evict_expired(Opts) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all pending promises from the queue for the reference.
-%% Equivalent to `flush(RealmUri, Ref, #{})'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all pending promises from the queue for the reference.
+Equivalent to `flush(RealmUri, Ref, #{})`.
+""".
 -spec flush(RealmUri :: uri(), bondy_ref:t() | '_') -> ok.
 
 flush(RealmUri, Ref) ->
     flush(RealmUri, Ref, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all pending promises from the queue for the reference.
-%%
-%% When `Ref' is a concrete `bondy_ref:t()' and `Opts' contains the key
-%% `on_callee_flush', the bound function is invoked once per `invocation'
-%% promise being removed (i.e. promises where `Ref' is the callee) before the
-%% promise is deleted. This is used by the dealer to fast-fail in-flight
-%% calls when the callee session dies, avoiding waits up to the call timeout.
-%%
-%% The callback is not invoked for `call' promises (where `Ref' is the caller)
-%% as there is no longer a caller to notify. It is also not invoked when
-%% `Ref' is `_' (bulk flush).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all pending promises from the queue for the reference.
+
+When `Ref` is a concrete `bondy_ref:t()` and `Opts` contains the key
+`on_callee_flush`, the bound function is invoked once per `invocation`
+promise being removed (i.e. promises where `Ref` is the callee) before the
+promise is deleted. This is used by the dealer to fast-fail in-flight
+calls when the callee session dies, avoiding waits up to the call timeout.
+
+The callback is not invoked for `call` promises (where `Ref` is the caller)
+as there is no longer a caller to notify. It is also not invoked when
+`Ref` is `_` (bulk flush).
+""".
 -spec flush(
     RealmUri :: uri(),
     bondy_ref:t() | '_',

@@ -3,16 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% **Note:**
-%% Usernames and group names are stored in lower case. All functions in this
-%% module are case sensitice so when using the functions in this module make
-%% sure the inputs you provide are in lowercase to. If you need to convert your
-%% input to lowercase use {@link string:casefold/1}.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_rbac_group).
+-moduledoc """
+**Note:**
+Usernames and group names are stored in lower case. All functions in this
+module are case sensitice so when using the functions in this module make
+sure the inputs you provide are in lowercase to. If you need to convert your
+input to lowercase use `string:casefold/1`.
+""".
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
@@ -148,10 +146,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Data :: map()) -> Group :: t().
 
 new(Data) ->
@@ -159,29 +153,22 @@ new(Data) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the group names the user's username.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the group names the user's username.".
 -spec name(t()) -> name().
 
 name(#{name := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the group names the user `User' is member of.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the group names the user `User` is member of.".
 -spec groups(t()) -> [name()].
 
 groups(#{groups := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if group `Group' is a member of the group named
-%% `Name'. Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if group `Group` is a member of the group named `Name`.
+Otherwise returns `false`.
+""".
 -spec is_member(Name :: name(), Group :: t()) -> boolean().
 
 is_member(Name0, #{type := ?TYPE, groups := Val}) ->
@@ -189,30 +176,22 @@ is_member(Name0, #{type := ?TYPE, groups := Val}) ->
     Name == all orelse lists:member(Name, Val).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the metadata map associated with the group `Group'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the metadata map associated with the group `Group`.".
 -spec meta(Group :: t()) -> map().
 
 meta(#{type := ?TYPE, meta := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec add(uri(), t()) -> {ok, t()} | {error, any()}.
 
 add(RealmUri, Group) ->
     add(RealmUri, Group, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a new group or updates an existing one.
-%% This change is globally replicated.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a new group or updates an existing one.
+This change is globally replicated.
+""".
 -spec add(RealmUri :: uri(), Group :: t(), Opts :: add_opts()) ->
     {ok, t()} | {error, add_error()}.
 
@@ -233,11 +212,9 @@ add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Name cannot be a reserved name. See {@link bondy_rbac:is_reserved_name/1}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Name cannot be a reserved name. See `bondy_rbac:is_reserved_name/1`.
+""".
 -spec update(RealmUri :: uri(), Name :: binary(), Data :: map()) ->
     {ok, NewGroup :: t()} | {error, any()}.
 
@@ -272,11 +249,9 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds group named `Groupname' to groups `Groups' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds group named `Groupname` to groups `Groups` in realm with uri `RealmUri`.
+""".
 -spec add_group(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
@@ -286,11 +261,9 @@ add_group(RealmUri, Groups, Groupname) ->
     add_groups(RealmUri, Groups, [Groupname]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds groups `Groupnames' to groups `Groups' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds groups `Groupnames` to groups `Groups` in realm with uri `RealmUri`.
+""".
 -spec add_groups(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
@@ -308,11 +281,9 @@ add_groups(RealmUri, Groups, Groupnames)  ->
     update_groups(RealmUri, Groups, Groupnames, Fun).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes groups `Groupnames' from groups `Groups' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes groups `Groupnames` from groups `Groups` in realm with uri `RealmUri`.
+""".
 -spec remove_group(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
@@ -322,11 +293,9 @@ remove_group(RealmUri, Groups, Groupname) ->
     remove_groups(RealmUri, Groups, [Groupname]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes groups `Groupnames' from groups `Groups' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes groups `Groupnames` from groups `Groups` in realm with uri `RealmUri`.
+""".
 -spec remove_groups(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
@@ -339,10 +308,6 @@ remove_groups(RealmUri, Groups, Groupnames) ->
     update_groups(RealmUri, Groups, Groupnames, Fun).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(uri(), binary() | map()) ->
     ok | {error, unknown_group | reserved_name}.
 
@@ -350,10 +315,6 @@ remove(RealmUri, Name) ->
     remove(RealmUri, Name, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(uri(), binary() | map(), map()) ->
     ok | {error, unknown_group | reserved_name}.
 
@@ -386,16 +347,15 @@ remove(RealmUri, Name, _Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all groups that beloong to realm `RealmUri'.
-%% If the option `dirty` is set to `true` this removes the groups directly from
-%% store (triggering a broadcast to other Bondy nodes). If set to `false` (the
-%% default) then for each group the function remove/2 is called.
-%%
-%% Use `dirty' with a value of `true' only when you are removing the realm
-%% entirely.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all groups that beloong to realm `RealmUri`.
+If the option `dirty` is set to `true` this removes the groups directly from
+store (triggering a broadcast to other Bondy nodes). If set to `false` (the
+default) then for each group the function `remove/2` is called.
+
+Use `dirty` with a value of `true` only when you are removing the realm
+entirely.
+""".
 -spec remove_all(uri(), #{dirty => boolean()}) -> ok.
 
 remove_all(RealmUri, Opts) ->
@@ -416,10 +376,6 @@ remove_all(RealmUri, Opts) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec lookup(uri(), list() | binary()) -> t() | {error, not_found}.
 
 lookup(RealmUri, Name0) ->
@@ -439,10 +395,6 @@ lookup(RealmUri, Name0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec fetch(uri(), list() | binary()) -> t() | no_return().
 
 fetch(RealmUri, Name) ->
@@ -452,10 +404,6 @@ fetch(RealmUri, Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec exists(uri(), list() | binary()) -> boolean().
 
 exists(RealmUri, Name) ->
@@ -465,20 +413,12 @@ exists(RealmUri, Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list(uri()) -> list(t()).
 
 list(RealmUri) ->
     list(RealmUri, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
 list(RealmUri, Opts) ->
@@ -507,21 +447,17 @@ list(RealmUri, Opts) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the external representation of the Group.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the external representation of the Group.".
 -spec to_external(Group :: t()) -> external().
 
 to_external(#{type := ?TYPE, version := ?VERSION} = Group) ->
     Group.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Takes a list of groupnames and returns any that can't be found on the
-%% realm identified by `RealmUri' or in its prototype (if set).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Takes a list of groupnames and returns any that can't be found on the realm
+identified by `RealmUri` or in its prototype (if set).
+""".
 -spec unknown(RealmUri :: uri(), Names :: [binary()]) ->
     Unknown :: [binary()].
 
@@ -543,17 +479,16 @@ unknown(RealmUri, Names) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a directed graph of the groups `Groups' by traversing the group
-%% membership relationship and computes the topological ordering of the
-%% groups if such ordering exists.  Otherwise returns `Groups' unmodified.
-%% Fails with `{cycle, Path :: [name()]}' exception if the graph directed graph
-%% has cycles of length two or more.
-%%
-%% This function doesn't fetch the definition of the groups in each group
-%% `groups' property.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a directed graph of the groups `Groups` by traversing the group
+membership relationship and computes the topological ordering of the
+groups if such ordering exists.  Otherwise returns `Groups` unmodified.
+Fails with `{cycle, Path :: [name()]}` exception if the graph directed graph
+has cycles of length two or more.
+
+This function doesn't fetch the definition of the groups in each group
+`groups` property.
+""".
 -spec topsort([t()]) -> [t()].
 
 topsort(L) when length(L) =< 1 ->
@@ -592,10 +527,6 @@ topsort(Groups) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec normalise_name(Term :: name()) -> name() | no_return().
 
 normalise_name(all) ->
@@ -624,26 +555,16 @@ normalise_name(_) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc bondy_config
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "bondy_config".
 will_merge(_PKey, _New, _Old) ->
     true.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 on_merge(_PKey, _New, _Old) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local update
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local update".
 on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
     IsCreate =
         Old == undefined orelse
@@ -661,18 +582,12 @@ on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local delete
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local delete".
 on_delete({?PLUMDB_PREFIX(RealmUri), Name}, _Old) ->
     bondy_event_manager:notify({[bondy, rbac, group, deleted], RealmUri, Name}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local erase
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local erase".
 on_erase(_PKey, _Old) ->
     ok.
 
@@ -705,11 +620,7 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 store(Prefix, Name, Group, #{rebase := true} = Opts) ->
     ActorId = maps:get(actor_id, Opts, undefined),
     Object = bondy_utils:rebase_object(Group, ActorId),
@@ -719,11 +630,8 @@ store(Prefix, Name, Group, _) ->
     plum_db:put(Prefix, Name, Group).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Doesn't take into account realm inheritance.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Doesn't take into account realm inheritance.".
 exists_check(Prefix, Name) ->
     case plum_db:get(Prefix, Name) of
         undefined -> throw(unknown_group);
@@ -731,11 +639,8 @@ exists_check(Prefix, Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Doesn't take into account realm inheritance
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Doesn't take into account realm inheritance".
 not_exists_check(Prefix, Name) ->
     case plum_db:get(Prefix, Name) of
         undefined -> ok;
@@ -743,11 +648,8 @@ not_exists_check(Prefix, Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Takes into account realm inheritance
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Takes into account realm inheritance".
 group_exists_check(RealmUri, Groups) ->
     %% Takes into account realm inheritance as it uses unknown
     case unknown(RealmUri, Groups) of
@@ -758,11 +660,8 @@ group_exists_check(RealmUri, Groups) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Takes into account realm inheritance
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Takes into account realm inheritance".
 do_unknown(RealmUri, Names) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
     ordsets:fold(

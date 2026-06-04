@@ -3,11 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_http_gateway_utils).
+-moduledoc """
+Utility functions for the HTTP gateway, including building location URIs and
+setting HTTP `Link` response headers.
+""".
 
 -type state_fun() :: fun((any()) -> any()).
 -export_type([state_fun/0]).

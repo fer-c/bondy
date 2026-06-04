@@ -3,11 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_registry_api).
+-moduledoc """
+Implements the `bondy_wamp_api` behaviour for the registry WAMP API, dispatching
+procedure calls that list registrations, subscriptions and callees for a realm.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -24,10 +24,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(
     Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok

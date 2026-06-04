@@ -1465,12 +1465,11 @@ del_prefix_subscription_index(Store, Entry) ->
     del_ptrie_index(Store, Entry, Ptrie).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc increases the ref_count for entry's node by 1. If the node was not
-%% present creates the entry on the table with ref_count = 1.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+increases the `ref_count` for entry's node by 1. If the node was not
+present creates the entry on the table with `ref_count = 1`.
+""".
 add_remote_exact_subscription_idx(Store, Entry) ->
     Tab = Store#bondy_registry_store.sub_remote_exact_idx_tab,
     RealmUri = bondy_registry_entry:realm_uri(Entry),
@@ -1493,12 +1492,11 @@ add_remote_exact_subscription_idx(Store, Entry) ->
     {ok, {Entry, IsFirstEntry}}.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc decreases the ref_count for entry's node by 1. If the node was not
-%% present creates the entry on the table with ref_count = 1.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+decreases the `ref_count` for entry's node by 1. If the node was not
+present creates the entry on the table with `ref_count = 1`.
+""".
 del_remote_exact_subscription_index(Store, Entry) ->
     Tab = Store#bondy_registry_store.sub_remote_exact_idx_tab,
     RealmUri = bondy_registry_entry:realm_uri(Entry),

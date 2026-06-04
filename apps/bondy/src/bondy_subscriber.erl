@@ -3,15 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module implements a supervised process (gen_server) that acts as a
-%% local (internal) WAMP subscriber that when received an EVENT applies the
-%% user provided function.
-%%
-%% It is used by bondy_broker:subscribe/4 and bondy_broker:unsubscribe/1.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_subscriber).
+-moduledoc """
+This module implements a supervised process (gen_server) that acts as a local
+(internal) WAMP subscriber that when received an EVENT applies the user provided
+function.
+
+It is used by `bondy_broker:subscribe/4` and `bondy_broker:unsubscribe/1`.
+""".
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -64,10 +63,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec start_link(id(), uri(), map(), uri(), function()) ->
     {ok, pid()} | {error, any()}.
 
@@ -77,43 +72,23 @@ start_link(Id, RealmUri, Opts, Topic, Fun) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 %% @private
 name(Id) ->
     list_to_atom("bondy_subscriber_" ++ integer_to_list(Id)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 pid(Id) ->
     bondy_gproc:lookup_pid({?MODULE, Id}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 info(Subscriber) ->
     gen_server:call(Subscriber, info, 5000).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 handle_event(Subscriber, Event) ->
     gen_server:cast(Subscriber, Event).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 handle_event_sync(Subscriber, Event) ->
     gen_server:call(Subscriber, Event, 5000).
 

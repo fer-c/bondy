@@ -3,14 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% It uses Jump Consistent Hash algorithm described in
-%% [A Fast, Minimal Memory, Consistent Hash Algorithm](https://arxiv.org/ftp/
-%% arxiv/papers/1406/1406.2294.pdf).
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_consistent_hashing).
+-moduledoc """
+It uses Jump Consistent Hash algorithm described in
+[A Fast, Minimal Memory, Consistent Hash Algorithm](https://arxiv.org/ftp/arxiv/papers/1406/1406.2294.pdf).
+""".
 
 -define(MAGIC, 16#27BB2EE687B0B0FD).
 -define(MASK, 16#FFFFFFFFFFFFFFFF).
@@ -26,20 +23,12 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec bucket(Key :: term(), Buckets :: pos_integer()) -> Bucket :: integer().
 
 bucket(Key, Buckets) ->
     bucket(Key, Buckets, jch).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec bucket(Key :: term(), Buckets :: pos_integer(), Algo :: atom()) ->
     Bucket :: integer().
 
@@ -69,15 +58,11 @@ jump_consistent_hash(Key, N) ->
     jump_consistent_hash(Key, N, -1, 0).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% The following is the C++ implementation in
-%% A Fast, Minimal Memory, Consistent Hash Algorithm
-%% https://arxiv.org/pdf/1406.2294.pdf
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+The following is the C++ implementation in
+[A Fast, Minimal Memory, Consistent Hash Algorithm](https://arxiv.org/pdf/1406.2294.pdf).
+""".
 
 %% static int32_t jump_consistent_hash(uint64_t key, int32_t num_buckets) {
 %%   int64_t b = -1, j = 0;

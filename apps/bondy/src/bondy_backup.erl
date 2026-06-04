@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_backup).
+-moduledoc """
+A `gen_server` that creates and restores backups of the database, running the
+backup and restore work asynchronously and writing to (or reading from) a
+`disk_log` file while tracking progress and emitting backup lifecycle events.
+""".
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
@@ -109,18 +110,13 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Backups up the database in the directory indicated by Path.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Backups up the database in the directory indicated by Path.
+""".
 -spec backup(file:filename_all() | map()) ->
     {ok, info()} | {error, term()}.
 
@@ -137,18 +133,10 @@ backup(Path) ->
     backup(#{path => Path}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 status() ->
     status(#{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec status(file:filename_all() | map()) ->
     undefined | {status(), non_neg_integer()} | {error, unknown}.
 
@@ -164,10 +152,9 @@ status(Map0) when is_map(Map0) ->
 status(Filename) ->
     status(#{filename => Filename}).
 
-%% -----------------------------------------------------------------------------
-%% @doc Restores a backup log.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Restores a backup log.
+""".
 -spec restore(file:filename_all() | map()) -> {ok, info()} | {error, term()}.
 
 restore(Map0) when is_map(Map0) ->

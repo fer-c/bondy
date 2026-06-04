@@ -4,19 +4,19 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc EARLY DRAFT implementation of the client-side connection between and
-%% edge node (client) and a remote/core node (server).
-%% At the moment there is not coordination support for Bridge Relays, this
-%% means that if you add a bridge to the bondy.conf that is used to configure
-%% more than one node, each node will start a bridge. This is ok for a single
-%% node, but not ok for a cluster. In the future we will have some form of
-%% leader election to have a singleton.
-%%
-%% Bridges created through the API will only start on the receiving node.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_manager).
+-moduledoc """
+EARLY DRAFT implementation of the client-side connection between and
+edge node (client) and a remote/core node (server).
+
+At the moment there is not coordination support for Bridge Relays, this
+means that if you add a bridge to the bondy.conf that is used to configure
+more than one node, each node will start a bridge. This is ok for a single
+node, but not ok for a cluster. In the future we will have some form of
+leader election to have a singleton.
+
+Bridges created through the API will only start on the receiving node.
+""".
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
@@ -88,27 +88,20 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Starts the manager
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Starts the manager.".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a bridge to the manager and optionally starts it.
-%%
-%% Options:
-%%
-%% <ul>
-%% <li>`autostart :: boolean()' - if true and the add operation succeeded
-%% the bridge will be immediately started. If `false' the bridge can be started
-%% later using {@link start_bridge/1}.
-%% </li>
-%% </ul>
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a bridge to the manager and optionally starts it.
+
+Options:
+
+- `autostart :: boolean()` - if true and the add operation succeeded
+  the bridge will be immediately started. If `false` the bridge can be started
+  later using `start_bridge/1`.
+""".
 -spec add_bridge(Data :: map(), Opts :: add_opts()) ->
     {ok, bondy_bridge_relay:t()} | {error, Reason :: any()}.
 
@@ -123,10 +116,6 @@ add_bridge(Data, Opts0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get_bridge(Name :: binary()) ->
     {ok, bondy_bridge_relay:t()} | {error, not_found}.
 
@@ -134,30 +123,18 @@ get_bridge(Name) ->
     gen_server:call(?MODULE, {get_bridge, Name}, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list_bridges() -> [bondy_bridge_relay:t()].
 
 list_bridges() ->
     gen_server:call(?MODULE, list_bridges, timer:seconds(15)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec status() -> status().
 
 status() ->
     gen_server:call(?MODULE, status, timer:seconds(15)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove_bridge(Name :: binary()) ->
     ok | {error, running | restarting | not_found}.
 
@@ -165,77 +142,54 @@ remove_bridge(Name) ->
     gen_server:call(?MODULE, {remove_bridge, Name}, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec enable_bridge(Name :: binary()) -> ok | {error, any()}.
 
 enable_bridge(Name) ->
     gen_server:call(?MODULE, {enable_bridge, Name}, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec disable_bridge(Name :: binary()) -> ok | {error, any()}.
 
 disable_bridge(Name) ->
     gen_server:call(?MODULE, {disable_bridge, Name}, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a bridge to the manager and optionally starts it.
-%% Options:
-%% <ul>
-%% <li>`autostart :: boolean()'</li> - if true and the add operation succeeded
-%% the bridge will be immediately started.
-%% </ul>
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a bridge to the manager and optionally starts it.
+
+Options:
+
+- `autostart :: boolean()` - if true and the add operation succeeded
+  the bridge will be immediately started.
+""".
 -spec start_bridges() -> ok.
 
 start_bridges() ->
     gen_server:call(?MODULE, start_bridges, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Starts a bridge.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Starts a bridge.".
 -spec start_bridge(Name :: binary()) -> ok | {error, any()}.
 
 start_bridge(Name) ->
     gen_server:call(?MODULE, {start_bridge, Name}, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Stops a bridge.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Stops a bridge.".
 -spec stop_bridge(Name :: binary()) -> ok | {error, any()}.
 
 stop_bridge(Name) ->
     gen_server:call(?MODULE, {stop_bridge, Name}, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Stops all bridges
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Stops all bridges.".
 -spec stop_bridges() -> ok.
 
 stop_bridges() ->
     gen_server:call(?MODULE, stop_bridges, timer:seconds(30)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Starts the tcp and tls raw socket listeners
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Starts the tcp and tls raw socket listeners.".
 -spec start_listeners() -> ok.
 
 start_listeners() ->
@@ -244,10 +198,6 @@ start_listeners() ->
     ok = bondy_ranch_listener:start(?TLS, Protocol, bondy_config:get(?TLS)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec stop_listeners() -> ok.
 
 stop_listeners() ->
@@ -255,10 +205,6 @@ stop_listeners() ->
     ok = bondy_ranch_listener:stop(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec suspend_listeners() -> ok.
 
 suspend_listeners() ->
@@ -266,10 +212,6 @@ suspend_listeners() ->
     ok = bondy_ranch_listener:suspend(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec resume_listeners() -> ok.
 
 resume_listeners() ->
@@ -277,27 +219,15 @@ resume_listeners() ->
     bondy_ranch_listener:resume(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 connections() ->
     bondy_ranch_listener:connections(?TCP)
         ++ bondy_ranch_listener:connections(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 tls_connections() ->
     bondy_ranch_listener:connections(?TLS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 tcp_connections() ->
     bondy_ranch_listener:connections(?TCP).
 

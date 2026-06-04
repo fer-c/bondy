@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_oauth2_rest_handler).
+-moduledoc """
+A Cowboy REST handler implementing the OAuth2 token endpoints. It serves
+the token, token revocation and JWKS HTTP routes, supporting the client
+credentials, resource owner password and refresh token grant flows.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include("http_api.hrl").
@@ -212,10 +213,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 init(Req, Opts0) ->
     Opts1 = maps_utils:validate(Opts0, ?OPTS_SPEC),
     St = #state{

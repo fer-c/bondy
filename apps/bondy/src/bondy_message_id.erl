@@ -5,6 +5,10 @@
 
 
 -module(bondy_message_id).
+-moduledoc """
+Generates WAMP message identifiers in the global, router and session scopes
+as defined by the WAMP specification.
+""".
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
@@ -25,11 +29,10 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Initialises the ets table to support session-scoped identifiers.
-%% This function has to be called during application startup.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Initialises the ets table to support session-scoped identifiers.
+This function has to be called during application startup.
+""".
 -spec init() -> ok.
 
 init() ->
@@ -46,10 +49,6 @@ init() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init_session(
     RealmUri :: uri(),
     SessionOrId :: bondy_session:t() | bondy_session_id:t()) -> ok.
@@ -64,42 +63,38 @@ init_session(RealmUri, Session) ->
     session(RealmUri, bondy_session:id(Session)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Generates a WAMP message id in the global scope.
-%% IDs in the global scope MUST be drawn _randomly_ from a uniform
-%% distribution over the complete range [0, 2^53].
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates a WAMP message id in the global scope.
+IDs in the global scope MUST be drawn *randomly* from a uniform
+distribution over the complete range `[0, 2^53]`.
+""".
 -spec global() -> id().
 
 global() ->
     bondy_wamp_utils:rand_uniform().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Generates a WAMP message id in the router scope.
-%% IDs in the router scope CAN be chosen freely by the specific router
-%% implementation.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates a WAMP message id in the router scope.
+IDs in the router scope CAN be chosen freely by the specific router
+implementation.
+""".
 -spec router(RealmUri :: uri()) -> id().
 
 router(_) ->
     global().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Generates a WAMP message id in the session scope.
-%% IDs in the session scope MUST be incremented by 1 beginning with 1 and
-%% wrapping to 1 after it reached 2^53 (for each direction -
-%% Client-to-Router and Router-to-Client)
-%% This is the Router-to-Client direction.
-%%
-%% If the counter hasn't been previously initialised using `init_session/2',
-%% the function will return a random ID by calling `router/1'.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates a WAMP message id in the session scope.
+IDs in the session scope MUST be incremented by 1 beginning with 1 and
+wrapping to 1 after it reached `2^53` (for each direction -
+Client-to-Router and Router-to-Client)
+This is the Router-to-Client direction.
+
+If the counter hasn't been previously initialised using `init_session/2`,
+the function will return a random ID by calling `router/1`.
+""".
 -spec session(
     RealmUri :: uri(),
     SessionOrId :: bondy_session:t() | bondy_session_id:t()) -> id().
@@ -117,10 +112,9 @@ session(RealmUri, Session) ->
     session(RealmUri, bondy_session:id(Session)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all counters associated with session identifier `SessionId'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all counters associated with session identifier `SessionId`.
+""".
 -spec purge_session(
     RealmUri :: uri(),
     SessionOrId :: bondy_session:t() | bondy_session_id:t()) -> ok.

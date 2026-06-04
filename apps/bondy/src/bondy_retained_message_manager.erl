@@ -3,11 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc Implements Eviction amogst other things
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_retained_message_manager).
+-moduledoc """
+Implements eviction amongst other things.
+""".
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -50,10 +49,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Realm :: uri(), Topic :: uri()) ->
     bondy_retained_message:t() | undefined.
 
@@ -61,10 +56,6 @@ get(Realm, Topic) ->
     bondy_retained_message:get(Realm, Topic).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec take(Realm :: uri(), Topic :: uri()) ->
     bondy_retained_message:t() | undefined.
 
@@ -74,10 +65,6 @@ take(Realm, Topic) ->
     Msg.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(bondy_retained_message:continuation()) ->
     {[bondy_retained_message:t()] | bondy_retained_message:continuation()}
     | bondy_retained_message:eot().
@@ -86,10 +73,6 @@ match(Cont) ->
     bondy_retained_message:match(Cont).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
@@ -102,10 +85,6 @@ match(Realm, Topic, SessionId, Strategy) ->
     bondy_retained_message:match(Realm, Topic, SessionId, Strategy).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
@@ -119,10 +98,6 @@ match(Realm, Topic, SessionId, Strategy, Opts0) ->
     bondy_retained_message:match(Realm, Topic, SessionId, Strategy, Opts0).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
@@ -134,10 +109,6 @@ put(Realm, Topic, Event, MatchOpts) ->
     put(Realm, Topic, Event, MatchOpts, default_ttl()).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
@@ -208,47 +179,39 @@ put(Realm, Topic, Event, MatchOpts, TTL) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc The max size for an event message.
-%% All events whose size exceeds this value will not be retained.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+The max size for an event message.
+All events whose size exceeds this value will not be retained.
+""".
 max_message_size() ->
     bondy_config:get([wamp_message_retention, max_message_size]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Maximum space in memory used by retained messages.
-%% Once the max has been reached no more events will be stored.
-%% A value of 0 means no limit is enforced.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Maximum space in memory used by retained messages.
+Once the max has been reached no more events will be stored.
+A value of 0 means no limit is enforced.
+""".
 max_memory() ->
     bondy_config:get([wamp_message_retention, max_memory]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Maximum number of messages that can be store in a Bondy node.
-%% Once the max has been reached no more events will be stored.
-%% A value of 0 means no limit is enforced.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Maximum number of messages that can be store in a Bondy node.
+Once the max has been reached no more events will be stored.
+A value of 0 means no limit is enforced.
+""".
 max_messages() ->
     bondy_config:get([wamp_message_retention, max_messages]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Default TTL for retained messages.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Default TTL for retained messages.
+""".
 default_ttl() ->
     bondy_config:get([wamp_message_retention, default_ttl]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec counters(Realm :: uri()) -> #{messages => integer(), memory => integer()}.
 
 counters(Realm) ->
@@ -259,30 +222,18 @@ counters(Realm) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 incr_counters(Realm, N, Size) ->
     Ref = get_counters_ref(Realm),
     ok = counters:add(Ref, 1, N),
     counters:add(Ref, 2, Size).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 decr_counters(Realm, N, Size) ->
     Ref = get_counters_ref(Realm),
     ok = counters:sub(Ref, 1, N),
     counters:sub(Ref, 2, Size).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

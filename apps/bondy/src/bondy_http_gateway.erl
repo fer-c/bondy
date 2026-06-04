@@ -753,14 +753,12 @@ load_spec(FName) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% We store the API Spec in the metadata store. Notice that we store the JSON
-%% and not the parsed spec as the parsed spec might contain mops proxy
-%% functions.  In case we upgrade the code of the mops.erl module those funs
-%% will no longer be valid and will fail with a badfun exception.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+We store the API Spec in the metadata store. Notice that we store the JSON
+and not the parsed spec as the parsed spec might contain mops proxy
+functions.  In case we upgrade the code of the mops.erl module those funs
+will no longer be valid and will fail with a badfun exception.
+""".
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
     plum_db:put(?PREFIX, Id, Spec).
 
@@ -921,12 +919,11 @@ validate_spec(Map) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Loads all the existing API specs from store, parses them and generates a
-%% dispatch table per scheme.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Loads all the existing API specs from store, parses them and generates a
+dispatch table per scheme.
+""".
 load_dispatch_tables() ->
     %% We sorted by time, this is because in case api definitions overlap
     %% we want at least try to process them in FIFO order.
@@ -982,11 +979,7 @@ compile_dispatch(Routes, Name) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec rebuild_dispatch_table(atom() | binary(), list()) -> ok.
 
 rebuild_dispatch_table(http, Routes) ->
@@ -1033,11 +1026,7 @@ handle_spec_updates(#state{updated_specs = L}) ->
     rebuild_dispatch_tables().
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol,
     %% SSE transport endpoints, and Longpoll transport endpoints
@@ -1063,11 +1052,7 @@ base_routes() ->
     ].
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 admin_base_routes() ->
     [
         {'_', [
@@ -1202,11 +1187,8 @@ listener_transport_opts(Name) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Tear down all APIs for that realm when event occurs
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Tear down all APIs for that realm when event occurs.".
 on_realm_deleted(_RealmUri, State) ->
     %% TODO: tear down all APIs for this realm
     State.

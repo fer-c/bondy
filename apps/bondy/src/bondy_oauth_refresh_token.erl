@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_oauth_refresh_token).
+-moduledoc """
+Generates, parses and verifies OAuth refresh tokens. Supports a plain
+sortable variant and an HMAC-protected variant that adds integrity
+protection.
+""".
 
 -define(SCHEME, "bondy:rtoken:").
 -define(VARIANT1, ~"1").

@@ -3,104 +3,83 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% @doc
-%% Collects Cowboy metrics using
-%% <a href="https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl">
-%%   metrics stream handler
-%% </a>.
-%%
-%% ==Exported metrics==
-%% <ul>
-%%   <li>
-%%     `cowboy_early_errors_total'<br/>
-%%     Type: counter.<br/>
-%%     Labels: default - `[]', configured via `early_errors_labels'.<br/>
-%%     Total number of Cowboy early errors, i.e. errors that occur before a request is received.
-%%   </li>
-%%   <li>
-%%     `bondy_protocol_upgrades_total'<br/>
-%%     Type: counter.<br/>
-%%     Labels: default - `[]', configured via `protocol_upgrades_labels'.<br/>
-%%     Total number of protocol upgrades, i.e. when http connection upgraded to websocket connection.
-%%   </li>
-%%   <li>
-%%     `cowboy_requests_total'<br/>
-%%     Type: counter.<br/>
-%%     Labels: default - `[method, reason, status_class]', configured via `request_labels'.<br/>
-%%     Total number of Cowboy requests.
-%%   </li>
-%%   <li>
-%%     `cowboy_spawned_processes_total'<br/>
-%%     Type: counter.<br/>
-%%     Labels: default - `[method, reason, status_class]', configured via `request_labels'.<br/>
-%%     Total number of spawned processes.
-%%   </li>
-%%   <li>
-%%     `cowboy_errors_total'<br/>
-%%     Type: counter.<br/>
-%%     Labels: default - `[method, reason, error]', configured via `error_labels'.<br/>
-%%     Total number of Cowboy request errors.
-%%   </li>
-%%   <li>
-%%     `cowboy_request_duration_microseconds'<br/>
-%%     Type: histogram.<br/>
-%%     Labels: default - `[method, reason, status_class]', configured via `request_labels'.<br/>
-%%     Buckets: default - `[0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]', configured via `duration_buckets'.<br/>
-%%     Cowboy request duration.
-%%   </li>
-%%   <li>
-%%     `cowboy_receive_body_duration_microseconds'<br/>
-%%     Type: histogram.<br/>
-%%     Labels: default - `[method, reason, status_class]', configured via `request_labels'.<br/>
-%%     Buckets: default - `[0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]', configured via `duration_buckets'.<br/>
-%%     Request body receiving duration.
-%%   </li>
-%% </ul>
-%%
-%% ==Configuration==
-%%
-%% Prometheus Cowboy2 instrumenter configured via `cowboy_instrumenter' key of `prometheus'
-%% app environment.
-%%
-%% Default configuration:
-%%
-%% <pre lang="erlang">
-%% {prometheus, [
-%%   ...
-%%   {cowboy_instrumenter, [{duration_buckets, [0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]},
-%%                          {early_error_labels,  []},
-%%                          {request_labels, [method, reason, status_class]},
-%%                          {error_labels, [method, reason, error]},
-%%                          {registry, default}]}
-%%   ...
-%% ]}
-%% </pre>
-%%
-%% ==Labels==
-%%
-%% Builtin:
-%%  - host,
-%%  - port,
-%%  - method,
-%%  - status,
-%%  - status_class,
-%%  - reason,
-%%  - error.
-%%
-%% ===Custom labels===
-%% can be implemented via module exporting label_value/2 function.
-%% First argument will be label name, second is Metrics data from
-%% <a href="https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl">
-%% metrics stream handler
-%% </a>.
-%% Set this module to `labels_module' configuration option.
-%%
-%% @end
-
 %% Replaces
 %% -module(prometheus_cowboy2_instrumenter).
 
 -module(bondy_prometheus_cowboy_collector).
+-moduledoc """
+Collects Cowboy metrics using the [metrics stream handler](https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl).
+
+## Exported metrics
+
+- `cowboy_early_errors_total`
+  Type: counter.
+  Labels: default - `[]`, configured via `early_errors_labels`.
+  Total number of Cowboy early errors, i.e. errors that occur before a request is received.
+- `bondy_protocol_upgrades_total`
+  Type: counter.
+  Labels: default - `[]`, configured via `protocol_upgrades_labels`.
+  Total number of protocol upgrades, i.e. when http connection upgraded to websocket connection.
+- `cowboy_requests_total`
+  Type: counter.
+  Labels: default - `[method, reason, status_class]`, configured via `request_labels`.
+  Total number of Cowboy requests.
+- `cowboy_spawned_processes_total`
+  Type: counter.
+  Labels: default - `[method, reason, status_class]`, configured via `request_labels`.
+  Total number of spawned processes.
+- `cowboy_errors_total`
+  Type: counter.
+  Labels: default - `[method, reason, error]`, configured via `error_labels`.
+  Total number of Cowboy request errors.
+- `cowboy_request_duration_microseconds`
+  Type: histogram.
+  Labels: default - `[method, reason, status_class]`, configured via `request_labels`.
+  Buckets: default - `[0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]`, configured via `duration_buckets`.
+  Cowboy request duration.
+- `cowboy_receive_body_duration_microseconds`
+  Type: histogram.
+  Labels: default - `[method, reason, status_class]`, configured via `request_labels`.
+  Buckets: default - `[0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]`, configured via `duration_buckets`.
+  Request body receiving duration.
+
+## Configuration
+
+Prometheus Cowboy2 instrumenter configured via `cowboy_instrumenter` key of `prometheus`
+app environment.
+
+Default configuration:
+
+```erlang
+{prometheus, [
+  ...
+  {cowboy_instrumenter, [{duration_buckets, [0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]},
+                         {early_error_labels,  []},
+                         {request_labels, [method, reason, status_class]},
+                         {error_labels, [method, reason, error]},
+                         {registry, default}]}
+  ...
+]}
+```
+
+## Labels
+
+Builtin:
+ - host,
+ - port,
+ - method,
+ - status,
+ - status_class,
+ - reason,
+ - error.
+
+### Custom labels
+
+can be implemented via module exporting `label_value/2` function.
+First argument will be label name, second is Metrics data from the
+[metrics stream handler](https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl).
+Set this module to `labels_module` configuration option.
+""".
 
 
 -export([setup/0]).
@@ -133,21 +112,19 @@
 %% API
 %% ===================================================================
 
+-doc """
+[Metrics stream handler](https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl) callback.
+""".
 -spec observe(map()) -> ok.
-%% @doc
-%% <a href="https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl">
-%% Metrics stream handler
-%% </a> callback.
-%% @end
 observe(Metrics0=#{ref:=ListenerRef}) ->
   {Host, Port} = ranch:get_addr(ListenerRef),
   dispatch_metrics(Metrics0#{listener_host=>Host,
                              listener_port=>Port}),
   ok.
 
-%% @doc
-%% Sets all metrics up. Call this when the app starts.
-%% @end
+-doc """
+Sets all metrics up. Call this when the app starts.
+""".
 setup() ->
   prometheus_counter:declare([{name, bondy_http_early_errors_total},
                               {registry, registry()},

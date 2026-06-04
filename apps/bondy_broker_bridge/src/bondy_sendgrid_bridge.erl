@@ -227,11 +227,7 @@ terminate(_Reason, _State) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec send_email(map())
     -> {ok, binary()} | {error, Reason :: any()} | no_return().
 
@@ -278,11 +274,7 @@ send_email(Action) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec formatted_body(map()) -> list() | no_return().
  
 formatted_body(#{<<"template_id">> := _, <<"template_data">> := _}) ->
@@ -302,11 +294,7 @@ formatted_body(_) ->
     error({error, <<"Missing body data Keys: [text/html, text/plain or template_id and template_data]">>}).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec do_send_with_retry(map(), integer(), backoff:backoff())
     -> {ok, binary()} | {error, Reason :: any()} | no_return().
 

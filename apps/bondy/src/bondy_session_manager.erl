@@ -4,6 +4,12 @@
 %% =============================================================================
 
 -module(bondy_session_manager).
+-moduledoc """
+A pooled `gen_server` worker that manages the lifecycle of WAMP sessions. It
+stores sessions, monitors their owner (connection) process to clean up on
+crashes, registers per-session WAMP procedures, and closes sessions
+individually or in bulk.
+""".
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
@@ -55,20 +61,12 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link(PoolName, WorkerName) ->
     gen_server:start_link(
         {local, WorkerName}, ?MODULE, [PoolName, WorkerName], []
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec pool() -> pool().
 
 pool() ->
@@ -83,15 +81,15 @@ pool() ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Stores the session `Session' and sets up a monitor for the calling
-%% process which is assumed to be the client connection process e.g. WAMP
-%% connection. In case the connection crashes it performs the cleanup of any
-%% session data that should not be retained.
-%% The session manager worker is picked from the pool based on the hash of the
-%% calling process' pid.
-%% -----------------------------------------------------------------------------
-%%
+-doc """
+Stores the session `Session` and sets up a monitor for the calling process
+which is assumed to be the client connection process e.g. WAMP connection. In
+case the connection crashes it performs the cleanup of any session data that
+should not be retained.
+
+The session manager worker is picked from the pool based on the hash of the
+calling process' pid.
+""".
 -spec open(Session :: bondy_session:t()) -> ok | {error, timeout | any()}.
 
 open(Session) ->
@@ -108,17 +106,15 @@ open(Session) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new session provided the RealmUri exists or can be dynamically
-%% created.
-%% It calls {@link bondy_session:new/4} which will fail with an exception
-%% if the realm does not exist or cannot be created.
-%%
-%% This function also sets up a monitor for the calling process which is
-%% assumed to be the client connection process e.g. WAMP connection. In case
-%% the connection crashes it performs the cleanup of any session data that
-%% should not be retained.
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new session provided the RealmUri exists or can be dynamically
+created. It calls `bondy_session:new/4` which will fail with an exception if the
+realm does not exist or cannot be created.
+
+This function also sets up a monitor for the calling process which is assumed to
+be the client connection process e.g. WAMP connection. In case the connection
+crashes it performs the cleanup of any session data that should not be retained.
+""".
 -spec open(
     bondy_session_id:t(),
     uri() | bondy_realm:t(),
@@ -139,11 +135,11 @@ open(Id, RealmOrUri, Opts) ->
         Id
     ).
 
-%% -----------------------------------------------------------------------------
-%% @doc Closes the session
-%% This function does NOT send a GOODBYE WAMP message to the session owner.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Closes the session.
+
+This function does NOT send a GOODBYE WAMP message to the session owner.
+""".
 -spec close(bondy_session:t()) -> ok.
 
 close(Session) ->
@@ -155,11 +151,11 @@ close(Session) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Closes the session.
-%% This function sends a GOODBYE WAMP message to the session owner.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Closes the session.
+
+This function sends a GOODBYE WAMP message to the session owner.
+""".
 -spec close(bondy_session:t(), uri()) -> ok.
 
 close(Session, ReasonUri) when is_binary(ReasonUri) ->
@@ -172,28 +168,26 @@ close(Session, ReasonUri) when is_binary(ReasonUri) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Closes all managed sessions in realm with URI `RealmUri'.
-%%
-%% Notice that `RealmUri' will be used to match the session's`authrealm'
-%% property and not `realm_uri'. If the user is an SSO user `authrealm' is the
-%% SSO realm and as result all sessions in all associated realms will be closed.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Closes all managed sessions in realm with URI `RealmUri`.
+
+Notice that `RealmUri` will be used to match the session's `authrealm` property
+and not `realm_uri`. If the user is an SSO user `authrealm` is the SSO realm and
+as result all sessions in all associated realms will be closed.
+""".
 -spec close_all(RealmUri :: uri()) -> ok.
 
 close_all(RealmUri) ->
     close_all(RealmUri, ?WAMP_CLOSE_NORMAL).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Closes all managed sessions in realm with URI `RealmUri'.
-%%
-%% Notice that `RealmUri' will be used to match the session's`authrealm'
-%% property and not `realm_uri'. If the user is an SSO user `authrealm' is the
-%% SSO realm and as result all sessions in all associated realms will be closed.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Closes all managed sessions in realm with URI `RealmUri`.
+
+Notice that `RealmUri` will be used to match the session's `authrealm` property
+and not `realm_uri`. If the user is an SSO user `authrealm` is the SSO realm and
+as result all sessions in all associated realms will be closed.
+""".
 -spec close_all(RealmUri :: uri(), ReasonUri :: uri()) -> ok.
 
 close_all(RealmUri, ReasonUri) when is_binary(ReasonUri) ->
@@ -201,16 +195,14 @@ close_all(RealmUri, ReasonUri) when is_binary(ReasonUri) ->
     do_close_all(Bindings, #{}, ReasonUri).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Closes all sessions for user `Username' on realm `RealmUri' according
-%% to the options `Opts'.
-%%
-%% Notice that `RealmUri' will be used to match the session's`authrealm'
-%% property and not `realm_uri'. If the user is an SSO user `authrealm' is the
-%% SSO realm and as result all sessions in all associated realms will be closed.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Closes all sessions for user `Username` on realm `RealmUri` according to the
+options `Opts`.
+
+Notice that `RealmUri` will be used to match the session's `authrealm` property
+and not `realm_uri`. If the user is an SSO user `authrealm` is the SSO realm and
+as result all sessions in all associated realms will be closed.
+""".
 -spec close_all(
     RealmUri :: uri(),
     Authid :: uri(),

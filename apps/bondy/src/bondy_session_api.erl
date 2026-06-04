@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_session_api).
+-moduledoc """
+Implements the WAMP API procedures for sessions, such as `bondy.session.get`
+and `bondy.session.self`.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("kernel/include/logger.hrl").

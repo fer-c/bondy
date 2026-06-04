@@ -3,36 +3,33 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc EARLY DRAFT implementation of the client-side connection between and
-%% edge node (this module) and a remote/core node
-%% ({@link bondy_bridge_relay_server}).
-%%
-%%
-%% <pre><code class="mermaid">
-%% stateDiagram-v2
-%%     %%{init:{'state':{'nodeSpacing': 50, 'rankSpacing': 200}}}%%
-%%     [*] --> connecting
-%%     connecting --> [*]: retry_limit_reached
-%%     connecting --> connecting: connect | tcp_error | socket_closed
-%%     connecting --> waiting_for_network: network_disconnected
-%%     connecting --> active: connected
-%%     waiting_for_network --> connecting: network_connected
-%%     waiting_for_network --> [*]: network_timeout
-%%     active --> active: session_established | rcv(data|ping) | snd(data|pong)
-%%     active --> idle: ping_idle_timeout
-%%     active --> connecting: tcp_error | socket_closed
-%%     active --> [*]: auth_timeout
-%%     idle --> idle: snd(ping|pong) | rcv(ping|pong)
-%%     idle --> active: snd(data)
-%%     idle --> active: rcv(data)
-%%     idle --> connecting: tcp_error
-%%     idle --> [*]: ping_timeout
-%%     idle --> [*]: idle_timeout
-%% </code></pre>
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_client).
+-moduledoc """
+EARLY DRAFT implementation of the client-side connection between an edge node
+(this module) and a remote/core node (`bondy_bridge_relay_server`).
+
+```mermaid
+stateDiagram-v2
+    %%{init:{'state':{'nodeSpacing': 50, 'rankSpacing': 200}}}%%
+    [*] --> connecting
+    connecting --> [*]: retry_limit_reached
+    connecting --> connecting: connect | tcp_error | socket_closed
+    connecting --> waiting_for_network: network_disconnected
+    connecting --> active: connected
+    waiting_for_network --> connecting: network_connected
+    waiting_for_network --> [*]: network_timeout
+    active --> active: session_established | rcv(data|ping) | snd(data|pong)
+    active --> idle: ping_idle_timeout
+    active --> connecting: tcp_error | socket_closed
+    active --> [*]: auth_timeout
+    idle --> idle: snd(ping|pong) | rcv(ping|pong)
+    idle --> active: snd(data)
+    idle --> active: rcv(data)
+    idle --> connecting: tcp_error
+    idle --> [*]: ping_timeout
+    idle --> [*]: idle_timeout
+```
+""".
 -behaviour(gen_statem).
 
 -include_lib("kernel/include/logger.hrl").
@@ -121,18 +118,13 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link(Bridge) ->
     gen_statem:start_link(?MODULE, Bridge, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Forwards a message to the remote router.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Forwards a message to the remote router.
+""".
 -spec forward(Ref :: bondy_ref:t(), Msg :: any()) ->
     ok.
 
@@ -149,18 +141,10 @@ forward(Ref, Msg) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 callback_mode() ->
     [state_functions, state_enter].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 init(Config0) ->
     % erlang:process_flag(sensitive, true),
     #{
@@ -213,10 +197,6 @@ init(Config0) ->
     {ok, connecting, State}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec terminate(term(), atom(), t()) -> term().
 
 terminate(normal, StateName, #state{socket = undefined}) ->
@@ -273,18 +253,10 @@ terminate(Reason, StateName, #state{} = State0) ->
     terminate(Reason, StateName, State).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 format_status(#{state := State} = Status) ->
     Status#{state => State#state{config = sensitive}}.
 
@@ -296,31 +268,27 @@ format_status(#{state := State} = Status) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A state function. In the `connecting' state the client is trying to
-%% establish a connection to a remote router (server). This is the initial
-%% state of the client.
-%%
-%% If establishing the connection fails because there is no network the client
-%% transitions to the `waiting_for_network' state. Otherwise, if
-%% `reconnect' is enabled it will retry up the configured limit (deadline or
-%% maximum number of retries). If the reconnect limit is reached the client
-%% will crash with an error reason and thus it will be restarted by the
-%% supervisor.
-%%
-%% The client regards the connection error reasons
-%% `enetdown', `ehostunreach' and `enetunreach' as the absence of network
-%% connectivity.
-%%
-%% The client also monitors the network status using
-%% {@link partisa_inet:monitor/1} and handles the resulting
-%% `{network_connected, ref()}' and `{network_disconnected, ref()}' signals but
-%% gives priority to the connection socket status.
-%%
-%% Previous states: `connecting', `waiting_for_network'.
-%% Next states: `active', `waiting_for_network' or termination.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A state function. In the `connecting` state the client is trying to establish a
+connection to a remote router (server). This is the initial state of the client.
+
+If establishing the connection fails because there is no network the client
+transitions to the `waiting_for_network` state. Otherwise, if `reconnect` is
+enabled it will retry up the configured limit (deadline or maximum number of
+retries). If the reconnect limit is reached the client will crash with an error
+reason and thus it will be restarted by the supervisor.
+
+The client regards the connection error reasons `enetdown`, `ehostunreach` and
+`enetunreach` as the absence of network connectivity.
+
+The client also monitors the network status using `partisa_inet:monitor/1` and
+handles the resulting `{network_connected, ref()}` and
+`{network_disconnected, ref()}` signals but gives priority to the connection
+socket status.
+
+Previous states: `connecting`, `waiting_for_network`.
+Next states: `active`, `waiting_for_network` or termination.
+""".
 connecting(enter, connecting, State) ->
 
     ok = logger:set_process_metadata(#{
@@ -362,19 +330,18 @@ connecting(EventType, EventContent, _) ->
     {stop, unexpected_event}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A state function. In `waiting_for_network' state the client has
-%% recognised that there is no network available and waits for a signal
-%% indicating that the network has been re-established.
-%%
-%% If the client does not receive a `{network_connected, ref()}' signal
-%% within the configured `network_timeout' it will crash with an error reason
-%% `network_timeout' and thus it will be restarted by the supervisor.
-%%
-%% Previous states: `connecting'.
-%% Next states: `connecting' or termination.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A state function. In `waiting_for_network` state the client has recognised that
+there is no network available and waits for a signal indicating that the network
+has been re-established.
+
+If the client does not receive a `{network_connected, ref()}` signal within the
+configured `network_timeout` it will crash with an error reason
+`network_timeout` and thus it will be restarted by the supervisor.
+
+Previous states: `connecting`.
+Next states: `connecting` or termination.
+""".
 waiting_for_network(enter, _, State) ->
     NetTimeout = State#state.network_timeout,
 
@@ -406,18 +373,15 @@ waiting_for_network(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, waiting_for_network, State).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A state function. In the `active' state the client is connected and has
-%% at least one active session with a remote router or is trying to establish
-%% such a session.
-%%
-%% In `active' state the client can send and receive messages.
-%%
-%%
-%% Previous states: `connecting' or `idle'.
-%% Next states: `idle', `connecting' or termination.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A state function. In the `active` state the client is connected and has at least
+one active session with a remote router or is trying to establish such a session.
+
+In `active` state the client can send and receive messages.
+
+Previous states: `connecting` or `idle`.
+Next states: `idle`, `connecting` or termination.
+""".
 active(enter, connecting, #state{} = State0) ->
     ok = on_connect(State0),
 
@@ -578,10 +542,6 @@ active(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, active, State).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 idle(enter, active, State) ->
     %% We use an event timeout meaning any event received will cancel it
     IdleTimeout = State#state.idle_timeout,
@@ -646,10 +606,9 @@ idle(EventType, EventContent, State) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Handle events common to all states
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Handle events common to all states
+""".
 handle_event({call, From}, Request, StateName, State) ->
     ?LOG_INFO(#{
         description => "Received unknown request",
@@ -1273,11 +1232,7 @@ init_session_and_sync(SessionId, #state{session = Session0} = State0) ->
     State2#state{session = undefined}.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 setup_proxing(SessionId, State0) ->
     %% We do this sequentially as we only support a single session for now.
     Session = session(SessionId, State0),
@@ -1339,13 +1294,11 @@ session_id(RealmUri, #state{sessions_by_realm = Map}) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc A temporary POC of full sync, not elegant at all.
-%% This should be resolved at the plum_db layer and not here, but we are
-%% interested in having a POC ASAP.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A temporary POC of full sync, not elegant at all. This should be resolved at the
+plum_db layer and not here, but we are interested in having a POC ASAP.
+""".
 init_aae_sync(#{id := SessionId}, State) ->
     % Ref = make_ref(),
     % State = update_session(sync_ref, Ref, SessionId, State0),
@@ -1428,14 +1381,13 @@ add_event_handler(Session, State) when is_map(Session) ->
     State#state{event_handlers = Refs}.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc We subscribe to the topics configured for this realm.
-%% Instead of receiving an EVENT we will get a PUBLISH message. This is an
-%% optimization performed by bondy_broker to avoid sending N events to N
-%% remote subscribers over the relay or bridge relay.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+We subscribe to the topics configured for this realm. Instead of receiving an
+EVENT we will get a PUBLISH message. This is an optimization performed by
+bondy_broker to avoid sending N events to N remote subscribers over the relay or
+bridge relay.
+""".
 subscribe_topics(Session0, State) ->
     MyRef = maps:get(ref, Session0),
     RealmUri = maps:get(realm_uri, Session0),

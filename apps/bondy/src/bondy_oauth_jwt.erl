@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_oauth_jwt).
+-moduledoc """
+Encodes, decodes and verifies OAuth JWTs, validating realm-scoped claims,
+signatures and expiry.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 

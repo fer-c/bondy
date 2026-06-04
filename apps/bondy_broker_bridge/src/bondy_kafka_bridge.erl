@@ -469,11 +469,8 @@ get_client() ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Returns a brod partition() or partitioner().
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns a brod `partition()` or `partitioner()`.".
 partition(#{<<"partition">> := N}) when is_integer(N) ->
     N;
 

@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_rpc_promise_manager).
+-moduledoc """
+A `m:gen_server` that periodically evicts expired RPC promises, sending a
+`wamp.error.timeout` error to the caller of each evicted promise.
+""".
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
@@ -35,10 +39,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

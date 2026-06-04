@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_http_utils).
+-moduledoc """
+Utility functions for HTTP request handling, including setting meta and
+security response headers, parsing the `Authorization` header and classifying
+IP addresses as public or private.
+""".
 -include_lib("partisan/include/partisan_util.hrl").
 
 -export([set_meta_headers/1]).
@@ -25,10 +26,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec set_meta_headers(Req :: cowboy_req:req()) ->
     NewReq :: cowboy_req:req().
 
@@ -36,13 +33,12 @@ set_meta_headers(Req) ->
     cowboy_req:set_resp_headers(meta_headers(), Req).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sets both meta headers and per-listener security headers on the
-%% Cowboy request. Security headers are cached in persistent_term by
-%% {@link bondy_http_security_headers} and include HSTS, X-Frame-Options,
-%% X-Content-Type-Options, Content-Security-Policy, and the Server header.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sets both meta headers and per-listener security headers on the
+Cowboy request. Security headers are cached in persistent_term by
+`bondy_http_security_headers` and include HSTS, X-Frame-Options,
+X-Content-Type-Options, Content-Security-Policy, and the Server header.
+""".
 -spec set_all_headers(cowboy_req:req()) -> cowboy_req:req().
 
 set_all_headers(Req) ->
@@ -53,10 +49,6 @@ set_all_headers(Req) ->
     cowboy_req:set_resp_headers(SecurityHeaders, Req1).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec meta_headers() -> map().
 
 meta_headers() ->
@@ -64,10 +56,6 @@ meta_headers() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec parse_authorization(Req :: cowboy_req:req()) ->
     {basic, binary(), binary()}
     | {bearer, binary()}
@@ -100,15 +88,15 @@ parse_authorization(Req) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns true if the argument is a valid public IP address.
-%% Private IPv4 fall in the ranges (10.0.0.0/8, 172.16.0.0/12, and
-%% 192.168.0.0/16).
-%% Private IPv6 addresses generally include Unique Local Addresses (ULA) which
-%% fall in the range fc00::/7, fd00::/7, and Link-Local addresses, which fall in
-%% the range fe80::/10.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true if the argument is a valid public IP address.
+
+Private IPv4 fall in the ranges (10.0.0.0/8, 172.16.0.0/12, and
+192.168.0.0/16).
+Private IPv6 addresses generally include Unique Local Addresses (ULA) which
+fall in the range fc00::/7, fd00::/7, and Link-Local addresses, which fall in
+the range fe80::/10.
+""".
 is_public_ip({A, B, _, _}) when
     A == 10;
     A == 172 andalso B >= 16 andalso B =< 31;

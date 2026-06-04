@@ -541,13 +541,11 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Accepts a POST, PATCH, PUT or DELETE over a resource by executing
-%% the configured action
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Accepts a POST, PATCH, PUT or DELETE over a resource by executing
+the configured action
+""".
 do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
     Method = method(Req0),
@@ -634,12 +632,10 @@ take_status_code(ErrorBody, Default) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Creates a context object based on the passed Request
-%% (`cowboy_request:request()').
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a context object based on the passed Request
+(`cowboy_request:request()`).
+""".
 -spec update_context(tuple(), map()) -> map().
 
 update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
@@ -713,17 +709,15 @@ parse_token(Req) ->
             throw(invalid_token)
     end.
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% By default, Cowboy will attempt to read up to 8MB of data, for up to 15
-%% seconds. The call will return once Cowboy has read at least 8MB of data, or
-%% at the end of the 15 seconds period.
-%% We get the path's body_max_bytes, body_read_bytes and body_read_seconds
-%% attributes to configure the cowboy_req's length and period options and also
-%% setup a total max length.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+By default, Cowboy will attempt to read up to 8MB of data, for up to 15
+seconds. The call will return once Cowboy has read at least 8MB of data, or
+at the end of the 15 seconds period.
+We get the path's body_max_bytes, body_read_bytes and body_read_seconds
+attributes to configure the cowboy_req's length and period options and also
+setup a total max length.
+""".
 -spec read_body(cowboy_req:request(), state()) ->
     {ok, cowboy_req:request(), state()} | no_return().
 
@@ -1150,12 +1144,8 @@ url(Host, Path, QS) ->
 
 
 
-%% -----------------------------------------------------------------------------
 % private
-%% @doc
-%% The Spec uses lowercase for the method names but Cowboy uses uppercase
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "The Spec uses lowercase for the method names but Cowboy uses uppercase.".
 method(Req) ->
     method_to_lowercase(cowboy_req:method(Req)).
 
@@ -1169,12 +1159,8 @@ method_to_lowercase(<<"PUT">>) -> <<"put">>.
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% This function exists just because because hackney (http client) uses atoms
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "This function exists just because because hackney (http client) uses atoms.".
 method_to_atom(<<"delete">>) -> delete;
 method_to_atom(<<"get">>) -> get;
 method_to_atom(<<"head">>) -> head;

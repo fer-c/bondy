@@ -4,6 +4,13 @@
 %% =============================================================================
 
 -module(bondy_table_manager).
+-moduledoc """
+A `m:gen_server` that owns ETS tables on behalf of other processes.
+
+It creates named and anonymous ETS tables, acts as their heir so they survive
+the crash and restart of the borrowing process, and can give ownership away to
+or reclaim it from a caller.
+""".
 -behaviour(gen_server).
 
 
@@ -41,11 +48,10 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the table identifier for table with name `Name' if it exists.
-%% Otherwise returns `error'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the table identifier for table with name `Name` if it exists.
+Otherwise returns `error`.
+""".
 -spec lookup(Name :: atom()) -> {ok, ets:tid() | atom()} | error.
 
 lookup(Name) when is_atom(Name) ->
@@ -57,11 +63,10 @@ lookup(Name) when is_atom(Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if table with name `Name' exists.
-%% Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if table with name `Name` exists.
+Otherwise returns `false`.
+""".
 -spec exists(Name :: atom()) -> boolean().
 
 exists(Name) ->
@@ -71,11 +76,10 @@ exists(Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new ets table, sets itself as heir.
-%% Makes sense only for public tables.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new ets table, sets itself as heir.
+Makes sense only for public tables.
+""".
 -spec add(Name :: atom(), Opts :: list()) -> {ok, ets:tid() | atom()} | error.
 
 add(Name, Opts) when
@@ -83,11 +87,9 @@ is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
     gen_server:call(?MODULE, {add, Name, Opts}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new ets table, sets itself as heir and gives it away
-%% to Requester
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new ets table, sets itself as heir and gives it away to Requester.
+""".
 -spec add_and_claim(Name :: atom(), Opts :: list()) ->
     {ok, ets:tid() | atom()} | error.
 
@@ -96,12 +98,11 @@ is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
     gen_server:call(?MODULE, {add_and_claim, Name, Opts}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc If the table exists, it gives it away to Requester.
-%% Otherwise, creates a new ets table, sets itself as heir and
-%% gives it away to Requester.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+If the table exists, it gives it away to Requester.
+Otherwise, creates a new ets table, sets itself as heir and gives it away to
+Requester.
+""".
 -spec add_or_claim(Name :: atom(), Opts :: list()) ->
     {ok, ets:tid() | atom()} | error.
 
@@ -110,15 +111,14 @@ is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
     gen_server:call(?MODULE, {add_or_claim, Name, Opts}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Idempotent variant of `add/2'. Returns the existing table for `Name'
-%% if it is already registered; otherwise creates a new ETS table with
-%% `bondy_table_manager' as owner and heir.
-%%
-%% Useful when a caller's `init' runs more than once (e.g. a gen_server is
-%% restarted by its supervisor) and must tolerate pre-existing tables.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Idempotent variant of `add/2`. Returns the existing table for `Name` if it is
+already registered; otherwise creates a new ETS table with
+`bondy_table_manager` as owner and heir.
+
+Useful when a caller's `init` runs more than once (e.g. a gen_server is
+restarted by its supervisor) and must tolerate pre-existing tables.
+""".
 -spec get_or_create(Name :: atom(), Opts :: list()) ->
     {ok, ets:tid() | atom()}.
 
@@ -127,15 +127,13 @@ is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
     gen_server:call(?MODULE, {get_or_create, Name, Opts}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new anonymous ETS table (no `named_table', no atom
-%% allocated) owned by `bondy_table_manager' and registered under the
-%% caller-supplied `Key' (any term). Returns `{error, already_exists}' if
-%% `Key' is already registered.
-%%
-%% Prefer `get_or_create_anonymous/2' for idempotent init paths.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a new anonymous ETS table (no `named_table`, no atom allocated) owned by
+`bondy_table_manager` and registered under the caller-supplied `Key` (any term).
+Returns `{error, already_exists}` if `Key` is already registered.
+
+Prefer `get_or_create_anonymous/2` for idempotent init paths.
+""".
 -spec add_anonymous(Key :: term(), Opts :: list()) ->
     {ok, ets:tid()} | {error, already_exists}.
 
@@ -143,13 +141,11 @@ add_anonymous(Key, Opts) when is_list(Opts) ->
     gen_server:call(?MODULE, {add_anonymous, Key, Opts}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Idempotent variant of `add_anonymous/2'. Returns the existing
-%% anonymous table registered under `Key' or creates a new one if absent.
-%% The table is owned by `bondy_table_manager', so it survives the caller's
-%% crash and restart.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Idempotent variant of `add_anonymous/2`. Returns the existing anonymous table
+registered under `Key` or creates a new one if absent. The table is owned by
+`bondy_table_manager`, so it survives the caller's crash and restart.
+""".
 -spec get_or_create_anonymous(Key :: term(), Opts :: list()) ->
     {ok, ets:tid()}.
 
@@ -157,11 +153,10 @@ get_or_create_anonymous(Key, Opts) when is_list(Opts) ->
     gen_server:call(?MODULE, {get_or_create_anonymous, Key, Opts}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Looks up the anonymous table registered under `Key'. Pure ETS
-%% lookup — does not call the gen_server.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Looks up the anonymous table registered under `Key`. Pure ETS lookup — does not
+call the gen_server.
+""".
 -spec lookup_anonymous(Key :: term()) -> {ok, ets:tid()} | error.
 
 lookup_anonymous(Key) ->
@@ -171,22 +166,19 @@ lookup_anonymous(Key) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Deletes the anonymous table registered under `Key' and its registry
-%% entry. Returns `true' if the table existed and was deleted, `false'
-%% otherwise.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Deletes the anonymous table registered under `Key` and its registry entry.
+Returns `true` if the table existed and was deleted, `false` otherwise.
+""".
 -spec delete_anonymous(Key :: term()) -> boolean().
 
 delete_anonymous(Key) ->
     gen_server:call(?MODULE, {delete_anonymous, Key}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Deletes the ets table with name Name iff the caller is the owner.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Deletes the ets table with name Name iff the caller is the owner.
+""".
 -spec delete(Name :: atom()) -> boolean().
 
 delete(Name) when is_atom(Name) ->
@@ -199,24 +191,21 @@ delete(Name) when is_atom(Name) ->
             false
     end.
 
-%% -----------------------------------------------------------------------------
-%% @doc Used by the table owner to delegate the ownership to the calling
-%% process.
-%% The process must be local and not already the owner of the table.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Used by the table owner to delegate the ownership to the calling process.
+The process must be local and not already the owner of the table.
+""".
 -spec claim(Name :: atom()) -> boolean().
 
 claim(Name) when is_atom(Name)->
     gen_server:call(?MODULE, {give_away, Name, self()}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Used by the table owner to delegate the ownership to another process.
-%% NewOwner must be alive, local and not already the owner of the table. If any
-%% condition is not met the function returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Used by the table owner to delegate the ownership to another process.
+NewOwner must be alive, local and not already the owner of the table. If any
+condition is not met the function returns `false`.
+""".
 -spec give_away(Name :: atom(), NewOwner :: pid()) -> boolean().
 
 give_away(Name, NewOwner)

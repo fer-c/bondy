@@ -4,11 +4,11 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_cluster_api).
+-moduledoc """
+`bondy_wamp_api` implementation exposing cluster operations (join, leave,
+members, connections and info) as WAMP procedures.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -24,10 +24,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(
     Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok

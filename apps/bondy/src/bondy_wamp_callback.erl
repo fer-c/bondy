@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_wamp_callback).
+-moduledoc """
+Defines the `bondy_wamp_callback` behaviour for WAMP `CALL` handlers and
+provides helpers to check whether a module conforms to it and to validate
+callback targets.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -40,30 +45,21 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns true is module `Mod' conforms with this behaviour.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true is module `Mod` conforms with this behaviour.
+""".
 -spec conforms(Mod :: module()) -> boolean().
 
 conforms(Mod) ->
     erlang:function_exported(Mod, handle_call, 2).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate_target({M :: module(), F :: atom()}) -> boolean().
 
 validate_target(MF) ->
     validate_target(MF, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate_target({M :: module(), F :: atom()}, A :: optional([term()])) ->
     boolean().
 

@@ -3,277 +3,270 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
-%% @doc This module implements the capabilities of a Dealer. It is used by
-%% {@link bondy_router}.
-%%
-%% A Dealer is one of the two roles a Router plays. In particular a Dealer is
-%% the middleman between an Caller and a Callee in an Routed RPC interaction,
-%% i.e. it works as a generic router for remote procedure calls
-%% decoupling Callers and Callees.
-%%
-%% Callees register the procedures they provide with Dealers.  Callers
-%% initiate procedure calls first to Dealers.  Dealers route calls
-%% incoming from Callers to Callees implementing the procedure called,
-%% and route call results back from Callees to Callers.
-%%
-%% A Caller issues calls to remote procedures by providing the procedure
-%% URI and any arguments for the call. The Callee will execute the
-%% procedure using the supplied arguments to the call and return the
-%% result of the call to the Caller.
-%%
-%% The Caller and Callee will usually implement all business logic, while the
-%% Dealer works as a generic router for remote procedure calls
-%% decoupling Callers and Callees.
-%%
-%% Bondy does not provide message transformations to ensure stability and
-%% safety.
-%% As such, any required transformations should be handled by Callers and
-%% Callees directly (notice that a Callee can act as a middleman implementing
-%% the required transformations).
-%%
-%% The message flow between _Callees_ and a _Dealer_ for registering and
-%% unregistering endpoints to be called over RPC involves the following
-%% messages:
-%%
-%% <ol>
-%% <li>`REGISTER'</li>
-%% <li>`REGISTERED'</li>
-%% <li>`UNREGISTER'</li>
-%% <li>`UNREGISTERED'</li>
-%% <li>`ERROR'</li>
-%% </ol>
-%%
-%% ```mermaid
-%%        ,------.          ,------.               ,------.
-%%        |Caller|          |Dealer|               |Callee|
-%%        `--+---'          `--+---'               `--+---'
-%%           |                 |                      |
-%%           |                 |                      |
-%%           |                 |       REGISTER       |
-%%           |                 | <---------------------
-%%           |                 |                      |
-%%           |                 |  REGISTERED or ERROR |
-%%           |                 | --------------------->
-%%           |                 |                      |
-%%           |                 |                      |
-%%           |                 |                      |
-%%           |                 |                      |
-%%           |                 |                      |
-%%           |                 |      UNREGISTER      |
-%%           |                 | <---------------------
-%%           |                 |                      |
-%%           |                 | UNREGISTERED or ERROR|
-%%           |                 | --------------------->
-%%        ,--+---.          ,--+---.               ,--+---.
-%%        |Caller|          |Dealer|               |Callee|
-%%        `------'          `------'               `------'
-%%
-%% '''
-%%
-%% == Calling and Invocations ==
-%%
-%% The message flow between _Callers_, a _Dealer_ and _Callees_ for
-%% calling procedures and invoking endpoints involves the following
-%% messages:
-%%
-%%    1. "CALL"
-%%
-%%    2. "RESULT"
-%%
-%%    3. "INVOCATION"
-%%
-%%    4. "YIELD"
-%%
-%%    5. "ERROR"
-%%
-%% <pre><code class="mermaid">
-%%    sequenceDiagram
-%%     %%{init: {'theme': 'neutral'} }%%
-%%     Caller->>+Dealer: CALL
-%%     Dealer->>Callee: INVOCATION
-%%     Callee->>Dealer: YIELD | ERROR
-%%     Dealer->>Caller: RESULT | ERROR
-%% </code></pre>
-%%
-%%    The execution of remote procedure calls is asynchronous, and there
-%%    may be more than one call outstanding.  A call is called outstanding
-%%    (from the point of view of the _Caller_), when a (final) result or
-%%    error has not yet been received by the _Caller_.
-%%
-%% == Routing ==
-%% The following sections describes how RPC routing is performed for all the
-%% generic use cases involving clustering and bridge relay connections.
-%% The following diagram shows the the example used in all the use cases, which
-%% involves a single Caller making calls to four different Callees that are
-%% local or remote to the caller.
-%%
-%% Notice that the erlang code included in the diagram notes are to be
-%% considered pseudo-code as they do not necessarily match the actual function
-%% signatures.
-%%
-%% <pre><code class="mermaid">
-%%   flowchart TB
-%%     %%{init: {'theme': 'neutral'} }%%
-%%     subgraph Bondy Cluster
-%%     Node1
-%%     Node2
-%%     end
-%%     subgraph Clients
-%%     CALLER --> Node1
-%%     CALLEE1 --> Node1
-%%     CALLEE2 --> Node2
-%%     end
-%%     subgraph Bondy Edge Cluster
-%%     EdgeNode1
-%%     EdgeNode2
-%%     end
-%%     Node1 -.Bridge Relay Connection...- EdgeNode1
-%%     subgraph Edge Clients
-%%     CALLEE3 --> EdgeNode1
-%%     CALLEE4 --> EdgeNode2
-%%     end
-%% </code></pre>
-%%
-%% === Call to a local Callee ===
-%%
-%% <pre><code class="mermaid">
-%%     sequenceDiagram
-%%     %%{init: {'theme': 'neutral'} }%%
-%%     	autonumber
-%%       participant CALLER
-%%       participant node1 as DEALER<br/><br/>@node1
-%%       participant CALLEE1
-%%     	note over node1: CALLEE1 seq = 99
-%%     	CALLER ->> node1:CALL.1
-%%     	note over node1: CALLEE1 seq = 100
-%%     	node1 -->> node1: promise:add({100, 1})
-%%     	node1 ->> CALLEE1: INVOCATION.100
-%%     	CALLEE1 ->> node1: YIELD.100
-%%     	node1 -->> node1: bondy_rpc_promise:take({100, 1})
-%%     	node1 ->> CALLER: RESULT.1
-%% </code></pre>
-%%
-%% === Call to a Remote Callee ===
-%%
-%% <pre><code class="mermaid">
-%%    sequenceDiagram
-%%     %%{init: {'theme': 'neutral'} }%%
-%%      autonumber
-%%     	participant CALLER
-%%     	participant Node1
-%%     	participant Node2
-%%     	participant CALLEE2
-%%     	note over Node2: CALLEE2 seq = 99
-%%     	CALLER ->> Node1:CALL.2
-%%     	Node1 -->> Node1: bondy_rpc_promise:new_call(2)
-%%     	rect RGB(230, 230, 230)
-%%     	note over Node1,Node2: CLUSTER CONNECTION
-%%     	Node1 -->> Node2: CALL.2
-%%      end
-%%     	Node2 -->> Node2: bondy_rpc_promise:new_invocation(100, 2)
-%%     	note over Node2: CALLEE2 seq = 100
-%%     	Node2 ->> CALLEE2: INVOCATION.100
-%%     	CALLEE2 ->> Node2: YIELD.100
-%%     	Node2 -->> Node2: bondy_rpc_promise:take({invocation, 100, '_'})
-%%     	Node2 -->> Node1: RESULT.2
-%%     	Node1 -->> Node1: bondy_rpc_promise:take({call, 2})
-%%     	Node1 ->> CALLER: RESULT.2
-%% </code></pre>
-%%
-%% === Call to Bridged Callee ===
-%%
-%% <pre><code class="mermaid">
-%%   sequenceDiagram
-%%     %%{init: {'theme': 'neutral'} }%%
-%%     autonumber
-%%     	participant CALLER
-%%     	participant Node1
-%%     	participant Node2
-%%     	participant CALLEE2
-%%     	note over Node2: CALLEE2 seq = 99
-%%     	CALLER ->> Node1:CALL.2
-%%     	Node1 -->> Node1: bondy_rpc_promise:new_call(2)
-%%     	rect RGB(230, 230, 230)
-%%     	note over Node1,Node2: CLUSTER CONNECTION
-%%     	Node1 -->> Node2: CALL.2
-%%      end
-%%     	Node2 -->> Node2: bondy_rpc_promise:new_invocation(100, 2)
-%%     	note over Node2: CALLEE2 seq = 100
-%%     	Node2 ->> CALLEE2: INVOCATION.100
-%%     	CALLEE2 ->> Node2: YIELD.100
-%%     	Node2 -->> Node2: bondy_rpc_promise:take(invocation, 100, '_')
-%%     	Node2 -->> Node1: RESULT.2
-%%     	Node1 -->> Node1: bondy_rpc_promise:take({call, 2})
-%%     	Node1 ->> CALLER: RESULT.2
-%% </code></pre>
-%%
-%% === Call to remote Bridged Callee ===
-%%
-%% <pre><code class="mermaid">
-%%    sequenceDiagram
-%%     %%{init: {'theme': 'neutral'} }%%
-%%     	participant CALLER
-%%     	participant Node1
-%%     	participant Node2
-%%     	participant Bridged_Node1
-%%     	participant Bridged_Node2
-%%     	note over Bridged_Node2: CALLEE seq = 99
-%%     	participant CALLEE4
-%%     	CALLER ->> Node1:CALL.5
-%%     	Node1 -->> Node1: promise:add({5, 5})
-%%     	Node1 -->> Node2: Call.5
-%%     	rect RGB(230, 230, 230)
-%%     	note over Node2,Bridged_Node1: BRIDGE RELAY CONNECTION
-%%       Node2 -->> Bridged_Node1:CALL.5
-%%     	end
-%%     	Bridged_Node1 -->> Bridged_Node2: CALL.5
-%%     	note over Bridged_Node2: CALLEE4 seq = 100
-%%     	Bridged_Node2 ->> CALLEE4: INVOCATION.100
-%%     	CALLEE4 ->> Bridged_Node2: YIELD.100
-%%     	Bridged_Node2 -->> Bridged_Node2: bondy_rpc_promise:take({invocation, 100, 5})
-%%     	Bridged_Node2 -->> Bridged_Node1: RESULT.5
-%%     	Bridged_Node1 -->> Node2: RESULT.5
-%%     	Node2 -->> Node1: RESULT.5
-%%     	Node1 ->> Node1: bondy_rpc_promise:take({call, 5})
-%%     	Node1 ->> CALLER: RESULT.5
-%% </code></pre>
-%%
-%% == Remote Procedure Call Ordering ==
-%%
-%% Regarding *Remote Procedure Calls*, the ordering guarantees are as
-%% follows:
-%%
-%% If _Callee A_ has registered endpoints for both *Procedure 1* and
-%% *Procedure 2*, and _Caller B_ first issues a *Call 1* to *Procedure
-%% 1* and then a *Call 2* to *Procedure 2*, and both calls are routed to
-%% _Callee A_, then _Callee A_ will first receive an invocation
-%% corresponding to *Call 1* and then *Call 2*. This also holds if
-%% *Procedure 1* and *Procedure 2* are identical.
-%%
-%% In other words, WAMP guarantees ordering of invocations between any
-%% given _pair_ of _Caller_ and _Callee_. The current implementation
-%% relies on Distributed Erlang which guarantees message ordering between
-%% processes in different nodes.
-%%
-%% There are no guarantees on the order of call results and errors in
-%% relation to _different_ calls, since the execution of calls upon
-%% different invocations of endpoints in _Callees_ are running
-%% independently.  A first call might require an expensive, long-running
-%% computation, whereas a second, subsequent call might finish
-%% immediately.
-%%
-%% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
-%% message will be sent by _Dealer_ to _Callee A_ before any
-%% "INVOCATION" message for *Procedure 1*.
-%%
-%% There is no guarantee regarding the order of return for multiple
-%% subsequent register requests.  A register request might require the
-%% _Dealer_ to do a time-consuming lookup in some database, whereas
-%% another register request second might be permissible immediately.
-%% @end
-%% =============================================================================
 -module(bondy_dealer).
+-moduledoc """
+This module implements the capabilities of a Dealer. It is used by
+`bondy_router`.
+
+A Dealer is one of the two roles a Router plays. In particular a Dealer is
+the middleman between an Caller and a Callee in an Routed RPC interaction,
+i.e. it works as a generic router for remote procedure calls
+decoupling Callers and Callees.
+
+Callees register the procedures they provide with Dealers.  Callers
+initiate procedure calls first to Dealers.  Dealers route calls
+incoming from Callers to Callees implementing the procedure called,
+and route call results back from Callees to Callers.
+
+A Caller issues calls to remote procedures by providing the procedure
+URI and any arguments for the call. The Callee will execute the
+procedure using the supplied arguments to the call and return the
+result of the call to the Caller.
+
+The Caller and Callee will usually implement all business logic, while the
+Dealer works as a generic router for remote procedure calls
+decoupling Callers and Callees.
+
+Bondy does not provide message transformations to ensure stability and
+safety.
+As such, any required transformations should be handled by Callers and
+Callees directly (notice that a Callee can act as a middleman implementing
+the required transformations).
+
+The message flow between *Callees* and a *Dealer* for registering and
+unregistering endpoints to be called over RPC involves the following
+messages:
+
+- `REGISTER`
+- `REGISTERED`
+- `UNREGISTER`
+- `UNREGISTERED`
+- `ERROR`
+
+```mermaid
+       ,------.          ,------.               ,------.
+       |Caller|          |Dealer|               |Callee|
+       `--+---'          `--+---'               `--+---'
+          |                 |                      |
+          |                 |                      |
+          |                 |       REGISTER       |
+          |                 | <---------------------
+          |                 |                      |
+          |                 |  REGISTERED or ERROR |
+          |                 | --------------------->
+          |                 |                      |
+          |                 |                      |
+          |                 |                      |
+          |                 |                      |
+          |                 |                      |
+          |                 |      UNREGISTER      |
+          |                 | <---------------------
+          |                 |                      |
+          |                 | UNREGISTERED or ERROR|
+          |                 | --------------------->
+       ,--+---.          ,--+---.               ,--+---.
+       |Caller|          |Dealer|               |Callee|
+       `------'          `------'               `------'
+```
+
+## Calling and Invocations
+
+The message flow between *Callers*, a *Dealer* and *Callees* for
+calling procedures and invoking endpoints involves the following
+messages:
+
+1. "CALL"
+2. "RESULT"
+3. "INVOCATION"
+4. "YIELD"
+5. "ERROR"
+
+```mermaid
+   sequenceDiagram
+    %%{init: {'theme': 'neutral'} }%%
+    Caller->>+Dealer: CALL
+    Dealer->>Callee: INVOCATION
+    Callee->>Dealer: YIELD | ERROR
+    Dealer->>Caller: RESULT | ERROR
+```
+
+The execution of remote procedure calls is asynchronous, and there
+may be more than one call outstanding.  A call is called outstanding
+(from the point of view of the *Caller*), when a (final) result or
+error has not yet been received by the *Caller*.
+
+## Routing
+
+The following sections describes how RPC routing is performed for all the
+generic use cases involving clustering and bridge relay connections.
+The following diagram shows the the example used in all the use cases, which
+involves a single Caller making calls to four different Callees that are
+local or remote to the caller.
+
+Notice that the erlang code included in the diagram notes are to be
+considered pseudo-code as they do not necessarily match the actual function
+signatures.
+
+```mermaid
+  flowchart TB
+    %%{init: {'theme': 'neutral'} }%%
+    subgraph Bondy Cluster
+    Node1
+    Node2
+    end
+    subgraph Clients
+    CALLER --> Node1
+    CALLEE1 --> Node1
+    CALLEE2 --> Node2
+    end
+    subgraph Bondy Edge Cluster
+    EdgeNode1
+    EdgeNode2
+    end
+    Node1 -.Bridge Relay Connection...- EdgeNode1
+    subgraph Edge Clients
+    CALLEE3 --> EdgeNode1
+    CALLEE4 --> EdgeNode2
+    end
+```
+
+### Call to a local Callee
+
+```mermaid
+    sequenceDiagram
+    %%{init: {'theme': 'neutral'} }%%
+    	autonumber
+      participant CALLER
+      participant node1 as DEALER<br/><br/>@node1
+      participant CALLEE1
+    	note over node1: CALLEE1 seq = 99
+    	CALLER ->> node1:CALL.1
+    	note over node1: CALLEE1 seq = 100
+    	node1 -->> node1: promise:add({100, 1})
+    	node1 ->> CALLEE1: INVOCATION.100
+    	CALLEE1 ->> node1: YIELD.100
+    	node1 -->> node1: bondy_rpc_promise:take({100, 1})
+    	node1 ->> CALLER: RESULT.1
+```
+
+### Call to a Remote Callee
+
+```mermaid
+   sequenceDiagram
+    %%{init: {'theme': 'neutral'} }%%
+     autonumber
+    	participant CALLER
+    	participant Node1
+    	participant Node2
+    	participant CALLEE2
+    	note over Node2: CALLEE2 seq = 99
+    	CALLER ->> Node1:CALL.2
+    	Node1 -->> Node1: bondy_rpc_promise:new_call(2)
+    	rect RGB(230, 230, 230)
+    	note over Node1,Node2: CLUSTER CONNECTION
+    	Node1 -->> Node2: CALL.2
+     end
+    	Node2 -->> Node2: bondy_rpc_promise:new_invocation(100, 2)
+    	note over Node2: CALLEE2 seq = 100
+    	Node2 ->> CALLEE2: INVOCATION.100
+    	CALLEE2 ->> Node2: YIELD.100
+    	Node2 -->> Node2: bondy_rpc_promise:take({invocation, 100, '_'})
+    	Node2 -->> Node1: RESULT.2
+    	Node1 -->> Node1: bondy_rpc_promise:take({call, 2})
+    	Node1 ->> CALLER: RESULT.2
+```
+
+### Call to Bridged Callee
+
+```mermaid
+  sequenceDiagram
+    %%{init: {'theme': 'neutral'} }%%
+    autonumber
+    	participant CALLER
+    	participant Node1
+    	participant Node2
+    	participant CALLEE2
+    	note over Node2: CALLEE2 seq = 99
+    	CALLER ->> Node1:CALL.2
+    	Node1 -->> Node1: bondy_rpc_promise:new_call(2)
+    	rect RGB(230, 230, 230)
+    	note over Node1,Node2: CLUSTER CONNECTION
+    	Node1 -->> Node2: CALL.2
+     end
+    	Node2 -->> Node2: bondy_rpc_promise:new_invocation(100, 2)
+    	note over Node2: CALLEE2 seq = 100
+    	Node2 ->> CALLEE2: INVOCATION.100
+    	CALLEE2 ->> Node2: YIELD.100
+    	Node2 -->> Node2: bondy_rpc_promise:take(invocation, 100, '_')
+    	Node2 -->> Node1: RESULT.2
+    	Node1 -->> Node1: bondy_rpc_promise:take({call, 2})
+    	Node1 ->> CALLER: RESULT.2
+```
+
+### Call to remote Bridged Callee
+
+```mermaid
+   sequenceDiagram
+    %%{init: {'theme': 'neutral'} }%%
+    	participant CALLER
+    	participant Node1
+    	participant Node2
+    	participant Bridged_Node1
+    	participant Bridged_Node2
+    	note over Bridged_Node2: CALLEE seq = 99
+    	participant CALLEE4
+    	CALLER ->> Node1:CALL.5
+    	Node1 -->> Node1: promise:add({5, 5})
+    	Node1 -->> Node2: Call.5
+    	rect RGB(230, 230, 230)
+    	note over Node2,Bridged_Node1: BRIDGE RELAY CONNECTION
+      Node2 -->> Bridged_Node1:CALL.5
+    	end
+    	Bridged_Node1 -->> Bridged_Node2: CALL.5
+    	note over Bridged_Node2: CALLEE4 seq = 100
+    	Bridged_Node2 ->> CALLEE4: INVOCATION.100
+    	CALLEE4 ->> Bridged_Node2: YIELD.100
+    	Bridged_Node2 -->> Bridged_Node2: bondy_rpc_promise:take({invocation, 100, 5})
+    	Bridged_Node2 -->> Bridged_Node1: RESULT.5
+    	Bridged_Node1 -->> Node2: RESULT.5
+    	Node2 -->> Node1: RESULT.5
+    	Node1 ->> Node1: bondy_rpc_promise:take({call, 5})
+    	Node1 ->> CALLER: RESULT.5
+```
+
+## Remote Procedure Call Ordering
+
+Regarding **Remote Procedure Calls**, the ordering guarantees are as
+follows:
+
+If *Callee A* has registered endpoints for both **Procedure 1** and
+**Procedure 2**, and *Caller B* first issues a **Call 1** to **Procedure
+1** and then a **Call 2** to **Procedure 2**, and both calls are routed to
+*Callee A*, then *Callee A* will first receive an invocation
+corresponding to **Call 1** and then **Call 2**. This also holds if
+**Procedure 1** and **Procedure 2** are identical.
+
+In other words, WAMP guarantees ordering of invocations between any
+given *pair* of *Caller* and *Callee*. The current implementation
+relies on Distributed Erlang which guarantees message ordering between
+processes in different nodes.
+
+There are no guarantees on the order of call results and errors in
+relation to *different* calls, since the execution of calls upon
+different invocations of endpoints in *Callees* are running
+independently.  A first call might require an expensive, long-running
+computation, whereas a second, subsequent call might finish
+immediately.
+
+Further, if *Callee A* registers for **Procedure 1**, the "REGISTERED"
+message will be sent by *Dealer* to *Callee A* before any
+"INVOCATION" message for **Procedure 1**.
+
+There is no guarantee regarding the order of return for multiple
+subsequent register requests.  A register request might require the
+*Dealer* to do a time-consuming lookup in some database, whereas
+another register request second might be permissible immediately.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -335,20 +328,12 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec features() -> map().
 
 features() ->
     maps:from_list(bondy_config:get([wamp, dealer, features])).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_feature_enabled(binary() | atom()) -> boolean().
 
 is_feature_enabled(F) when is_binary(F) ->
@@ -363,11 +348,10 @@ is_feature_enabled(F) when is_atom(F) ->
     bondy_config:get([wamp, dealer, features, F], false).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all registrations and all the pending items in the RPC promise
-%% queue that are associated for reference `Ref' in realm `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all registrations and all the pending items in the RPC promise
+queue that are associated for reference `Ref` in realm `RealmUri`.
+""".
 -spec flush(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
 
 flush(RealmUri, Ref) ->
@@ -411,17 +395,16 @@ flush(RealmUri, Ref) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Flushes any in-flight invocation promises where `Ref' is the callee,
-%% replying to each caller with a `wamp.error.no_eligible_callee' ERROR
-%% routed back through the promise's `via' queue.
-%%
-%% Used by the registry to fast-fail callers when a remote node goes down
-%% and its callees are being pruned, so they don't wait for the call
-%% timeout. Unlike `flush/2', this does not touch registrations — the
-%% caller is expected to have already removed them.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Flushes any in-flight invocation promises where `Ref` is the callee,
+replying to each caller with a `wamp.error.no_eligible_callee` ERROR
+routed back through the promise's `via` queue.
+
+Used by the registry to fast-fail callers when a remote node goes down
+and its callees are being pruned, so they don't wait for the call
+timeout. Unlike `flush/2`, this does not touch registrations — the
+caller is expected to have already removed them.
+""".
 -spec flush_callee_promises(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
 
 flush_callee_promises(RealmUri, Ref) ->
@@ -444,15 +427,15 @@ flush_callee_promises(RealmUri, Ref) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a local registration.
-%% If the registration is done using a callback module, only the invoke single
-%% strategy can be used (i.e. shared_registration and sharded_registration are
-%% also disabled). Also the callback module needs to conform to the
-%% wamp_api_callback behaviour, otherwise the call fails with a badarg
-%% exception.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a local registration.
+
+If the registration is done using a callback module, only the invoke single
+strategy can be used (i.e. `shared_registration` and `sharded_registration`
+are also disabled). Also the callback module needs to conform to the
+`wamp_api_callback` behaviour, otherwise the call fails with a `badarg`
+exception.
+""".
 -spec register(Procedure :: uri(), Opts :: map(), Ref :: bondy_context:t()) ->
     {ok, id()}
     | {error, already_exists | any()}
@@ -465,10 +448,6 @@ register(Procedure, Opts, Ctxt) when is_map(Ctxt) ->
     register(Procedure, Opts, RealmUri, Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec register(
     Procedure :: uri(),
     Opts :: map(),
@@ -505,12 +484,12 @@ register(Procedure, Opts0, RealmUri, Ref) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc For internal Bondy use.
-%% Terminates the process identified by Pid by
-%% bondy_subscribers_sup:terminate_subscriber/1
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+For internal Bondy use.
+
+Terminates the process identified by `Pid` by
+`bondy_subscribers_sup:terminate_subscriber/1`.
+""".
 -spec unregister(pid()) -> ok | {error, not_found}.
 
 unregister(Callee) when is_integer(Callee) ->
@@ -520,10 +499,6 @@ unregister(Callee) when is_pid(Callee) ->
     error(not_implemented).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec unregister(RegId :: id(), bondy_context:t() | uri()) ->
     ok | {error, not_found}.
 
@@ -555,10 +530,6 @@ unregister(RegId, Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec callees(RealmUri :: uri()) -> [map()] | no_return().
 
 callees(RealmUri) ->
@@ -587,10 +558,6 @@ callees(RealmUri) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec callees(RealmUri :: uri(), ProcedureUri :: uri()) ->
     [map()] | no_return().
 
@@ -598,10 +565,6 @@ callees(RealmUri, ProcedureUri) ->
     callees(RealmUri, ProcedureUri, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec callees(RealmUri :: uri(), ProcedureUri :: uri(), Opts :: map()) ->
     [map()] | no_return().
 
@@ -634,12 +597,10 @@ callees(RealmUri, ProcedureUri, Opts0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% This function is called by {@link bondy_router} to handle inbound messages
-%% sentt by WAMP peers connected to this Bondy node.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+This function is called by `bondy_router` to handle inbound messages
+sentt by WAMP peers connected to this Bondy node.
+""".
 -spec forward(M :: wamp_message(), Ctxt :: map()) -> ok.
 
 forward(M, Ctxt) ->
@@ -687,11 +648,10 @@ forward(M, Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Handles inbound messages received from a relay i.e. a cluster peer node
-%% or bridge_relay i.e. edge client or server.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Handles inbound messages received from a relay i.e. a cluster peer node
+or `bridge_relay` i.e. edge client or server.
+""".
 -spec forward(wamp_message(), To :: bondy_ref:t(), Opts :: map()) ->
     ok | no_return().
 
@@ -906,11 +866,8 @@ forward(#error{request_type = ?CANCEL} = M, Caller, Opts) ->
 %     bondy:send(RealmUri, To, Error, Opts).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc We handle messages from our local clients.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "We handle messages from our local clients.".
 -spec do_forward(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
 do_forward(#register{} = M, Ctxt) ->
@@ -1058,12 +1015,11 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc If the callback module returns other than `ok' or `reply' we need to
-%% find the callee in the registry.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+If the callback module returns other than `ok` or `reply` we need to
+find the callee in the registry.
+""".
 apply_static_callback(#call{} = M0, Ctxt, Mod) ->
     %% Caller is always local.
     Caller = bondy_context:ref(Ctxt),
@@ -1207,11 +1163,8 @@ format_error(Error, #{error_formatter := Fun}) ->
     Fun(Error).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc A local Caller is cancelling a previous CALL.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local Caller is cancelling a previous CALL.".
 handle_cancel(#cancel{} = M, Ctxt0, kill) ->
     %% INTERRUPT is sent to the callee, but ERROR is not returned
     %% to the caller until the callee has responded to INTERRUPT with
@@ -1339,13 +1292,11 @@ cancel_mode(Mode) when is_atom(Mode) -> Mode;
 cancel_mode(_) -> skip.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Registers an RPC endpoint.
-%% If the registration already exists, it fails with a
-%% `{not_authorized | procedure_already_exists, binary()}' reason.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Registers an RPC endpoint.
+If the registration already exists, it fails with a
+`{not_authorized | procedure_already_exists, binary()}` reason.
+""".
 handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     ok = maybe_reserved_ns(Uri),
     ok = bondy_rbac:authorize(<<"wamp.register">>, Uri, Ctxt),
@@ -1405,14 +1356,12 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Unregisters an RPC endpoint.
-%% If the registration does not exist, it fails with a 'no_such_registration' or
-%% '{not_authorized, binary()}' error.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Unregisters an RPC endpoint.
+If the registration does not exist, it fails with a `no_such_registration` or
+`{not_authorized, binary()}` error.
+""".
 -spec handle_unregister(wamp_unregister(), bondy_context:t()) ->
     ok | no_return().
 
@@ -1458,11 +1407,7 @@ reply_error(Error, Ctxt) ->
     bondy:send(RealmUri, bondy_context:ref(Ctxt), Error).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec take_invocations(
     id(), wamp_message(), function(), bondy_context:t()) ->
     {ok, bondy_context:t()}.
@@ -1490,11 +1435,7 @@ take_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 2) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec find_invocations(
     id(),
     fun((bondy_rpc_promise:t(), bondy_context:t()) -> {ok, bondy_context:t()}),
@@ -1538,11 +1479,7 @@ no_matching_promise(M) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(wamp_call(), bondy_context:t(), uri(), map()) -> ok.
 
 handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
@@ -1596,12 +1533,11 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
     handle_call(Msg, Uri, Fun, Opts, Ctxt0).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Used to handle calls from local callers only
-%% Throws {not_authorized, binary()}
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Used to handle calls from local callers only.
+Throws `{not_authorized, binary()}`.
+""".
 -spec handle_call(
     wamp_call(), uri(), call_fun(), invoke_opts(), bondy_context:t()) ->
     ok.
@@ -1668,11 +1604,7 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec do_call(
     id(), uri(), call_fun(), invoke_opts(), bondy_context:t(), entry()) -> ok.
 
@@ -1739,10 +1671,9 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Assumes `Entries' is sorted using bondy_registry_entry:mg_comparator().
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Assumes `Entries` is sorted using `bondy_registry_entry:mg_comparator()`.
+""".
 -spec choose(
     Entries :: {[entry()], trie_continuation() | eot()} | eot(),
     CallOpts :: map()) -> {ok, Entry :: entry()} | {error, noproc}.
@@ -1754,10 +1685,9 @@ choose({L, Cont}, CallOpts) ->
     choose(L, CallOpts, undefined, [], Cont).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Assumes `Entries' is sorted using bondy_registry_entry:mg_comparator().
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Assumes `Entries` is sorted using `bondy_registry_entry:mg_comparator()`.
+""".
 -spec choose(
     Entries :: [entry()],
     CallOpts :: map(),
@@ -1814,16 +1744,14 @@ choose([H|T], CallOpts, LastGroup, Acc, Cont) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Adds support for (Sharded Registration)
-%% [https://wamp-proto.org/_static/gen/wamp_latest.html#sharded-registration]
-%% by transforming the call runmode and rkey properties into the ones
-%% expected by the extensions to REGISTER.Options in order to reuse Bondy's
-%% jump_consistent_hash load balancing strategy.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds support for
+[Sharded Registration](https://wamp-proto.org/_static/gen/wamp_latest.html#sharded-registration)
+by transforming the call runmode and rkey properties into the ones
+expected by the extensions to `REGISTER.Options` in order to reuse Bondy's
+`jump_consistent_hash` load balancing strategy.
+""".
 lb_opts(Strategy, CallOpts0) ->
     CallOpts1 = coerce_strategy(Strategy, CallOpts0),
     coerce_routing_key(CallOpts1).
@@ -1848,9 +1776,10 @@ coerce_routing_key(CallOpts) ->
 
 
 %% @private
-%% @doc We add context and metadata to the details of the CALL so that we
-%% con forward it to a remote node or create an INVOCATION with it.
-%% @end
+-doc """
+We add context and metadata to the details of the CALL so that we
+con forward it to a remote node or create an INVOCATION with it.
+""".
 prepare_call(M, Uri, Entry, Ctxt) ->
     Args = maybe_append_callback_args(M#call.args, Entry),
     Options = prepare_call_options(
@@ -1882,15 +1811,14 @@ call_to_invocation(#call{options = #{'$private' := Private}} = M, ReqId) ->
     bondy_wamp_message:invocation_from(M, ReqId, RegistrationId, Details).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc If this is a callback, then it must be a remote callback, as we should
-%% have handled the local callback sequentially.
-%% We add the statically defined arguments to the INVOCATION so that
-%% we avoid the receiving node having to look the local copy of the entry
-%% to retrieve the arguments.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+If this is a callback, then it must be a remote callback, as we should
+have handled the local callback sequentially.
+We add the statically defined arguments to the INVOCATION so that
+we avoid the receiving node having to look the local copy of the entry
+to retrieve the arguments.
+""".
 maybe_append_callback_args(Args0, Entry) ->
     Args = args_to_list(Args0),
 
@@ -1902,16 +1830,15 @@ maybe_append_callback_args(Args0, Entry) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc An internal function that we use to parse and evaluate CALL.Options. We
-%% use this to cache certain metadata we need to either forward the CALL
-%% to another node and/or turn the CALL into an INVOCATION.
-%% The resulting CALL has Options.'$private' field with subfields call_id,
-%% registration_id and invocation_details. The latter is the map we will pass
-%% as value to INVOCATION.Details.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+An internal function that we use to parse and evaluate `CALL.Options`. We
+use this to cache certain metadata we need to either forward the CALL
+to another node and/or turn the CALL into an INVOCATION.
+The resulting CALL has `Options.'$private'` field with subfields `call_id`,
+`registration_id` and `invocation_details`. The latter is the map we will pass
+as value to `INVOCATION.Details`.
+""".
 prepare_call_options(Opts, CallId, Uri, Entry, Ctxt) ->
     RegistrationId =
         case bondy_registry_entry:is_proxy(Entry) of
@@ -2016,11 +1943,13 @@ on_delete(Entry) ->
 
 
 %% @private
-%% @doc Replies to the caller of an in-flight invocation promise with a
-%% `wamp.error.no_eligible_callee' ERROR. Used by `flush/2' when the callee
-%% session dies, so callers fast-fail instead of waiting for the call
-%% timeout. The reply is routed back through any relays stored in the
-%% promise's `via' queue.
+-doc """
+Replies to the caller of an in-flight invocation promise with a
+`wamp.error.no_eligible_callee` ERROR. Used by `flush/2` when the callee
+session dies, so callers fast-fail instead of waiting for the call
+timeout. The reply is routed back through any relays stored in the
+promise's `via` queue.
+""".
 send_no_eligible_callee(Promise) ->
     RealmUri = bondy_rpc_promise:realm_uri(Promise),
     Caller = bondy_rpc_promise:caller(Promise),

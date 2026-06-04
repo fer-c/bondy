@@ -3,16 +3,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc Server-side WAMP-CRA password storage.
-%%
-%% The cryptographic algorithm lives in `bondy_wamp_cra' (the router-independent
-%% single source of truth shared with the WAMP client). This module keeps the
-%% server-only concerns: building a `bondy_password:t()' and supplying defaults
-%% (`kdf', `iterations') from `bondy_config' when the caller omits them.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_password_cra).
+-moduledoc """
+Server-side WAMP-CRA password storage.
+
+The cryptographic algorithm lives in `bondy_wamp_cra` (the router-independent
+single source of truth shared with the WAMP client). This module keeps the
+server-only concerns: building a `bondy_password:t()` and supplying defaults
+(`kdf`, `iterations`) from `bondy_config` when the caller omits them.
+""".
 
 -type data()        ::  bondy_wamp_cra:data().
 -type params()      ::  bondy_wamp_cra:params().
@@ -40,10 +39,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(binary(), params(), fun((data(), params()) -> bondy_password:t())) ->
     bondy_password:t() | no_return().
 
@@ -67,21 +62,16 @@ new(Password, Params0, Builder) ->
     Builder(Data, Params).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify_string(binary(), data(), params()) -> boolean().
 
 verify_string(String, Data, Params) ->
     bondy_wamp_cra:verify_string(String, Data, Params).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Validates the CRA params, filling `kdf' and `iterations' from
-%% `bondy_config' when absent.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Validates the CRA params, filling `kdf` and `iterations` from `bondy_config`
+when absent.
+""".
 -spec validate_params(Params :: params()) ->
     Validated :: params() | no_return().
 
@@ -91,80 +81,50 @@ validate_params(Params0) ->
     bondy_wamp_cra:validate_params(Params2).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec hash_function() -> atom().
 
 hash_function() ->
     bondy_wamp_cra:hash_function().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec hash_length() -> integer().
 
 hash_length() ->
     bondy_wamp_cra:hash_length().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec salt_length() -> integer().
 
 salt_length() ->
     bondy_wamp_cra:salt_length().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec nonce_length() -> integer().
 
 nonce_length() ->
     bondy_wamp_cra:nonce_length().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec salt() -> binary().
 
 salt() ->
     bondy_wamp_cra:salt().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A base64 encoded 128-bit random value.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A base64 encoded 128-bit random value.".
 -spec nonce() -> binary().
 
 nonce() ->
     bondy_wamp_cra:nonce().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the 64 encoded salted password.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the 64 encoded salted password.".
 -spec salted_password(binary(), binary(), map()) -> binary().
 
 salted_password(Password, Salt, Params) ->
     bondy_wamp_cra:salted_password(Password, Salt, Params).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec compare(binary(), binary()) -> boolean().
 
 compare(A, B) ->

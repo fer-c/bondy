@@ -3,18 +3,18 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% restart defines when a terminated bridge must be restarted.
-%% A permanent bridge is always restarted, even after recovering from a Bondy
-%% node crash or when the node is manually stopped and re-started. Bondy
-%% persists the configuration of permanent bridges in the database and reads
-%% them during startup.
-%% A transient bridge is restarted only if it terminated abnormally. In case of
-%% a node crash or manually stopped and re-started they will not be restarted.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay).
+-moduledoc """
+`restart` defines when a terminated bridge must be restarted.
+
+A permanent bridge is always restarted, even after recovering from a Bondy
+node crash or when the node is manually stopped and re-started. Bondy
+persists the configuration of permanent bridges in the database and reads
+them during startup.
+
+A transient bridge is restarted only if it terminated abnormally. In case of
+a node crash or manually stopped and re-started they will not be restarted.
+""".
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -516,10 +516,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec forward(Ref :: bondy_ref:t() | [bondy_ref:t()], Msg :: any()) ->
     ok.
 
@@ -534,20 +530,12 @@ forward(Ref, Msg) ->
     bondy_bridge_relay_client:forward(Ref, Msg).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Data :: map()) -> t() | no_return().
 
 new(Data) ->
     type_and_version(maps_utils:validate(Data, ?BRIDGE_RELAY_SPEC)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec add(t()) -> ok | {error, already_exists | any()}.
 
 add(#{type := ?TYPE, name := Name} = Bridge0) ->
@@ -560,20 +548,12 @@ add(#{type := ?TYPE, name := Name} = Bridge0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(Name :: binary()) -> ok.
 
 remove(Name) ->
     plum_db:delete(?PLUMDB_PREFIX, Name).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec exists(Name :: binary()) -> boolean().
 
 exists(Name) ->
@@ -583,10 +563,6 @@ exists(Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec lookup(Name :: binary()) -> {ok, t()} | {error, not_found}.
 
 lookup(Name) ->
@@ -598,10 +574,6 @@ lookup(Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list() -> [t()].
 
 list() ->
@@ -612,10 +584,6 @@ list() ->
     [V || {_, V} <- plum_db:match(?PLUMDB_PREFIX, '_', PDBOpts)].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec to_external(Bridge :: t()) -> map().
 
 to_external(Bridge) ->

@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_wamp_subprotocol).
+-moduledoc """
+Parses and validates WAMP subprotocol identifiers, mapping their binary
+representations (e.g. `wamp.2.json`) to the internal
+`{Transport, Frame, Encoding}` subprotocol tuples and back.
+""".
 -include("bondy_wamp.hrl").
 
 
@@ -22,10 +27,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec from_binary(binary()) -> subprotocol() | {error, invalid_subprotocol}.
 
 from_binary(?WAMP2_JSON) ->                 {ws, text, json};
@@ -42,10 +43,6 @@ from_binary(_) ->                           {error, invalid_subprotocol}.
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate(binary() | subprotocol()) ->
     {ok, subprotocol()} | {error, invalid_subprotocol}.
 

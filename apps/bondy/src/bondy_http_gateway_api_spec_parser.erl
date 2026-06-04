@@ -1392,16 +1392,14 @@ parse_request_method(Method, Spec0, Ctxt) ->
 
 
 %% @private
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Parses a path action section definition. Before applying validations
-%% this function applies defaults values and evaluates all terms
-%% (using mops:eval/2).
-%% If the action type provided is not reconised it fails with
-%% `{unsupported_action_type, Type}'.
-%% If an action type is not provided if fails with `action_type_missing'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Parses a path action section definition. Before applying validations
+this function applies defaults values and evaluates all terms
+(using `mops:eval/2`).
+If the action type provided is not reconised it fails with
+`{unsupported_action_type, Type}`.
+If an action type is not provided if fails with `action_type_missing`.
+""".
 -spec parse_action(binary(), map(), map()) -> map().
 
 parse_action(_, #{<<"type">> := <<"wamp_call">>} = Spec, Ctxt) ->
@@ -1457,12 +1455,8 @@ parse_response(_, Spec0, Ctxt) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Lower level variables and defaults override previous ones
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Lower level variables and defaults override previous ones.".
 merge_eval_vars(Spec0, Ctxt0) ->
     %% We merge (override) ctxt variables and defaults
     VVars = maps:get(?VARS_KEY, Spec0, #{}),
@@ -1483,30 +1477,36 @@ eval_vars(Ctxt) ->
     element(1, eval_vars(Ctxt, Ctxt)).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% We assume Ctxt0 has been previously evaluated.
-%% Variables are evaluated before defaults
-%%
-%% If at level 1 we have:
-%% a = b
-%% b = 1
-%% c = 2
-%% After eval we get:
-%% a = 1
-%% b = 1
-%% c = 2
-%%
-%% If at level 2 we have:
-%% a = 2
-%% c = b
-%% After eval we get:
-%% a = 2
-%% b = 1
-%% c = 1
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+We assume Ctxt0 has been previously evaluated.
+Variables are evaluated before defaults
+
+If at level 1 we have:
+```
+a = b
+b = 1
+c = 2
+```
+After eval we get:
+```
+a = 1
+b = 1
+c = 2
+```
+
+If at level 2 we have:
+```
+a = 2
+c = b
+```
+After eval we get:
+```
+a = 2
+b = 1
+c = 1
+```
+""".
 eval_vars(S0, Ctxt0) ->
     Vars = maps:get(?VARS_KEY, S0, #{}),
     Defs = maps:get(?DEFAULTS_KEY, S0, #{}),
@@ -1595,10 +1595,6 @@ allowed_methods(Path) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec do_dispatch_table(map()) -> [scheme_rule()].
 
 do_dispatch_table(API) ->
@@ -1613,10 +1609,6 @@ do_dispatch_table(API) ->
     ]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec dispatch_table_version(binary(), binary(), tuple()) ->
     [scheme_rule()] | no_return().
 
@@ -1635,10 +1627,6 @@ dispatch_table_version(Host, Realm, {_Name, Version}) ->
     ].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec dispatch_table_path(
     binary(), binary(), boolean(), binary(), tuple(), map()) ->
     [scheme_rule()] | no_return().
@@ -1762,13 +1750,11 @@ remove_trailing_slash(Bin) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Returns a context where all keys have been assigned funs that take
-%% a context as an argument.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a context where all keys have been assigned funs that take
+a context as an argument.
+""".
 get_context_proxy() ->
     %% We cannot used funs as they will break when we run the
     %% parse transform, so we use mops:proxy()

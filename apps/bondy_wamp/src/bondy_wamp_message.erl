@@ -3,12 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
-%% @doc
-%%
-%% @end
-%% =============================================================================
 -module(bondy_wamp_message).
+-moduledoc """
+Constructors and accessors for the internal (Erlang record) representation of
+WAMP messages. Each public function builds and validates a message of a given
+type, raising an exception when the supplied identifiers, URIs or
+options/details maps are invalid.
+""".
 -include("bondy_wamp.hrl").
 
 -type t()               ::  wamp_call()
@@ -123,10 +124,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_message(any()) -> boolean().
 
 is_message(Term) when is_record(Term, abort) -> true;
@@ -156,11 +153,9 @@ is_message(Term) when is_record(Term, yield) -> true;
 is_message(_) -> false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% If Details argument is not valid fails with an exception
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+If Details argument is not valid fails with an exception
+""".
 -spec hello(uri(), map()) -> wamp_hello() | no_return().
 
 hello(RealmUri, Details) when is_binary(RealmUri) ->
@@ -170,10 +165,6 @@ hello(RealmUri, Details) when is_binary(RealmUri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec welcome(id(), map()) -> wamp_welcome() | no_return().
 
 welcome(SessionId, Details)   ->
@@ -183,10 +174,6 @@ welcome(SessionId, Details)   ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 %% "ABORT" gets sent only _before_ a _Session_ is established
 -spec abort(map(), uri()) -> wamp_abort() | no_return().
 
@@ -197,10 +184,6 @@ abort(Details, ReasonUri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(binary(), map()) -> wamp_challenge() | no_return().
 
 challenge(AuthMethod, Extra) when is_map(Extra) ->
@@ -210,10 +193,6 @@ challenge(AuthMethod, Extra) when is_map(Extra) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(binary(), map()) -> wamp_authenticate() | no_return().
 
 authenticate(Signature, Extra) when is_map(Extra) ->
@@ -223,10 +202,6 @@ authenticate(Signature, Extra) when is_map(Extra) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 %% "GOODBYE" is sent only _after_ a _Session_ is already established.
 -spec goodbye(map(), uri()) -> wamp_goodbye() | no_return().
 
@@ -237,20 +212,12 @@ goodbye(Details, ReasonUri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec error(pos_integer(), id(), map(), uri()) -> wamp_error() | no_return().
 
 error(ReqType, ReqId, Details, ErrorUri) ->
     error(ReqType, ReqId, Details, ErrorUri, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec error(pos_integer(), id(), map(), uri(), list() | partial()) ->
     wamp_error() | no_return().
 
@@ -263,10 +230,6 @@ when is_atom(Enc), is_binary(Bin) ->
     M#error{partial = Partial}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec error(
     pos_integer(),
     id(),
@@ -292,20 +255,12 @@ when is_map(Details0) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec error_from(error_source(), map(), uri()) -> wamp_error() | no_return().
 
 error_from(M, Details, ErrorUri) ->
     error_from(M, Details, ErrorUri, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec error_from(error_source(), map(), uri(), list()) ->
     wamp_error() | no_return().
 
@@ -313,10 +268,6 @@ error_from(M, Details, ErrorUri, Args) ->
     error_from(M, Details, ErrorUri, Args, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec error_from(
     error_source(),
     map(),
@@ -357,30 +308,18 @@ error_from(#publish{} = M, Details0, ErrorUri, Args, KWArgs) ->
     error(?PUBLISH, ReqId, Details, ErrorUri, Args, KWArgs).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec publish(id(), map(), uri()) -> wamp_publish() | no_return().
 
 publish(ReqId, Options, TopicUri) ->
     publish(ReqId, Options, TopicUri, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec publish(id(), map(), uri(), list()) -> wamp_publish() | no_return().
 
 publish(ReqId, Options, TopicUri, Args) when is_list(Args) ->
     publish(ReqId, Options, TopicUri, Args, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec publish(id(), map(), uri(), list() | undefined, map() | undefined) ->
     wamp_publish() | no_return().
 
@@ -397,10 +336,6 @@ publish(ReqId, Options0, TopicUri, Args0, KWArgs0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec published(id(), id()) -> wamp_published() | no_return().
 
 published(ReqId, PubId) ->
@@ -410,10 +345,6 @@ published(ReqId, PubId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec subscribe(id(), map(), uri()) -> wamp_subscribe() | no_return().
 
 subscribe(ReqId, Options0, TopicUri) when is_map(Options0) ->
@@ -427,10 +358,6 @@ subscribe(ReqId, Options0, TopicUri) when is_map(Options0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec subscribed(id(), id()) -> wamp_subscribed() | no_return().
 
 subscribed(ReqId, SubsId) ->
@@ -440,10 +367,6 @@ subscribed(ReqId, SubsId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec unsubscribe(id(), id()) -> wamp_unsubscribe() | no_return().
 
 unsubscribe(ReqId, SubsId) ->
@@ -453,10 +376,6 @@ unsubscribe(ReqId, SubsId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec unsubscribed(id()) -> wamp_unsubscribed() | no_return().
 
 unsubscribed(ReqId) ->
@@ -465,30 +384,18 @@ unsubscribed(ReqId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec event(id(), id(), map()) -> wamp_event() | no_return().
 
 event(SubsId, PubId, Details) ->
     event(SubsId, PubId, Details, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec event(id(), id(), map(), list()) -> wamp_event() | no_return().
 
 event(SubsId, PubId, Details, Args) when is_list(Args) ->
     event(SubsId, PubId, Details, Args, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec event(id(), id(), map(), list() | undefined, map() | undefined) ->
     wamp_event() | no_return().
 
@@ -505,21 +412,15 @@ event(SubsId, PubId, Details0, Args0, KWArgs0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @deprecated
-%% %% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+**Deprecated**
+""".
 -spec copy_event(wamp_event(), SubsId :: id()) ->  wamp_event() | no_return().
 
 copy_event(#event{} = Event, SubsId) ->
     Event#event{subscription_id = bondy_wamp_utils:validate_id(SubsId)}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec event_from(wamp_publish(), id(), id(), map()) ->
     wamp_event() | no_return().
 
@@ -534,10 +435,6 @@ event_from(#publish{} = M, SubsId, PubId, Details) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec event_received(id(), map(), uri()) -> wamp_event_received() | no_return().
 
 event_received(PubId, Details0, Payload) when is_map(Details0) ->
@@ -550,10 +447,6 @@ event_received(PubId, Details0, Payload) when is_map(Details0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec subscriber_received(id(), map(), uri()) -> wamp_subscriber_received() | no_return().
 
 subscriber_received(PubId, Details0, Payload) when is_map(Details0) ->
@@ -566,30 +459,18 @@ subscriber_received(PubId, Details0, Payload) when is_map(Details0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec call(id(), map(), uri()) -> wamp_call() | no_return().
 
 call(ReqId, Options, ProcedureUri) ->
     call(ReqId, Options, ProcedureUri, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec call(id(), map(), uri(), list()) -> wamp_call() | no_return().
 
 call(ReqId, Options, ProcedureUri, Args) when is_list(Args) ->
     call(ReqId, Options, ProcedureUri, Args, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec call(id(), map(), uri(), list() | undefined, map() | undefined) ->
     wamp_call() | no_return().
 
@@ -606,10 +487,6 @@ call(ReqId, Options0, ProcedureUri, Args0, KWArgs0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec cancel(id(), map()) -> wamp_cancel() | no_return().
 
 cancel(ReqId, Options) ->
@@ -619,30 +496,18 @@ cancel(ReqId, Options) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec result(id(), map()) -> wamp_result() | no_return().
 
 result(ReqId, Details) ->
     result(ReqId, Details, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec result(id(), map(), list()) -> wamp_result() | no_return().
 
 result(ReqId, Details, Args) when is_list(Args) ->
     result(ReqId, Details, Args, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec result(id(), map(), list() | undefined, map() | undefined) ->
     wamp_result() | no_return().
 
@@ -658,10 +523,6 @@ result(ReqId, Details0, Args0, KWArgs0) when is_map(Details0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec result_from(wamp_yield(), id(), map()) -> wamp_result() | no_return().
 
 result_from(#yield{} = M, RegId, Details0) ->
@@ -675,10 +536,6 @@ result_from(#yield{} = M, RegId, Details0) ->
         partial = M#yield.partial
     }.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec register(id(), map(), uri()) -> wamp_register() | no_return().
 
 register(ReqId0, Options0, ProcedureUri) ->
@@ -693,10 +550,6 @@ register(ReqId0, Options0, ProcedureUri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec registered(id(), id()) -> wamp_registered() | no_return().
 
 registered(ReqId, RegId) ->
@@ -706,10 +559,6 @@ registered(ReqId, RegId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec unregister(id(), id()) -> wamp_unregister() | no_return().
 
 unregister(ReqId, RegId) ->
@@ -719,10 +568,6 @@ unregister(ReqId, RegId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 % -spec registration_revocation(id(), id()) -> wamp_unregister() | no_return().
 
 % registration_revocation(RegId, Reason) when is_binary(Reason) ->
@@ -733,10 +578,6 @@ unregister(ReqId, RegId) ->
 %     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec unregistered(id()) -> wamp_unregistered() | no_return().
 
 unregistered(ReqId) ->
@@ -745,10 +586,6 @@ unregistered(ReqId) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec unregistered(id(), map()) -> wamp_unregistered() | no_return().
 
 unregistered(ReqId, Details) when is_map(Details) ->
@@ -759,30 +596,18 @@ unregistered(ReqId, Details) when is_map(Details) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec invocation(id(), id(), map()) -> wamp_invocation() | no_return().
 
 invocation(ReqId, RegId, Details) ->
     invocation(ReqId, RegId, Details, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec invocation(id(), id(), map(), list()) -> wamp_invocation() | no_return().
 
 invocation(ReqId, RegId, Details, Args) when is_list(Args) ->
     invocation(ReqId, RegId, Details, Args, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec invocation(id(), id(), map(), list() | undefined, map() | undefined) ->
     wamp_invocation() | no_return().
 
@@ -799,10 +624,6 @@ invocation(ReqId, RegId, Details0, Args0, KWArgs0) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec invocation_from(wamp_call(), id(), id(), map()) ->
     wamp_invocation() | no_return().
 
@@ -820,10 +641,6 @@ invocation_from(#call{} = M, ReqId, RegId, Details0) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec interrupt(id(), map()) -> wamp_interrupt() | no_return().
 
 interrupt(ReqId, Options) ->
@@ -833,30 +650,18 @@ interrupt(ReqId, Options) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec yield(id(), map()) -> wamp_yield() | no_return().
 
 yield(ReqId, Options) ->
     yield(ReqId, Options, undefined, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec yield(id(), map(), list()) -> wamp_yield() | no_return().
 
 yield(ReqId, Options, Args) when is_list(Args) ->
     yield(ReqId, Options, Args, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec yield(id(), map(), list() | undefined, map() | undefined) ->
     wamp_yield() | no_return().
 
@@ -894,10 +699,6 @@ options(_) ->
     error(badarg).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec details(
     wamp_hello()
     | wamp_welcome()

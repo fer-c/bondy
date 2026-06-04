@@ -3,12 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module provides the functions and algorithms to operate with the
-%% Salted Challenge-Reponse Mechanism data structures.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_password_scram).
+-moduledoc """
+This module provides the functions and algorithms to operate with the
+Salted Challenge-Reponse Mechanism data structures.
+""".
 
 
 -define(SALT_LENGTH, 16).
@@ -64,10 +63,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(binary(), params(), fun((data(), params()) -> bondy_password:t())) ->
     bondy_password:t() | no_return().
 
@@ -97,10 +92,6 @@ new(String, Params0, Builder) when is_function(Builder, 2) ->
     Builder(Data, Params).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify_string(binary(), data(), params()) -> boolean().
 
 verify_string(String, Data, Params) ->
@@ -115,10 +106,6 @@ verify_string(String, Data, Params) ->
     CStoredKey =:= StoredKey.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate_params(Params :: params()) ->
     Validated :: params() | no_return().
 
@@ -134,40 +121,24 @@ validate_params(Params0) ->
     maps:merge(Params3, Static).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec hash_function() -> atom().
 
 hash_function() ->
     sha256.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec hash_length() -> integer().
 
 hash_length() ->
     32.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec salt_length() -> integer().
 
 salt_length() ->
     ?SALT_LENGTH.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec salt() -> Salt :: binary().
 
 salt() ->
@@ -175,20 +146,12 @@ salt() ->
     crypto:strong_rand_bytes(salt_length()).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec server_nonce(ClientNonce :: binary()) -> ServerNonce :: binary().
 
 server_nonce(ClientNonce) ->
     <<ClientNonce/binary, (crypto:strong_rand_bytes(16))/binary>>.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec salted_password(
     Password :: binary(),
     Salt :: binary(),
@@ -215,30 +178,18 @@ salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
     crypto:pbkdf2_hmac(HashFun, Normalised, Salt, Iterations, HashLen).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec client_key(SaltedPassword :: binary()) -> ClientKey :: binary().
 
 client_key(SaltedPassword) ->
     crypto:mac(hmac, hash_function(), SaltedPassword, <<"Client Key">>).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec stored_key(ClientKey :: binary()) -> StoredKey :: binary().
 
 stored_key(ClientKey) ->
     crypto:hash(hash_function(), ClientKey).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec client_signature(StoredKey :: binary(), AuthMessage :: binary()) ->
     ClientSignature :: binary().
 
@@ -247,12 +198,10 @@ when is_binary(StoredKey), is_binary(AuthMessage) ->
     crypto:mac(hmac, hash_function(), StoredKey, AuthMessage).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc computes the client proof out of the client key `Key' and the client
-%% signature `Signature'. See {@link client_key/2} and
-%% {@link client_signature/2} respectively.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Computes the client proof out of the client key `Key` and the client signature
+`Signature`. See `client_key/2` and `client_signature/2` respectively.
+""".
 -spec client_proof(Key :: binary(), Signature :: binary()) ->
     ClientProof :: binary().
 
@@ -260,10 +209,6 @@ client_proof(Key, Signature) when is_binary(Key), is_binary(Signature) ->
     crypto:exor(Key, Signature).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec recovered_client_key(
     ClientProof :: binary(), ClientSignature :: binary()) ->
     RecoveredClientKey :: binary().
@@ -273,10 +218,6 @@ when is_binary(ClientProof) andalso is_binary(ClientSignature) ->
     crypto:exor(ClientProof, ClientSignature).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec recovered_stored_key(RecoveredClientKey :: binary()) ->
     RecoveredStoredKey :: binary().
 
@@ -284,20 +225,12 @@ recovered_stored_key(RecoveredClientKey) when is_binary(RecoveredClientKey) ->
     crypto:hash(hash_function(), RecoveredClientKey).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec server_key(SaltedPassword :: binary()) -> ServerKey :: binary().
 
 server_key(SaltedPassword) ->
     crypto:mac(hmac, hash_function(), SaltedPassword, <<"Server Key">>).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec server_signature(ServerKey :: binary(), AuthMessage :: binary()) ->
     ClientSignature :: binary().
 
@@ -305,10 +238,6 @@ server_signature(ServerKey, AuthMessage) ->
     crypto:mac(hmac, hash_function(), ServerKey, AuthMessage).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec check_proof(
     ProvidedProof :: binary(),
     ClientProof :: binary(),
@@ -324,18 +253,10 @@ check_proof(ProvidedProof, _, ClientSignature, StoredKey) ->
     stored_key(client_proof(ProvidedProof, ClientSignature)) =:= StoredKey.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 auth_message(AuthId, ClientNonce, ServerNonce, Salt, Iterations) ->
     auth_message(AuthId, ClientNonce, ServerNonce, Salt, Iterations, "", "").
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 auth_message(
     AuthId, ClientNonce, ServerNonce, Salt, Iterations, CBindName, CBindData) ->
 

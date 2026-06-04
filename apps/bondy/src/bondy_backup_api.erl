@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_backup_api).
+-moduledoc """
+Implements the `bondy_wamp_api` behaviour for the Bondy backup administrative
+procedures, dispatching WAMP calls to create, query the status of, and restore
+backups via `m:bondy_backup`.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -23,10 +24,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(
     Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok

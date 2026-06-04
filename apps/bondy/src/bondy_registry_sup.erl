@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_registry_sup).
+-moduledoc """
+Top-level supervisor for the registry subsystem. It starts the registry
+partition workers (one per partition, managed through a `gproc_pool`) and the
+`bondy_registry` worker.
+""".
 -behaviour(supervisor).
 
 -include("bondy.hrl").
@@ -28,10 +29,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

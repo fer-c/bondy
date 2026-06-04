@@ -3,11 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_app).
+-moduledoc """
+The `application` behaviour implementation for the Bondy OTP application.
+
+Handles startup and shutdown: initialising configuration, starting
+dependencies (`tuplespace`, `plum_db`/Partisan), the supervision tree and the
+network listeners, and tearing them down gracefully on stop.
+""".
 -behaviour(application).
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
@@ -30,18 +33,13 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A convenience function. Calls `init:stop/0'
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A convenience function. Calls `init:stop/0`.
+""".
 stop() ->
     init:stop().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 status() ->
     #{
         vsn => vsn(),
@@ -49,10 +47,6 @@ status() ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec vsn() -> list().
 vsn() ->
     bondy_config:get(vsn, "undefined").
@@ -65,10 +59,9 @@ vsn() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Application behaviour callback
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Application behaviour callback.
+""".
 start(_Type, Args) ->
     %% We initialise the Bondy config, we need to make this call before
     %% starting tuplespace, partisan and plum_db. This is because we are
@@ -143,10 +136,9 @@ start(_Type, Args) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Application behaviour callback
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Application behaviour callback.
+""".
 prep_stop(_State) ->
     ok = bondy_config:set(status, shutting_down),
 
@@ -176,10 +168,9 @@ prep_stop(_State) ->
     ok = stop_listeners().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Application behaviour callback
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Application behaviour callback.
+""".
 stop(_State) ->
     ?LOG_NOTICE(#{description => "Shutdown finished"}),
     ok.
@@ -394,12 +385,11 @@ setup_event_handlers() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Sets up some internal WAMP subscribers. These are processes supervised
-%% by {@link bondy_subsribers_sup}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sets up some internal WAMP subscribers. These are processes supervised
+by `bondy_subsribers_sup`.
+""".
 setup_wamp_subscriptions() ->
     ok.
 

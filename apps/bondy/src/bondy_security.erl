@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_security).
+-moduledoc """
+Manages the per-realm security status (enabled or disabled), persisting it in
+`plum_db`, and resolves the RBAC module used for a realm.
+""".
 
 -define(STATUS_PREFIX(RealmUri), {security_status, RealmUri}).
 
@@ -22,18 +26,10 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 rbac_mod(_) ->
     bondy_rbac.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 is_enabled(RealmUri) ->
     bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     case plum_db:get(?STATUS_PREFIX(RealmUri), enabled) of
@@ -42,28 +38,16 @@ is_enabled(RealmUri) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 enable(RealmUri) ->
     bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     plum_db:put(?STATUS_PREFIX(RealmUri), enabled, true).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 disable(RealmUri) ->
     bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     plum_db:put(?STATUS_PREFIX(RealmUri), enabled, false).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 status(RealmUri) ->
     case is_enabled(RealmUri) of
         true -> enabled;

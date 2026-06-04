@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_wamp_erl).
+-moduledoc """
+Encodes and decodes WAMP terms to and from the Erlang external term format,
+mapping between WAMP message representations and native Erlang terms (atoms,
+maps, lists and tuples) according to the configured options.
+""".
 
 -record(wamp_erl, {
     keys = binary               ::  binary
@@ -51,10 +56,6 @@ decode(Bin, Opts) ->
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec encode_term(term(), encode_opts()) -> term().
 
 
@@ -124,10 +125,6 @@ encode_term(Term, _) ->
     Term.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec decode_term(term(), decode_opts()) -> term().
 
 decode_term(<<"true">>, _) ->

@@ -6,14 +6,14 @@
 
 %% From https://github.com/ferd/flatlog
 %% https://ferd.ca/erlang-otp-21-s-new-logger.html
-%%% @doc
-%%% This is the main module that exposes custom formatting to the OTP
-%%% logger library (part of the `kernel' application since OTP-21).
-%%%
-%%% The module honors the standard configuration of the kernel's default
-%%% logger formatter regarding: max depth, templates.
-%%% @end
 -module(bondy_logger_formatter).
+-moduledoc """
+This is the main module that exposes custom formatting to the OTP
+logger library (part of the `kernel` application since OTP-21).
+
+The module honors the standard configuration of the kernel's default
+logger formatter regarding: max depth, templates.
+""".
 
 %% API exports
 -export([format/2]).

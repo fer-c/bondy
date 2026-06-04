@@ -24,11 +24,11 @@
 %% -------------------------------------------------------------------
 
 %-module(riak_core_console_table).
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_cli_table).
+-moduledoc """
+Renders ASCII tables for CLI output from a column spec and a list of rows,
+supporting multi-line fields and automatic column-width sizing.
+""".
 
 %% API
 -export([print/2, print/3,

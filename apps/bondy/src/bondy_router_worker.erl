@@ -3,11 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_router_worker).
+-moduledoc """
+Implements the router worker pool using the `sidejob` library, supporting both
+a permanent pool of supervised `m:gen_server` workers and a transient pool that
+spawns a new worker per task. Used by `m:bondy_router` to forward WAMP messages
+asynchronously with load regulation.
+""".
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
@@ -43,12 +45,10 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Starts a sidejob pool of workers according to the configuration
-%% for the entry named 'router_pool'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Starts a sidejob pool of workers according to the configuration
+for the entry named `router_pool`.
+""".
 -spec start_pool() -> ok.
 
 start_pool() ->
@@ -61,10 +61,6 @@ start_pool() ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 cast(Fun) when is_function(Fun, 0) ->
     Opts = bondy_config:get(router_pool),
     PoolType = key_value:get(type, Opts, transient),
@@ -173,12 +169,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Actually starts a sidejob pool based on system configuration.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Actually starts a sidejob pool based on system configuration.
+""".
 do_start_pool() ->
     Opts = bondy_config:get(router_pool),
     Size = key_value:get(size, Opts),
@@ -196,12 +190,10 @@ do_start_pool() ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Helper function for {@link async_forward/2}
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Helper function for `async_forward/2`.
+""".
 do_cast(permanent, PoolName, Fun) ->
     %% We send a request to an existing permanent worker
     %% using bondy_router acting as a sidejob_worker

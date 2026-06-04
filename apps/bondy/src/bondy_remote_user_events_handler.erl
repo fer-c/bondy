@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_remote_user_events_handler).
+-moduledoc """
+A `m:gen_server` that subscribes to `plum_db` object update notifications for
+the user, group and grant tables, reacting to security-related changes made on
+remote nodes.
+""".
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
@@ -36,10 +37,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

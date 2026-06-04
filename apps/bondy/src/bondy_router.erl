@@ -3,80 +3,77 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module provides the routing logic for all WAMP interactions.
-%%
-%% In general `bondy_router' tries to handle all messages asynchronously.
-%% It does it by
-%% using either a static or a dynamic pool of workers based on configuration.
-%% This module implements both type of workers as a gen_server (this module).
-%% A static pool uses a set of supervised processes whereas a
-%% dynamic pool spawns a new erlang process for each message. In both cases,
-%% sidejob supervises the processes.
-%% By default bondy_router uses a dynamic pool.
-%%
-%% The pools are implemented using the sidejob library in order to provide
-%% load regulation. Inn case a maximum pool capacity has been reached,
-%% the router will handle the message synchronously i.e. blocking the
-%% calling processes (usually the one that handles the transport connection
-%% e.g. {@link bondy_wamp_ws_connection_handler}).
-%%
-%% The router also handles messages synchronously in those
-%% cases where it needs to preserve message ordering guarantees.
-%%
-%% This module handles only the concurrency and basic routing logic,
-%% delegating the rest to either {@link bondy_broker} for PubSub interactions,
-%% {@link bondy_dealer} for RPC interactions and {@link bondy_relay} for
-%% all interactions targeting a remote peer.
-%%
-%% ```
-%% ,------.                                    ,------.
-%% | Peer |                                    | Peer |
-%% `--+---'                                    `--+---'
-%%    |                                           |
-%%    |               TCP established             |
-%%    |<----------------------------------------->|
-%%    |                                           |
-%%    |               TLS established             |
-%%    |+<--------------------------------------->+|
-%%    |+                                         +|
-%%    |+           WebSocket established         +|
-%%    |+|<------------------------------------->|+|
-%%    |+|                                       |+|
-%%    |+|            WAMP established           |+|
-%%    |+|+<----------------------------------->+|+|
-%%    |+|+                                     +|+|
-%%    |+|+                                     +|+|
-%%    |+|+            WAMP closed              +|+|
-%%    |+|+<----------------------------------->+|+|
-%%    |+|                                       |+|
-%%    |+|                                       |+|
-%%    |+|            WAMP established           |+|
-%%    |+|+<----------------------------------->+|+|
-%%    |+|+                                     +|+|
-%%    |+|+                                     +|+|
-%%    |+|+            WAMP closed              +|+|
-%%    |+|+<----------------------------------->+|+|
-%%    |+|                                       |+|
-%%    |+|           WebSocket closed            |+|
-%%    |+|<------------------------------------->|+|
-%%    |+                                         +|
-%%    |+              TLS closed                 +|
-%%    |+<--------------------------------------->+|
-%%    |                                           |
-%%    |               TCP closed                  |
-%%    |<----------------------------------------->|
-%%    |                                           |
-%% ,--+---.                                    ,--+---.
-%% | Peer |                                    | Peer |
-%% `------'                                    `------'
-%%
-%% '''
-%% (Diagram copied from WAMP RFC Draft)
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_router).
+-moduledoc """
+This module provides the routing logic for all WAMP interactions.
+
+In general `bondy_router` tries to handle all messages asynchronously.
+It does it by
+using either a static or a dynamic pool of workers based on configuration.
+This module implements both type of workers as a gen_server (this module).
+A static pool uses a set of supervised processes whereas a
+dynamic pool spawns a new erlang process for each message. In both cases,
+sidejob supervises the processes.
+By default bondy_router uses a dynamic pool.
+
+The pools are implemented using the sidejob library in order to provide
+load regulation. Inn case a maximum pool capacity has been reached,
+the router will handle the message synchronously i.e. blocking the
+calling processes (usually the one that handles the transport connection
+e.g. `bondy_wamp_ws_connection_handler`).
+
+The router also handles messages synchronously in those
+cases where it needs to preserve message ordering guarantees.
+
+This module handles only the concurrency and basic routing logic,
+delegating the rest to either `m:bondy_broker` for PubSub interactions,
+`m:bondy_dealer` for RPC interactions and `bondy_relay` for
+all interactions targeting a remote peer.
+
+```
+,------.                                    ,------.
+| Peer |                                    | Peer |
+`--+---'                                    `--+---'
+   |                                           |
+   |               TCP established             |
+   |<----------------------------------------->|
+   |                                           |
+   |               TLS established             |
+   |+<--------------------------------------->+|
+   |+                                         +|
+   |+           WebSocket established         +|
+   |+|<------------------------------------->|+|
+   |+|                                       |+|
+   |+|            WAMP established           |+|
+   |+|+<----------------------------------->+|+|
+   |+|+                                     +|+|
+   |+|+                                     +|+|
+   |+|+            WAMP closed              +|+|
+   |+|+<----------------------------------->+|+|
+   |+|                                       |+|
+   |+|                                       |+|
+   |+|            WAMP established           |+|
+   |+|+<----------------------------------->+|+|
+   |+|+                                     +|+|
+   |+|+                                     +|+|
+   |+|+            WAMP closed              +|+|
+   |+|+<----------------------------------->+|+|
+   |+|                                       |+|
+   |+|           WebSocket closed            |+|
+   |+|<------------------------------------->|+|
+   |+                                         +|
+   |+              TLS closed                 +|
+   |+<--------------------------------------->+|
+   |                                           |
+   |               TCP closed                  |
+   |<----------------------------------------->|
+   |                                           |
+,--+---.                                    ,--+---.
+| Peer |                                    | Peer |
+`------'                                    `------'
+```
+(Diagram copied from WAMP RFC Draft)
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -103,10 +100,9 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the broker and dealer roles with their features.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the broker and dealer roles with their features.
+""".
 -spec roles() -> #{binary() => #{binary() => boolean()}}.
 
 roles() ->
@@ -116,28 +112,24 @@ roles() ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the Bondy agent identification string
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the Bondy agent identification string.
+""".
 agent() ->
     Vsn = list_to_binary(bondy_app:vsn()),
     <<"LEAPSIGHT-BONDY-", Vsn/binary>>.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Forwards a WAMP message to the Dealer or Broker based on message type.
-%% The message might end up being handled synchronously
-%% (performed by the calling process i.e. the transport handler)
-%% or asynchronously (by sending the message to the router load regulated
-%% worker pool).
-%%
-%% This function is called by {@link bondy_wamp_protocol} for messages that
-%% originate from WAMP peers connected to this Bondy node.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Forwards a WAMP message to the Dealer or Broker based on message type.
+The message might end up being handled synchronously
+(performed by the calling process i.e. the transport handler)
+or asynchronously (by sending the message to the router load regulated
+worker pool).
+
+This function is called by `bondy_wamp_protocol` for messages that
+originate from WAMP peers connected to this Bondy node.
+""".
 -spec forward(M :: wamp_message(), Ctxt :: bondy_context:t()) ->
     {ok, bondy_context:t()}
     | {reply, Reply :: wamp_message(), bondy_context:t()}
@@ -208,11 +200,10 @@ forward(M, #{session := _} = Ctxt) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc This function is called by {@link bondy_relay} for messages
-%% that originate from another Bondy node.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+This function is called by `bondy_relay` for messages
+that originate from another Bondy node.
+""".
 -spec forward(wamp_message(), optional(bondy_ref:t()), map()) ->
     ok | no_return().
 
@@ -251,13 +242,12 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sends a GOODBYE message to all existing client connections.
-%% The client should reply with another GOODBYE within the configured time and
-%% when it does or on timeout, Bondy will close the connection triggering the
-%% cleanup of all the client sessions.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sends a GOODBYE message to all existing client connections.
+The client should reply with another GOODBYE within the configured time and
+when it does or on timeout, Bondy will close the connection triggering the
+cleanup of all the client sessions.
+""".
 pre_stop() ->
     M = bondy_wamp_message:goodbye(
         #{message => <<"Router is shutting down">>},
@@ -293,12 +283,11 @@ stop() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all subscriptions, registrations and all the pending items in
-%% the RPC promise queue that are associated for reference `Ref' in realm
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all subscriptions, registrations and all the pending items in
+the RPC promise queue that are associated for reference `Ref` in realm
+`RealmUri`.
+""".
 -spec flush(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
 
 flush(RealmUri, Ref) ->
@@ -313,11 +302,7 @@ flush(RealmUri, Ref) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec acknowledge_message(map()) -> boolean().
 
 acknowledge_message(#publish{options = Opts}) ->
@@ -403,14 +388,13 @@ async_forward(M, Ctxt0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Synchronously forwards a message in the calling process.
-%% These are messages sent by Caller or Publisher only i.e. client-to-router
-%% direction.
-%% This function is called by {@link async_forward/2}.
-%% @end.
-%% -----------------------------------------------------------------------------
+-doc """
+Synchronously forwards a message in the calling process.
+These are messages sent by Caller or Publisher only i.e. client-to-router
+direction.
+This function is called by `async_forward/2`.
+""".
 -spec sync_forward(event()) -> ok.
 
 sync_forward({#subscribe{} = M, Ctxt}) ->
@@ -446,20 +430,19 @@ sync_forward({M, _Ctxt}) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Auxiliary function used by forward/3.
-%% These are messages sent by Caller or Publisher only i.e. client-to-router
-%% direction or a router-to-client message that is also being forwarded by
-%% another cluster peer node.
-%% The following messages are never forwarded between cluster peer nodes:
-%% INVOCATION, YIELD, INTERRUPT, EVENT.
-%% EVENT is particular since Bondy forwards PUBLISH messages when subscribers
-%% exist in cluster peer nodes, this is because in WAMP every EVENT has a per
-%% subscriber sequence number, so these events could not possibly be generated
-%% on the publisher's node.
-%% @end.
-%% -----------------------------------------------------------------------------
+-doc """
+Auxiliary function used by `forward/3`.
+These are messages sent by Caller or Publisher only i.e. client-to-router
+direction or a router-to-client message that is also being forwarded by
+another cluster peer node.
+The following messages are never forwarded between cluster peer nodes:
+INVOCATION, YIELD, INTERRUPT, EVENT.
+EVENT is particular since Bondy forwards PUBLISH messages when subscribers
+exist in cluster peer nodes, this is because in WAMP every EVENT has a per
+subscriber sequence number, so these events could not possibly be generated
+on the publisher's node.
+""".
 do_forward(#publish{} = M, To, Opts) ->
     bondy_broker:forward(M, To, Opts);
 

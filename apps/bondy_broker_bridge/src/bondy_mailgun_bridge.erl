@@ -200,11 +200,7 @@ terminate(_Reason, _State) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec send_email(map())
     -> {ok, binary()} | {error, Reason :: any()} | no_return().
 
@@ -250,11 +246,7 @@ send_email(Action) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 formatted_body(#{<<"text/html">> := HTML}) ->
     Message =  <<
         "Please open this email with an HTML viewer to complete the process."

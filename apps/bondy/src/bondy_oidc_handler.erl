@@ -825,15 +825,17 @@ cookie_opts(_BasePath, MaxAge, IsSecure, HttpOnly, CookieDomain,
 
 
 %% @private
-%% @doc Attempts to build an RP-Initiated Logout URL for the IdP. If the ticket
-%% contains OIDC claims (provider name and id_token), uses
-%% `oidcc_logout:initiate_url/3' to redirect to the IdP's end_session_endpoint
-%% with the `post_logout_redirect_uri' pointing back to the SPA.
-%%
-%% Falls back to `RedirectUri' (direct SPA redirect) when:
-%% - No OIDC provider is in the claims (non-OIDC session)
-%% - The provider's client context cannot be obtained
-%% - The IdP does not support `end_session_endpoint'
+-doc """
+Attempts to build an RP-Initiated Logout URL for the IdP. If the ticket
+contains OIDC claims (provider name and id_token), uses
+`oidcc_logout:initiate_url/3` to redirect to the IdP's end_session_endpoint
+with the `post_logout_redirect_uri` pointing back to the SPA.
+
+Falls back to `RedirectUri` (direct SPA redirect) when:
+- No OIDC provider is in the claims (non-OIDC session)
+- The provider's client context cannot be obtained
+- The IdP does not support `end_session_endpoint`
+""".
 maybe_idp_logout_url(RealmUri, Claims, RedirectUri) ->
     case Claims of
         #{oidc_provider := Provider} when is_binary(Provider) ->

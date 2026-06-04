@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_stdlib_error).
+-moduledoc """
+Structured error values with a type, code, nature, message, details, causes and
+a documentation URI. Maps error types to standard attributes and renders or
+normalizes them into maps and human-readable messages.
+""".
 
 -type t() :: #{
     type := atom(),

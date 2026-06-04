@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_oauth_token_set).
+-moduledoc """
+An in-memory set of OAuth tokens keyed by authorisation scope, with a
+secondary index by token id. Supports adding, finding, removing, merging,
+cleaning up expired tokens and truncating to a maximum size.
+""".
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 

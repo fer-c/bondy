@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_telemetry_api).
+-moduledoc """
+Implements the `m:bondy_wamp_api` behaviour for the telemetry WAMP API,
+dispatching calls to the telemetry administrative procedures.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -19,10 +23,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(
     Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) -> ok
     | continue

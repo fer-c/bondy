@@ -3,12 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
-%% @doc
-%%
-%% @end
-%% =============================================================================
 -module(bondy_wamp_details).
+-moduledoc """
+Builds and validates the `Details` dictionary of WAMP messages such as `HELLO`,
+`WELCOME`, `EVENT`, `RESULT` and `INVOCATION`, honouring the extended details
+configured in the application environment.
+""".
 -include("bondy_wamp.hrl").
 
 -type type()    ::  hello
@@ -36,23 +36,24 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Fails with an exception if the Options maps is not valid.
-%% A Options map is valid if all its properties (keys) are valid. A property is
-%% valid if it is a key defined by the WAMP Specification for the message type
-%% or when the key is found in the list of extended_options configured in the
-%% application environment and in both cases the key is valid according to the
-%% WAMP regex specification.
-%%
-%% Example:
-%%
-%% ```
-%% application:set_env(wamp, extende_options, [{call, [<<"_x">>, <<"_y">>]}).
-%% ```
-%%
-%% Using this configuration only `call' messages would accept `<<"_x">>'
-%% and `<<"_y">>' properties.
-%% -----------------------------------------------------------------------------
+-doc """
+Fails with an exception if the Options maps is not valid.
+
+A Options map is valid if all its properties (keys) are valid. A property is
+valid if it is a key defined by the WAMP Specification for the message type
+or when the key is found in the list of extended_options configured in the
+application environment and in both cases the key is valid according to the
+WAMP regex specification.
+
+Example:
+
+```erlang
+application:set_env(wamp, extende_options, [{call, [<<"_x">>, <<"_y">>]}).
+```
+
+Using this configuration only `call` messages would accept `<<"_x">>`
+and `<<"_y">>` properties.
+""".
 -spec new(MessageType :: type(), Details :: map()) -> map() | no_return().
 
 new(Type, Details) ->

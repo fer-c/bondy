@@ -4,11 +4,11 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_cache).
+-moduledoc """
+Stub key/value cache API keyed by realm URI. Currently a placeholder whose
+operations are not yet implemented.
+""".
 
 
 -export([get/2]).

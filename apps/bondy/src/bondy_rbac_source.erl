@@ -3,16 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% **Note:**
-%% Usernames and group names are stored in lower case. All functions in this
-%% module are case sensitice so when using the functions in this module make
-%% sure the inputs you provide are in lowercase to. If you need to convert your
-%% input to lowercase use {@link string:casefold/1}.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_rbac_source).
+-moduledoc """
+**Note:**
+Usernames and group names are stored in lower case. All functions in this
+module are case sensitice so when using the functions in this module make
+sure the inputs you provide are in lowercase to. If you need to convert your
+input to lowercase use `string:casefold/1`.
+""".
 -include_lib("partisan/include/partisan_util.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -129,10 +127,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new_assignment(Data :: map()) -> Source :: assignment().
 
 new_assignment(Data) when is_map(Data) ->
@@ -144,32 +138,22 @@ new_assignment(Data) when is_map(Data) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the authmethod associated with the source
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the authmethod associated with the source".
 authmethod(#{type := source, authmethod := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the source's CIDR.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the source's CIDR.".
 cidr(#{type := source, cidr := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the metadata associated with the source
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the metadata associated with the source".
 meta(#{type := source, meta := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a source to the realm identified by `RealmUri' using
-%% assignment or map `Assignment'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a source to the realm identified by `RealmUri` using assignment or map
+`Assignment`.
+""".
 -spec add(
     RealmUri :: uri(), Assignment :: map() | assignment()) ->
     {ok, t()}  | {error, any()}.
@@ -178,11 +162,10 @@ add(RealmUri, Assignment) ->
     add(RealmUri, Assignment, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a source to the realm identified by `RealmUri' using
-%% assignment or map `Assignment'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a source to the realm identified by `RealmUri` using assignment or map
+`Assignment`.
+""".
 -spec add(
     RealmUri :: uri(),
     Assignment :: map() | assignment(),
@@ -207,10 +190,6 @@ add(RealmUri, #source_assignment{} = A, Opts) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(
     RealmUri :: uri(),
     Usernames :: [binary() | anonymous] | binary() | anonymous | all,
@@ -257,11 +236,9 @@ remove(RealmUri, Username, CIDR) when is_binary(Username) ->
     remove(RealmUri, [Username], CIDR).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all sources from all users in realm identifier by uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all sources from all users in realm identifier by uri `RealmUri`.
+""".
 -spec remove_all(RealmUri :: uri()) -> ok.
 
 remove_all(RealmUri) ->
@@ -274,10 +251,6 @@ remove_all(RealmUri) ->
         Opts
     ).
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove_all(RealmUri :: uri(), Username :: binary()) -> ok.
 
 remove_all(RealmUri, Username) ->
@@ -295,11 +268,9 @@ remove_all(RealmUri, Username) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns all the sources for user including the ones for special
-%% use 'all'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns all the sources for user including the ones for special use 'all'.
+""".
 -spec match(uri(), binary() | all | anonymous) -> [t()].
 
 match(RealmUri, all) ->
@@ -312,10 +283,6 @@ match(RealmUri, Username) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(
     RealmUri :: uri(),
     Username :: binary() | all | anonymous,
@@ -338,11 +305,10 @@ match(RealmUri, Username, ConnIP) when ?IS_IP(ConnIP) ->
     [from_term(Term) || Term <- lists:filter(Pred, Sources)].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the first matching source of all the sources available for
-%% username `Username'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the first matching source of all the sources available for username
+`Username`.
+""".
 -spec match_first(
     RealmUri :: uri(),
     Username :: binary() | all | anonymous,
@@ -365,20 +331,12 @@ match_first(RealmUri, Username, ConnIP) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list(uri()) -> list(t()).
 
 list(RealmUri) ->
     list(RealmUri, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
 list(RealmUri, Opts) ->
@@ -404,10 +362,7 @@ list(RealmUri, Opts) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the external representation of the source `Source'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the external representation of the source `Source`.".
 -spec to_external(Source :: t()) -> external().
 
 to_external(#{type := source, version := ?VERSION} = Source) ->
@@ -475,15 +430,18 @@ store(RealmUri, Key, Source, _) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% Returns the Key Value
-%% Example:
-%% [
-%%     {{anonymous, {{0,0,0,0},0}},
-%%     #{authmethod => <<"anonymous">>,...,version => <<"1.1">>}}]
-%% }
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the Key Value
+Example:
+
+```erlang
+[
+    {{anonymous, {{0,0,0,0},0}},
+    #{authmethod => <<"anonymous">>,...,version => <<"1.1">>}}]
+}
+```
+""".
 do_match(RealmUri, Username) ->
     Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
     ProtoSources = case bondy_realm:prototype_uri(RealmUri) of
@@ -500,11 +458,7 @@ do_match(RealmUri, Username) ->
     lists:append(Sources, ProtoSources).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 do_match(RealmUri, Username, AMask) ->
     Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
     ProtoSources = case bondy_realm:prototype_uri(RealmUri) of

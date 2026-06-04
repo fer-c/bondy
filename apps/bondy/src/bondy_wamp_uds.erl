@@ -45,11 +45,10 @@ transport options directly from a small dedicated `wamp_uds` config block.
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Conditionally starts the WAMP Unix domain socket listener. A no-op unless
-%% `[wamp_uds, enabled]` is `true`.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Conditionally starts the WAMP Unix domain socket listener. A no-op unless
+`[wamp_uds, enabled]` is `true`.
+""".
 -spec start_listeners() -> ok | {error, any()}.
 
 start_listeners() ->
@@ -79,10 +78,7 @@ start_listeners() ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Stops the listener and removes its socket file.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Stops the listener and removes its socket file.".
 -spec stop_listeners() -> ok.
 
 stop_listeners() ->
@@ -91,10 +87,6 @@ stop_listeners() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec suspend_listeners() -> ok.
 
 suspend_listeners() ->
@@ -102,10 +94,6 @@ suspend_listeners() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec resume_listeners() -> ok.
 
 resume_listeners() ->
@@ -113,10 +101,6 @@ resume_listeners() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 connections() ->
     case bondy_config:get([?UDS, enabled], false) of
         true -> ranch:procs(?UDS, connections);
@@ -124,10 +108,7 @@ connections() ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the filesystem path the listener binds to.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the filesystem path the listener binds to.".
 -spec path() -> string().
 
 path() ->

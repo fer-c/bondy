@@ -3,40 +3,39 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% ### WAMP Permissions:
-%%
-%% * "wamp.register"
-%% * "wamp.unregister"
-%% * "wamp.call"
-%% * "wamp.cancel"
-%% * "wamp.subscribe"
-%% * "wamp.unsubscribe"
-%% * "wamp.publish"
-%% * "wamp.disclose_caller"
-%% * "wamp.disclose_publisher"
-%%
-%% ### Reserved Names
-%% Reserved names are role (user or group) or resource names that act as
-%% keywords in RBAC in either binary or atom forms and thus cannot be used.
-%%
-%% The following is the list of all reserved names.
-%%
-%% * all - group
-%% * anonymous - the anonymous user and group
-%% * any - use to denote a resource
-%% * from - use to denote a resource
-%% * on - not used
-%% * to - use to denote a resource
-%% %% **Note:**
-%% Usernames and group names are stored in lower case. All functions in this
-%% module are case sensitice so when using the functions in this module make
-%% sure the inputs you provide are in lowercase to. If you need to convert your
-%% input to lowercase use {@link string:casefold/1}.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_rbac).
+-moduledoc """
+### WAMP Permissions:
+
+- "wamp.register"
+- "wamp.unregister"
+- "wamp.call"
+- "wamp.cancel"
+- "wamp.subscribe"
+- "wamp.unsubscribe"
+- "wamp.publish"
+- "wamp.disclose_caller"
+- "wamp.disclose_publisher"
+
+### Reserved Names
+Reserved names are role (user or group) or resource names that act as
+keywords in RBAC in either binary or atom forms and thus cannot be used.
+
+The following is the list of all reserved names.
+
+- all - group
+- anonymous - the anonymous user and group
+- any - use to denote a resource
+- from - use to denote a resource
+- on - not used
+- to - use to denote a resource
+
+**Note:**
+Usernames and group names are stored in lower case. All functions in this
+module are case sensitice so when using the functions in this module make
+sure the inputs you provide are in lowercase to. If you need to convert your
+input to lowercase use `string:casefold/1`.
+""".
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
@@ -195,10 +194,7 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns 'ok' or an exception.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns 'ok' or an exception.".
 -spec authorize(binary(), bondy_context:t() | context()) ->
     ok | no_return().
 
@@ -206,15 +202,13 @@ authorize(Permission, Ctxt) ->
     authorize(Permission, any, Ctxt).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns 'ok' or an exception.
-%% Failures:
-%% <ul>
-%% <li>`{no_such_realm, uri()}'</li>
-%% <li>`{not_authorized, Reason :: binary()}'</li>
-%% </ul>
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns 'ok' or an exception.
+Failures:
+
+- `{no_such_realm, uri()}`
+- `{not_authorized, Reason :: binary()}`
+""".
 -spec authorize(binary(), binary() | any, bondy_context:t() | context()) ->
     ok | no_return().
 
@@ -242,10 +236,6 @@ authorize(Permission, Resource, Ctxt) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get_context(Ctxt :: bondy_context:t()) -> context().
 
 get_context(Ctxt) ->
@@ -260,10 +250,6 @@ get_context(Ctxt) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec refresh_context(Ctxt :: bondy_context:t()) -> {boolean(), context()}.
 
 refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
@@ -296,10 +282,6 @@ refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get_anonymous_context(Ctxt :: bondy_context:t()) -> context().
 
 get_anonymous_context(Ctxt) ->
@@ -313,36 +295,29 @@ get_anonymous_context(Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 get_anonymous_context(RealmUri, Username) ->
     Ctxt = build_context(RealmUri, Username, grants(RealmUri, anonymous, group)),
     Ctxt#bondy_rbac_context{is_anonymous = true}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Contexts are only valid until the GRANT epoch changes, and it will
-%% change whenever a GRANT or a REVOKE is performed. This is a little coarse
-%% grained right now, but it'll do for the moment.
-%% @end
-%% -----------------------------------------------------------------------------
-
+-doc """
+Contexts are only valid until the GRANT epoch changes, and it will
+change whenever a GRANT or a REVOKE is performed. This is a little coarse
+grained right now, but it'll do for the moment.
+""".
 get_context(RealmUri, Username)
 when is_binary(Username) orelse Username == anonymous ->
     build_context(RealmUri, Username, grants(RealmUri, Username, user)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns an RBAC context for `Username' with explicit group memberships.
-%%
-%% Used for claim-based sessions (e.g. OIDC) where the user may not have a
-%% local `bondy_rbac_user' record but carries group memberships from the
-%% Identity Provider. The explicit groups are traversed for their grants in
-%% addition to the `all' group and any direct user grants.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns an RBAC context for `Username` with explicit group memberships.
+
+Used for claim-based sessions (e.g. OIDC) where the user may not have a
+local `bondy_rbac_user` record but carries group memberships from the
+Identity Provider. The explicit groups are traversed for their grants in
+addition to the `all` group and any direct user grants.
+""".
 -spec get_context(
     RealmUri :: uri(),
     Username :: binary() | anonymous,
@@ -379,10 +354,6 @@ andalso is_list(ExplicitGroups0) ->
         RealmUri, Username, group_grants(lists:flatten(Acc2)), ExplicitGroups).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 get_metadata(_, anonymous) ->
     #{};
 
@@ -414,20 +385,18 @@ get_metadata(RealmUri, Username, Groups) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns true if term is a reserved name in binary or atom form.
-%%
-%% **Reserved names:**
-%%
-%% * all
-%% * anonymous
-%% * any
-%% * from
-%% * on
-%% * to
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true if term is a reserved name in binary or atom form.
+
+**Reserved names:**
+
+- all
+- anonymous
+- any
+- from
+- on
+- to
+""".
 -spec is_reserved_name(Term :: binary() | atom()) -> boolean() | no_return().
 
 is_reserved_name(Term) when is_binary(Term) ->
@@ -463,39 +432,32 @@ is_reserved_name(_) ->
     error(invalid_name).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Normalises the utf8 binary `Bin' into a Normalised Form of compatibly
-%% equivalent Decomposed characters according to the Unicode standard and
-%% converts it to a case-agnostic comparable string.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Normalises the utf8 binary `Bin` into a Normalised Form of compatibly
+equivalent Decomposed characters according to the Unicode standard and
+converts it to a case-agnostic comparable string.
+""".
 -spec normalise_name(Term :: binary() | atom()) -> boolean() | no_return().
 
 normalise_name(Bin) when is_binary(Bin) ->
     string:casefold(unicode:characters_to_nfkd_binary(Bin)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Validates the data for a grant or revoke request.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Validates the data for a grant or revoke request.".
 -spec request(Data :: request_data()) -> Request :: request() | no_return().
 
 request(Data) ->
     validate(Data).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% **Use cases**
-%%
-%% ```
-%% grant <permissions> on any to all|{<user>|<group>[,...]}
-%% grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
-%% '''
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+**Use cases**
+
+```
+grant <permissions> on any to all|{<user>|<group>[,...]}
+grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
+```
+""".
 -spec grant(RealmUri :: uri(), Request :: request() | map()) ->
     ok | {error, Reason :: any()} | no_return().
 
@@ -503,16 +465,14 @@ grant(RealmUri, Arg) ->
     grant(RealmUri, Arg, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% **Use cases**
-%%
-%% ```
-%% grant <permissions> on any to all|{<user>|<group>[,...]}
-%% grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
-%% '''
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+**Use cases**
+
+```
+grant <permissions> on any to all|{<user>|<group>[,...]}
+grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
+```
+""".
 -spec grant(
     RealmUri :: uri(), Request :: request() | map(), Opts :: grant_opts()) ->
     ok | {error, Reason :: any()} | no_return().
@@ -531,10 +491,6 @@ grant(RealmUri, Data, Opts) when is_map(Data) ->
     grant(RealmUri, request(Data), Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke(RealmUri :: uri(), Request :: request() | map()) ->
     ok | {error, Reason :: any()} | no_return().
 
@@ -551,10 +507,6 @@ revoke(RealmUri, Data) when is_map(Data) ->
     revoke(RealmUri, validate(Data)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 revoke_user(RealmUri, Username) ->
     Prefix = ?USER_GRANTS_PREFIX(RealmUri),
     plum_db:foreach(
@@ -567,10 +519,6 @@ revoke_user(RealmUri, Username) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 revoke_group(RealmUri, Name) ->
     Prefix = ?GROUP_GRANTS_PREFIX(RealmUri),
 
@@ -584,10 +532,10 @@ revoke_group(RealmUri, Name) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the local grants assigned in realm `RealmUri'. This function does not use protypical inheritance.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the local grants assigned in realm `RealmUri`. This function does not
+use protypical inheritance.
+""".
 -spec grants(RealmUri :: uri(), Opts :: map())
 -> [{{binary(), normalised_resource()}, [permission()]}].
 
@@ -605,10 +553,6 @@ grants(RealmUri, Opts0) ->
     lists:append(GroupGrants, UserGrants).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec grants(
     RealmUri :: uri(), Name :: binary(), RoleType :: user | group) ->
     [grant()].
@@ -617,34 +561,24 @@ grants(RealmUri, Name, Type) ->
     group_grants(acc_grants(RealmUri, Name, Type)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec user_grants(RealmUri :: uri(), Username :: binary()) -> [grant()].
 
 user_grants(RealmUri, Username) ->
     grants(RealmUri, Username, user).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec group_grants(RealmUri :: uri(), Name :: binary()) -> [grant()].
 
 group_grants(RealmUri, Name) ->
     grants(RealmUri, Name, group).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Resource must be a binary or the atom `any'.
-%% In the case the resource is `any', the role needs to have this permission
-%% applied *globally*. This is for things with undetermined inputs or
-%% permissions that don't tie to a particular resource.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Resource must be a binary or the atom `any`.
+In the case the resource is `any`, the role needs to have this permission
+applied *globally*. This is for things with undetermined inputs or
+permissions that don't tie to a particular resource.
+""".
 -spec check_permission(Permission :: permission(), Context :: context()) ->
     {true, context()} | {false, binary(), context()}.
 
@@ -665,10 +599,6 @@ when is_binary(Resource) orelse Resource =:= any ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove_all(RealmUri :: uri(), Opts :: map()) -> ok.
 
 remove_all(RealmUri, _Opts) ->
@@ -688,22 +618,16 @@ remove_all(RealmUri, _Opts) ->
         Opts
     ).
 
+-doc "To list the grants for a realm, a role (group or user) or a resource.".
 -spec externalize_grant(grant()) -> map().
 
-%% -----------------------------------------------------------------------------
-%% @doc To list the grants for a realm
-%% @end
-%% -----------------------------------------------------------------------------
 externalize_grant({{Role, {_, _} = Resource}, Permissions}) ->
     ResourceMap = externalize_grant({Resource, Permissions}),
     ResourceMap#{
         <<"roles">> => [Role]
     };
 
-%% -----------------------------------------------------------------------------
-%% @doc To list the grants for a role (group or user)
-%% @end
-%% -----------------------------------------------------------------------------
+%% To list the grants for a role (group or user)
 externalize_grant({{<<>>, Strategy}, Permissions}) ->
     externalize_grant({{any, Strategy}, Permissions});
 
@@ -1049,11 +973,8 @@ inconsistency_error(Keys) ->
     error(bondy_error_utils:map({inconsistency_error, Keys})).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Grant permissions to one or more roles(
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Grant permissions to one or more roles(".
 -spec grant(
     RealmUri ::binary(),
     Arg :: all | [binary()],
@@ -1167,10 +1088,7 @@ store(Prefix, Key, Permissions, _) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Revoke permissions to one or more roles
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Revoke permissions to one or more roles".
 -spec revoke(
     RealmUri :: binary(),
     Roles :: all | [binary()],
@@ -1429,14 +1347,13 @@ acc_grants_find(Rolename, group = Type, {RealmUri, ProtoUri}) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc We return the groups this role is a member of. If the groups does not
-%% exist we try fetching from the prototype if it exists.
-%% Returns qualified group names e.g. {Name, Uri} where Uri can be the Realm's
-%% or its prototype.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+We return the groups this role is a member of. If the groups does not
+exist we try fetching from the prototype if it exists.
+Returns qualified group names e.g. {Name, Uri} where Uri can be the Realm's
+or its prototype.
+""".
 role_groupnames(Rolename, Type, RealmProto, Seen) ->
     case lists:member(Rolename, Seen) of
         true ->

@@ -3,11 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc An implementation of app_config behaviour.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_config).
+-moduledoc """
+An implementation of the `app_config` behaviour.
+""".
 -behaviour(app_config).
 
 %% We renamed the default plum_db data channel
@@ -213,10 +212,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 init(Args) ->
     %% We initialise the environment with the args
     ok = set_vsn(Args),
@@ -246,10 +241,6 @@ init(Args) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Key :: list() | atom() | tuple()) -> term().
 
 get(wamp_call_timeout = Key) ->
@@ -261,20 +252,12 @@ get(Key) ->
     app_config:get(?BONDY, Key).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
 
 get(Key, Default) ->
     app_config:get(?BONDY, Key, Default).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec set(Key :: key_value:key() | tuple(), Value :: term()) -> ok.
 
 set(status, Value) ->
@@ -288,20 +271,12 @@ set(Key, Value) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec node() -> atom().
 
 node() ->
     partisan_config:get(name).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec nodestring() -> nodestring().
 
 nodestring() ->
@@ -316,10 +291,6 @@ nodestring() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec node_spec() -> partisan:node_spec().
 
 node_spec() ->
@@ -354,12 +325,11 @@ listener_protocol_opts(Name) ->
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc A utility function we use to extract the version name that is
-%% injected by the bondy.app.src configuration file.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+A utility function we use to extract the version name that is injected by the
+`bondy.app.src` configuration file.
+""".
 set_vsn(Args) ->
     case lists:keyfind(vsn, 1, Args) of
         {vsn, Vsn} ->

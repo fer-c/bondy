@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_auth_password).
+-moduledoc """
+This module implements the `bondy_auth` behaviour for password-based
+authentication, verifying a client-supplied string against the user's stored
+password using the `cra` or `scram` protocols.
+""".
 -behaviour(bondy_auth).
 
 -define(VALID_PROTOCOLS, [cra, scram]).
@@ -29,10 +30,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
@@ -55,10 +52,6 @@ init(Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec requirements() -> bondy_auth:requirements().
 
 requirements() ->
@@ -69,10 +62,6 @@ requirements() ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(
     DataIn :: map(), Ctxt :: bondy_auth:context(), State :: state()) ->
     {false, NewState :: state()}
@@ -82,10 +71,6 @@ challenge(_, _, State) ->
     {true, #{}, State}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(
     String :: binary(),
     DataIn :: map(),

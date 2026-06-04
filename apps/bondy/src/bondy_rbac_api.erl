@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_rbac_api).
+-moduledoc """
+Implements the `bondy_wamp_api` behaviour for the RBAC administrative API,
+dispatching the `bondy.user.*`, `bondy.group.*`, `bondy.grant.*` and
+`bondy.source.*` WAMP procedures to the corresponding RBAC modules.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -426,11 +431,6 @@ handle_call(_, #call{} = M, _) ->
     {reply, E}.
 
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 
 handle_event(_, _) ->
     ok.

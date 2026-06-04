@@ -3,152 +3,134 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module implements the functions to issue and manage authentication
-%% tickets.
-%%
-%% <h1>Overview</h1>
-%% An authentication ticket is a signed (and possibly encrypted)
-%% assertion of a user's identity, that a client can use to authenticate the
-%% user without the need to ask it to re-enter its credentials.
-%%
-%% Tickets MUST be issued by a session that was opened using an authentication
-%% method that is neither `ticket' nor `anonymous' authentication.
-%%
-%% == Claims ==
-%%
-%% <ul>
-%% <li>`id': provides a unique identifier for the ticket.</li>
-%% <li>`issued_by': identifies the principal that issued the ticket. Most
-%% of the time this is an application identifier (a.k.asl username or client_id)
-%% but sometimes can be the WAMP session's username (a.k.a `authid').</li>
-%% <li>`authid': identifies the principal that is the subject of the ticket.
-%% The Claims in a ticket are normally statements. This is the WAMP session's
-%% username (a.k.a `authid').</li>
-%% <li>`authrealm': identifies the recipients that the ticket is intended for.
-%% The value is `RealmUri'.</li>
-%% <li>`expires_at': identifies the expiration time on or after which
-%% the ticket MUST NOT be accepted for processing.  The processing of th thia
-%% claim requires that the current date/time MUST be before the expiration date/
-%% time listed in the &quot;exp&quot; claim. Bondy considers a small leeway of
-%% 2 mins by default.</li>
-%% <li>`issued_at': identifies the time at which the ticket was issued.
-%% This claim can be used to determine the age of the ticket. Its value is a
-%% timestamp in seconds.</li>
-%% <li>`issued_on': the bondy nodename in which the ticket was issued.</li>
-%% <li>`scope': the scope of the ticket, consisting of</li>
-%% <li>`realm': If `all' the ticket grants access to all realms the user
-%% has access to by the authrealm (an SSO realm). Otherwise, the value is the
-%% realm this ticket is valid on.</li>
-%% </ul>
-%%
-%% == Claims Storage ==
-%%
-%% Claims for a ticket are stored in PlumDB using the prefix
-%% `{bondy_ticket, Suffix :: binary()}' where `Suffix' is the concatenation of
-%% the authentication realm's URI and the user's username (a.k.a `authid') and
-%% a key which is derived by the ticket's scope. The scope itself is the result
-%% of the combination of the different options provided by the {@link issue/2}
-%% function.
-%%
-%% The decision to use this key as opposed to the ticket's unique identifier
-%% is so that we are able to bound the number of tickets a user can have at any
-%% point in time in order to reduce data storage and cluster replication
-%% traffic.
-%%
-%% == Ticket Scopes ==
-%% A ticket can be issued using different scopes. The scope is determined based
-%% on the options used to issue the ticket.
-%%
-%% There are 4 scopes:
-%%
-%% <ol>
-%% <li>Local scope</li>
-%% <li>SSO scope</li>
-%% <li>Client-Local scope</li>
-%% <li>Client-SSO scope</li>
-%% </ol>
-%%
-%% === Local scope ===
-%% The ticket was issued with `allow_sso' option set to `false' or when set to
-%% `true' the user did not have SSO credentials, and the option `client_ticket'
-%% was not provided.
-%% The ticket can be used to authenticate on the session's realm only.
-%%
-%% ==== Authorization ====
-%% To be able to issue this ticket, the user must have been granted
-%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.local">>'
-%% resource.
-%%
-%% === SSO Scope ===
-%% The ticket was issued with `allow_sso' option set to `true', the user has
-%% SSO credentials, and the option `client_ticket' was not provided.
-%% The ticket can be used to authenticate on any realm the user has access to
-%% through SSO.
-%%
-%% ==== Authorization ====
-%% To be able to issue this ticket, the user must have been granted
-%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.sso">>'
-%% resource.
-%%
-%% === Client-Local scope ===
-%% The ticket was issued with `allow_sso' option set to `false' or when set to
-%% `true' the user did not have SSO credentials, and the option `client_ticket'
-%% was provided having a valid ticket issued by a client
-%% (a local or sso ticket).
-%% The ticket can be used to authenticate on the session's realm by the
-%% specified client only.
-%%
-%% ==== Authorization ====
-%% To be able to issue this ticket, the session must have been granted
-%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
-%% resource.
-%%
-%% === Client-SSO scope ===
-%% The ticket was issued with `allow_sso' option set to `true' and the user has
-%% SSO credentials, and the option `client_ticket' was provided having a valid
-%% ticket issued by a client (a local or sso ticket).
-%% The ticket can be used to authenticate on any realm the user has access to
-%% through SSO only by the specified client.
-%%
-%% ==== Authorization ====
-%% To be able to issue this ticket, the session must have been granted
-%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
-%% resource.
-%%
-%% === Scope Summary ===
-%%
-%% *Keys:*
-%% * `uri()' in the following table refers to the scope realm (not the
-%% Authentication realm which is used in the prefix)
-%%
-%% <div class="markdown">
-%% |SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value|
-%% |---|---|---|---|---|---|
-%% |Local|no|no|no|`uri()'|`t()'|
-%% |SSO|yes|no|no|`username()'|`t()'|
-%% |Client-Local|no|yes|no|`client_id()'|`[{uri(), t()}]'|
-%% |Client-Local|no|yes|yes|`client_id()'|`[{{uri(), instance_id()}, t()}]'|
-%% |Client-SSO|yes|yes|no|`client_id()'|`[{all, t()}]'|
-%% |Client-SSO|yes|yes|yes|`client_id()'|`[{{all, instance_id()}, t()}]'|
-%% </div>
-%%
-%% === Permissions Summary ===
-%% Issuing tickets requires the user to be granted certain permissions beyond
-%% the WAMP permission required to call the procedures.
-%%
-%% <div class="markdown">
-%% |Scope|Permission|Resource|
-%% |---|---|---|
-%% |Local|`bondy.issue'|`bondy.ticket.scope.local'|
-%% |SSO|`bondy.issue'|`bondy.ticket.scope.sso'|
-%% |Client-Local|`bondy.issue'|`bondy.ticket.scope.client_local'|
-%% |Client-SSO|`bondy.issue'|`bondy.ticket.scope.client_sso'|
-%% </div>
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_ticket).
+-moduledoc """
+This module implements the functions to issue and manage authentication
+tickets.
+
+## Overview
+An authentication ticket is a signed (and possibly encrypted) assertion of a
+user's identity, that a client can use to authenticate the user without the need
+to ask it to re-enter its credentials.
+
+Tickets MUST be issued by a session that was opened using an authentication
+method that is neither `ticket` nor `anonymous` authentication.
+
+## Claims
+
+- `id`: provides a unique identifier for the ticket.
+- `issued_by`: identifies the principal that issued the ticket. Most of the time
+  this is an application identifier (a.k.asl username or client_id) but sometimes
+  can be the WAMP session's username (a.k.a `authid`).
+- `authid`: identifies the principal that is the subject of the ticket. The
+  Claims in a ticket are normally statements. This is the WAMP session's username
+  (a.k.a `authid`).
+- `authrealm`: identifies the recipients that the ticket is intended for. The
+  value is `RealmUri`.
+- `expires_at`: identifies the expiration time on or after which the ticket MUST
+  NOT be accepted for processing. The processing of th thia claim requires that
+  the current date/time MUST be before the expiration date/time listed in the
+  "exp" claim. Bondy considers a small leeway of 2 mins by default.
+- `issued_at`: identifies the time at which the ticket was issued. This claim can
+  be used to determine the age of the ticket. Its value is a timestamp in
+  seconds.
+- `issued_on`: the bondy nodename in which the ticket was issued.
+- `scope`: the scope of the ticket, consisting of
+- `realm`: If `all` the ticket grants access to all realms the user has access to
+  by the authrealm (an SSO realm). Otherwise, the value is the realm this ticket
+  is valid on.
+
+## Claims Storage
+
+Claims for a ticket are stored in PlumDB using the prefix
+`{bondy_ticket, Suffix :: binary()}` where `Suffix` is the concatenation of the
+authentication realm's URI and the user's username (a.k.a `authid`) and a key
+which is derived by the ticket's scope. The scope itself is the result of the
+combination of the different options provided by the `issue/2` function.
+
+The decision to use this key as opposed to the ticket's unique identifier is so
+that we are able to bound the number of tickets a user can have at any point in
+time in order to reduce data storage and cluster replication traffic.
+
+## Ticket Scopes
+A ticket can be issued using different scopes. The scope is determined based on
+the options used to issue the ticket.
+
+There are 4 scopes:
+
+1. Local scope
+2. SSO scope
+3. Client-Local scope
+4. Client-SSO scope
+
+### Local scope
+The ticket was issued with `allow_sso` option set to `false` or when set to
+`true` the user did not have SSO credentials, and the option `client_ticket` was
+not provided.
+The ticket can be used to authenticate on the session's realm only.
+
+#### Authorization
+To be able to issue this ticket, the user must have been granted permission
+`<<"bondy.issue">>` on the `<<"bondy.ticket.scope.local">>` resource.
+
+### SSO Scope
+The ticket was issued with `allow_sso` option set to `true`, the user has SSO
+credentials, and the option `client_ticket` was not provided.
+The ticket can be used to authenticate on any realm the user has access to
+through SSO.
+
+#### Authorization
+To be able to issue this ticket, the user must have been granted permission
+`<<"bondy.issue">>` on the `<<"bondy.ticket.scope.sso">>` resource.
+
+### Client-Local scope
+The ticket was issued with `allow_sso` option set to `false` or when set to
+`true` the user did not have SSO credentials, and the option `client_ticket` was
+provided having a valid ticket issued by a client (a local or sso ticket).
+The ticket can be used to authenticate on the session's realm by the specified
+client only.
+
+#### Authorization
+To be able to issue this ticket, the session must have been granted permission
+`<<"bondy.issue">>` on the `<<"bondy.ticket.scope.client_local">>` resource.
+
+### Client-SSO scope
+The ticket was issued with `allow_sso` option set to `true` and the user has SSO
+credentials, and the option `client_ticket` was provided having a valid ticket
+issued by a client (a local or sso ticket).
+The ticket can be used to authenticate on any realm the user has access to
+through SSO only by the specified client.
+
+#### Authorization
+To be able to issue this ticket, the session must have been granted permission
+`<<"bondy.issue">>` on the `<<"bondy.ticket.scope.client_local">>` resource.
+
+### Scope Summary
+
+*Keys:*
+- `uri()` in the following table refers to the scope realm (not the
+  Authentication realm which is used in the prefix)
+
+|SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value|
+|---|---|---|---|---|---|
+|Local|no|no|no|`uri()`|`t()`|
+|SSO|yes|no|no|`username()`|`t()`|
+|Client-Local|no|yes|no|`client_id()`|`[{uri(), t()}]`|
+|Client-Local|no|yes|yes|`client_id()`|`[{{uri(), instance_id()}, t()}]`|
+|Client-SSO|yes|yes|no|`client_id()`|`[{all, t()}]`|
+|Client-SSO|yes|yes|yes|`client_id()`|`[{{all, instance_id()}, t()}]`|
+
+### Permissions Summary
+Issuing tickets requires the user to be granted certain permissions beyond the
+WAMP permission required to call the procedures.
+
+|Scope|Permission|Resource|
+|---|---|---|
+|Local|`bondy.issue`|`bondy.ticket.scope.local`|
+|SSO|`bondy.issue`|`bondy.ticket.scope.sso`|
+|Client-Local|`bondy.issue`|`bondy.ticket.scope.client_local`|
+|Client-SSO|`bondy.issue`|`bondy.ticket.scope.client_sso`|
+""".
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
@@ -266,27 +248,25 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Issues a ticket to be used with the WAMP Ticket authentication
-%% method. The function stores the ticket claims data and replicates it across
-%% all nodes in the cluster.
-%%
-%% The session `Session' must have been opened using an authentication
-%% method that is neither `ticket' nor `anonymous' authentication.
-%%
-%% The function takes an options map `opts()' that can contain the following
-%% keys:
-%% * `expiry_time_secs': the expiration time on or after which the ticket MUST
-%% NOT be accepted for processing. This is a request that might not be honoured
-%% by the router as it depends on the router configuration, so the returned
-%% value might defer.
-%% To issue a client-scoped ticket, either the option `client_ticket' or
-%% `client_id' must be present. The `client_ticket' option takes a valid ticket
-%% issued by a different user (normally a
-%% client). Otherwise the call will return the error tuple with reason
-%% `invalid_request'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Issues a ticket to be used with the WAMP Ticket authentication method. The
+function stores the ticket claims data and replicates it across all nodes in the
+cluster.
+
+The session `Session` must have been opened using an authentication method that
+is neither `ticket` nor `anonymous` authentication.
+
+The function takes an options map `opts()` that can contain the following keys:
+- `expiry_time_secs`: the expiration time on or after which the ticket MUST NOT
+  be accepted for processing. This is a request that might not be honoured by the
+  router as it depends on the router configuration, so the returned value might
+  defer.
+
+To issue a client-scoped ticket, either the option `client_ticket` or
+`client_id` must be present. The `client_ticket` option takes a valid ticket
+issued by a different user (normally a client). Otherwise the call will return
+the error tuple with reason `invalid_request`.
+""".
 -spec issue(Session :: bondy_session:t(), Opts :: opts()) ->
     {ok, Ticket :: jwt(), Claims :: t()}
     | {error, issue_error()}
@@ -318,20 +298,12 @@ issue(Session, Opts0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify(Ticket :: binary()) -> {ok, t()} | {error, expired | invalid}.
 
 verify(Ticket) ->
     verify(Ticket, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify(Ticket :: binary(), Opts :: verify_opts()) ->
     {ok, t()} | {error, expired | invalid}.
 
@@ -397,10 +369,6 @@ verify(Ticket, Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec lookup(
     RealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
@@ -428,10 +396,6 @@ lookup(RealmUri, Authid, Scope) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke(optional(t())) -> ok | {error, any()}.
 
 revoke(undefined) ->
@@ -454,10 +418,9 @@ revoke(Claims) when is_map(Claims) ->
     revoke(RealmUri, Authid, Scope).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc `RealmUri' should eb aht value of the ticket's `authrealm' claim
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+`RealmUri` should be the value of the ticket's `authrealm` claim.
+""".
 -spec revoke(
     RealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
@@ -470,10 +433,9 @@ when is_binary(RealmUri), is_binary(Authid), is_map(Scope) ->
     plum_db:delete(Prefix, Key).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Revokes all tickets issued to all users in realm `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Revokes all tickets issued to all users in realm `RealmUri`.
+""".
 -spec revoke_all(RealmUri :: uri()) -> ok.
 
 revoke_all(RealmUri) when is_binary(RealmUri) ->
@@ -484,12 +446,11 @@ revoke_all(RealmUri) when is_binary(RealmUri) ->
     ok = plum_db:foreach(Fun, Prefix, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Revokes all tickets issued to user with `Username' in realm `RealmUri'.
-%% Notice that the ticket could have been issued by itself or by a client
-%% application.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Revokes all tickets issued to user with `Username` in realm `RealmUri`.
+Notice that the ticket could have been issued by itself or by a client
+application.
+""".
 -spec revoke_all(RealmUri :: uri(), Authid :: bondy_rbac_user:username()) ->
     ok.
 
@@ -512,11 +473,10 @@ revoke_all(RealmUri, Authid) ->
     plum_db:foreach(Fun, Prefix, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Revokes all tickets issued to user with `Username' in realm `RealmUri'
-%% matching the scope `Scope'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Revokes all tickets issued to user with `Username` in realm `RealmUri` matching
+the scope `Scope`.
+""".
 -spec revoke_all(
     RealmUri :: uri(),
     Authid ::  all | bondy_rbac_user:username(),
@@ -570,12 +530,11 @@ remove_expired() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Updates the claims stored in PlumDB for an existing ticket. This is used
-%% by the OIDC refresh worker to update OIDC tokens (refresh_token,
-%% access_token_expires_at) without re-issuing the ticket.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Updates the claims stored in PlumDB for an existing ticket. This is used by the
+OIDC refresh worker to update OIDC tokens (refresh_token,
+access_token_expires_at) without re-issuing the ticket.
+""".
 -spec update_claims(
     AuthRealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
@@ -726,11 +685,7 @@ scope(Session, Opts, Uri) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+%% @private
 authorize(ScopeType, AuthCtxt) ->
 
     case ScopeType of

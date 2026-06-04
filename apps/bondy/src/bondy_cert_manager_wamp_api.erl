@@ -5,6 +5,11 @@
 
 
 -module(bondy_cert_manager_wamp_api).
+-moduledoc """
+`bondy_wamp_api` implementation exposing `bondy_cert_manager` operations
+(reloading CA certs, rotating listener certificates and managing mTLS client
+authentication) as WAMP procedures.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").

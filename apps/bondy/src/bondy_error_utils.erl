@@ -3,11 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_error_utils).
+-moduledoc """
+Utility functions for converting errors into standardised error maps and
+mapping error codes to WAMP/Bondy error URIs.
+""".
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("http_api.hrl").
@@ -45,10 +45,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 format_error(Reason, [{_M, _F, _As, Info} | _]) ->
     ErrorInfo = proplists:get_value(error_info, Info, #{}),
     ErrorMap = maps:get(cause, ErrorInfo),
@@ -58,10 +54,6 @@ format_error(Reason, [{_M, _F, _As, Info} | _]) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 code_to_uri(invalid_argument) ->
     ?WAMP_INVALID_ARGUMENT;
 
@@ -83,10 +75,6 @@ code_to_uri(Reason) when is_binary(Reason) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 map(#error{} = Err) ->
     map(#{
         error_uri => Err#error.error_uri,

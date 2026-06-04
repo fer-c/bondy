@@ -4,6 +4,12 @@
 %% =============================================================================
 
 -module(bondy_uuidv7).
+-moduledoc """
+Generation and handling of UUIDv7 identifiers (RFC 4122 variant), which embed a
+48-bit millisecond timestamp followed by random bits. Provides creation,
+timestamp extraction, validation, string formatting (hex or URL-safe) and
+parsing.
+""".
 
 %% UUIDv7 constants
 -define(VERSION, 16#7).

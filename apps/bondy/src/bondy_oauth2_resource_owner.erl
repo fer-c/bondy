@@ -3,11 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_oauth2_resource_owner).
+-moduledoc """
+Manages OAuth2 resource owners (end-users or system accounts), which are
+represented as RBAC users belonging to the `resource_owners` group.
+""".
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_oauth.hrl").
@@ -64,12 +64,10 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Adds a resource owner (end-user or system) to realm RealmUri.
-%% Creates a new user adding it to the `resource_owners' group.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a resource owner (end-user or system) to realm RealmUri.
+Creates a new user adding it to the `resource_owners` group.
+""".
 -spec add(uri(), map()) ->
     {ok, map()} | {error, term()} | no_return().
 
@@ -80,10 +78,6 @@ add(RealmUri, Data) ->
     bondy_rbac_user:add(RealmUri, User).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec update(uri(), binary(), map()) ->
     {ok, t()} | {error, term()} | no_return().
 
@@ -92,10 +86,6 @@ update(RealmUri, ClientId, Data0) ->
     bondy_rbac_user:update(RealmUri, ClientId, Data).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec change_password(uri(), binary(), binary(), binary()) ->
     ok | {error, any()}.
 
@@ -103,10 +93,6 @@ change_password(RealmUri, _Issuer, Username, New) when is_binary(New) ->
     bondy_rbac_user:change_password(RealmUri, Username, New).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec change_password(uri(), binary(), binary(), binary(), binary()) ->
     ok | {error, any()}.
 
@@ -115,20 +101,12 @@ change_password(RealmUri, _Issuer, Username, New, Old) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(uri(), list() | binary()) -> ok.
 
 remove(RealmUri, Id) ->
     bondy_rbac_user:remove(RealmUri, Id).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec to_external(t()) -> map().
 
 to_external(Owner) ->

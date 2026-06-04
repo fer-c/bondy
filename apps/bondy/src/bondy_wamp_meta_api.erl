@@ -3,20 +3,17 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%%
-%% Handles the following META API wamp calls:
-%%
-%% * "wamp.subscription.list": Retrieves subscription IDs listed according to match policies.
-%% * "wamp.subscription.lookup": Obtains the subscription (if any) managing a topic, according to some match policy.
-%% * "wamp.subscription.match": Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
-%% * "wamp.subscription.get": Retrieves information on a particular subscription.
-%% * "wamp.subscription.list_subscribers": Retrieves a list of session IDs for sessions currently attached to the subscription.
-%% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_wamp_meta_api).
+-moduledoc """
+Handles the following META API wamp calls:
+
+- `wamp.subscription.list`: Retrieves subscription IDs listed according to match policies.
+- `wamp.subscription.lookup`: Obtains the subscription (if any) managing a topic, according to some match policy.
+- `wamp.subscription.match`: Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
+- `wamp.subscription.get`: Retrieves information on a particular subscription.
+- `wamp.subscription.list_subscribers`: Retrieves a list of session IDs for sessions currently attached to the subscription.
+- `wamp.subscription.count_subscribers`: Obtains the number of sessions currently attached to the subscription.
+""".
 -behaviour(bondy_wamp_callback).
 
 -include_lib("kernel/include/logger.hrl").
@@ -37,10 +34,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
@@ -237,10 +230,6 @@ handle_call(#call{} = M, _) ->
     {reply, E}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 handle_invocation(#invocation{} = M, Ctxt) ->
     Procedure = maps:get(procedure, M#invocation.details),
     do_handle_invocation(M, Ctxt, Procedure).
@@ -302,17 +291,19 @@ no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Retrieves subscription IDs listed according to match policies.
-%% Res :=
-%%   {
-%%       "exact": subscription_ids|list,
-%%       "prefix": subscription_ids|list,
-%%       "wildcard": subscription_ids|list
-%%   }
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Retrieves subscription IDs listed according to match policies.
+
+```
+Res :=
+  {
+      "exact": subscription_ids|list,
+      "prefix": subscription_ids|list,
+      "wildcard": subscription_ids|list
+  }
+```
+""".
 summary(Type, RealmUri) ->
     Default = #{
         ?EXACT_MATCH => [],

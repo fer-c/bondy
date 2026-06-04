@@ -168,10 +168,6 @@ globally (for now). Entries are immutable.
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RealmUri, Ref, Uri, Opts) ->
@@ -179,10 +175,6 @@ new(Type, RealmUri, Ref, Uri, Opts) ->
     new(Type, RegId, RealmUri, Ref, Uri, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(entry_type(), id(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RegId, RealmUri, Ref, Uri, Opts0)
@@ -230,10 +222,6 @@ when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_TYPE(Type) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec pattern(
     Type :: entry_type(),
     RealmUri :: uri(),
@@ -244,10 +232,6 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options) ->
     pattern(Type, RealmUri, ProcedureOrTopic, Options, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec pattern(
     Type :: entry_type(),
     RealmUri :: uri(),
@@ -278,10 +262,6 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
         origin_ref = '_'
     }.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec key_pattern(
     RealmUri    ::  uri(),
     SessionId   ::  wildcard(bondy_session_id:t()),
@@ -299,10 +279,6 @@ is_binary(RealmUri) andalso
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 field_index(realm_uri) ->
     #entry_key.realm_uri;
 
@@ -313,10 +289,6 @@ field_index(entry_id) ->
     #entry_key.entry_id.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 is_entry(#entry{}) ->
     true;
 
@@ -324,10 +296,6 @@ is_entry(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 is_key(#entry_key{}) ->
     true;
 
@@ -335,12 +303,10 @@ is_key(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's id
-%% property.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value of the subscription's or registration's id
+property.
+""".
 -spec id(t_or_key()) -> wildcard(id()).
 
 id(#entry{key = Key}) ->
@@ -350,45 +316,39 @@ id(#entry_key{entry_id = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the type of the entry, the atom 'registration' or 'subscription'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the type of the entry, the atom `registration` or `subscription`.
+""".
 -spec type(t()) -> entry_type().
 
 type(#entry{type = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's realm_uri property.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value of the subscription's or registration's realm_uri property.
+""".
 -spec key(t()) -> key().
 
 key(#entry{key = Key}) ->
     Key.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns either a session identifier, a pid() or a callback module
-%% depending on the type of entry. I can also return the wildcard '_' when the
-%% entry is used as a pattern (See {@link pattern/5}).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns either a session identifier, a `pid()` or a callback module
+depending on the type of entry. I can also return the wildcard `'_'` when the
+entry is used as a pattern (See `pattern/5`).
+""".
 -spec target(t()) -> wildcard(bondy_ref:target()).
 
 target(#entry{ref = Ref}) ->
     bondy_ref:target(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the value of the subscription's or registration's realm_uri
-%% property.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value of the subscription's or registration's realm_uri
+property.
+""".
 -spec realm_uri(t_or_key()) -> uri().
 
 realm_uri(#entry{key = Key}) ->
@@ -398,14 +358,12 @@ realm_uri(#entry_key{realm_uri = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's nodestring
-%% property.
-%% This is always the Bondy cluster peer node where the handler exists as a
-%% binary
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value of the subscription's or registration's nodestring
+property.
+This is always the Bondy cluster peer node where the handler exists as a
+binary
+""".
 -spec nodestring(t()) -> wildcard(nodestring()).
 
 nodestring(#entry{ref = '_'}) ->
@@ -415,12 +373,10 @@ nodestring(#entry{ref = Ref}) ->
     bondy_ref:nodestring(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's node property.
-%% This is always the Bondy cluster peer node where the handler exists.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value of the subscription's or registration's node property.
+This is always the Bondy cluster peer node where the handler exists.
+""".
 -spec node(t()) -> wildcard(node()).
 
 node(#entry{ref = '_'}) ->
@@ -430,75 +386,69 @@ node(#entry{ref = Ref}) ->
     bondy_ref:node(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns true if the entry represents a handler local to the caller's
-%% node and false when the target is located in a cluster peer.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true if the entry represents a handler local to the caller's
+node and false when the target is located in a cluster peer.
+""".
 -spec is_local(t()) -> boolean().
 
 is_local(#entry{ref = Ref}) ->
     bondy_ref:is_local(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if the entry represents a handler local to the node
-%% represented by `Nodestring'. Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if the entry represents a handler local to the node
+represented by `Nodestring`. Otherwise returns `false`.
+""".
 -spec is_local(t(), nodestring()) -> boolean().
 
 is_local(#entry{ref = Ref}, Nodestring) ->
     bondy_ref:is_local(Ref, Nodestring).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `false' if the entry is local and its target is a process which
-%% is not alive (See `erlang:is_process_alive/1') or if the entry is remote (
-%% regardless of its target type) and the remote node is disconnected (See
-%% `partisan:is_connected/1). Otherwise returns `true'.
-%%
-%% Normally entries are removed from the registry once the owner session dies.
-%% However that can happen between the session terminated and the time we read
-%% the entry and the time of this function call. Or, in the case of a remote
-%% entry,when the cluster peer is not connected and the registry has not yet
-%% been pruned.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `false` if the entry is local and its target is a process which
+is not alive (See `erlang:is_process_alive/1`) or if the entry is remote (
+regardless of its target type) and the remote node is disconnected (See
+`partisan:is_connected/1`). Otherwise returns `true`.
+
+Normally entries are removed from the registry once the owner session dies.
+However that can happen between the session terminated and the time we read
+the entry and the time of this function call. Or, in the case of a remote
+entry,when the cluster peer is not connected and the registry has not yet
+been pruned.
+""".
 is_alive(#entry{ref = Ref}) ->
     bondy_ref:is_alive(Ref).
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns true if the entry target is a callback registration.
-%% Callback registrations are only used by Bondy itself to provide some of the
-%% admin and meta APIs.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true if the entry target is a callback registration.
+Callback registrations are only used by Bondy itself to provide some of the
+admin and meta APIs.
+""".
 -spec is_callback(t()) -> boolean().
 
 is_callback(#entry{ref = Ref}) ->
     callback == bondy_ref:target_type(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the callback arguments when target is a callback, otherwise
-%% returns `undefined' or the wildcard value '_' when the entry was used as a
-%% pattern (See {@link pattern/5}).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the callback arguments when target is a callback, otherwise
+returns `undefined` or the wildcard value `'_'` when the entry was used as a
+pattern (See `pattern/5`).
+""".
 -spec callback_args(t()) -> optional(list(term())).
 
 callback_args(#entry{callback_args = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the callback module when target is a callback, otherwise
-%% returns `undefined'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the callback module when target is a callback, otherwise
+returns `undefined`.
+""".
 -spec callback(t()) -> optional(mfargs()).
 
 callback(#entry{ref = Ref} = E) ->
@@ -510,24 +460,22 @@ callback(#entry{ref = Ref} = E) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the value of the subscription's or registration's pid
-%% property when target is a pid() or a session identifier. Otherwise
-%% returns `undefined' or the wildcard value '_' when the entry was used as a
-%% pattern (See {@link pattern/5}).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value of the subscription's or registration's pid
+property when target is a `pid()` or a session identifier. Otherwise
+returns `undefined` or the wildcard value `'_'` when the entry was used as a
+pattern (See `pattern/5`).
+""".
 -spec pid(t_or_key()) -> pid().
 
 pid(#entry{ref = Ref}) ->
     bondy_ref:pid(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the value of the subscription's or registration's session `key'
-%% property.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the value of the subscription's or registration's session `key`
+property.
+""".
 -spec session_id(t_or_key()) -> wildcard(optional(bondy_session_id:t())).
 
 session_id(#entry{key = Key}) ->
@@ -536,64 +484,53 @@ session_id(#entry{key = Key}) ->
 session_id(#entry_key{session_id = Val}) ->
     Val.
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the ref() of the subscription or registration
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the `ref()` of the subscription or registration".
 -spec ref(t()) -> bondy_ref:t().
 
 ref(#entry{ref = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the origin ref() of the subscription or registration
-%% This value is only present when the entry is a proxy.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the origin `ref()` of the subscription or registration
+This value is only present when the entry is a proxy.
+""".
 -spec origin_ref(t()) -> optional(bondy_ref:t()).
 
 origin_ref(#entry{origin_ref = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the origin ref() of the subscription or registration.
-%% This value is only present when the entry is a proxy.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the origin `ref()` of the subscription or registration.
+This value is only present when the entry is a proxy.
+""".
 -spec origin_id(t()) -> optional(id()).
 
 origin_id(#entry{origin_id = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the uri this entry is about i.e. either a subscription topic_uri or
-%% a registration procedure_uri.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the uri this entry is about i.e. either a subscription topic_uri or
+a registration procedure_uri.
+""".
 -spec uri(t()) -> uri().
 
 uri(#entry{uri = Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the match_policy used by this subscription or regitration.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the match_policy used by this subscription or regitration.
+""".
 -spec match_policy(t()) -> binary().
 
 match_policy(#entry{match_policy = Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the match_policy used by this subscription or regitration.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the match_policy used by this subscription or regitration.
+""".
 -spec invocation_policy(t()) -> optional(invocation_policy()).
 
 invocation_policy(#entry{type = subscription}) ->
@@ -603,71 +540,53 @@ invocation_policy(#entry{invocation_policy = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the time when this entry was created. Its value is a timestamp in
-%% milliseconds.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the time when this entry was created. Its value is a timestamp in
+milliseconds.
+""".
 -spec created(t()) -> pos_integer().
 
 created(#entry{created = Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the 'options' property of the entry.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the value of the `options` property of the entry.".
 -spec options(t()) -> map().
 
 options(#entry{options = Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get_option(any(), t(), any()) -> any().
 
 get_option(Key, #entry{options = Opts}, Default) ->
     maps:get(Key, Opts, Default).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec find_option(any(), t()) -> {ok, any()} | error.
 
 find_option(Key, #entry{options = Opts}) ->
     maps:find(Key, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Converts the entry into a map according to the WAMP protocol Details
-%% dictionary format.
-%% @end
-%% -----------------------------------------------------------------------------
-
+-doc """
+Converts the entry into a map according to the WAMP protocol Details
+dictionary format.
+""".
 -spec to_external(t()) -> ext().
 
 to_external(Entry) ->
     to_external(Entry, default).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Converts the entry into a map. Certain values of type atom such as
-%% `node' are turned into binaries. This is to avoid exhausting a remote node
-%% atoms table for use cases where the entries are replicated e.g. edge-remote
-%% connections.
-%% Formats:
-%% - wamp_meta - a map according to the WAMP protocol Details dictionary format.
-%% - default - a map compatible with JSON (Bondy types converted to string)
-%% - bridge_relay - a map containing Bondy types
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Converts the entry into a map. Certain values of type atom such as
+`node` are turned into binaries. This is to avoid exhausting a remote node
+atoms table for use cases where the entries are replicated e.g. edge-remote
+connections.
+Formats:
+- wamp_meta - a map according to the WAMP protocol Details dictionary format.
+- default - a map compatible with JSON (Bondy types converted to string)
+- bridge_relay - a map containing Bondy types
+""".
 -spec to_external(t(), Format :: default | bridge_relay | details_map) -> ext().
 
 to_external(#entry{key = Key} = E, wamp_meta) ->
@@ -719,15 +638,14 @@ to_external(#entry{key = Key} = E, bridge_relay) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns a copy of the entry where the node component of the ref has
-%% been replaced with the node of the calling process, the session identifier
-%% replaced with `SessionId' and the pid with `Pid'.
-%%
-%% The entry is used by a router node to create a proxy of an entry originated
-%% in an edge router.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a copy of the entry where the node component of the ref has
+been replaced with the node of the calling process, the session identifier
+replaced with `SessionId` and the pid with `Pid`.
+
+The entry is used by a router node to create a proxy of an entry originated
+in an edge router.
+""".
 -spec proxy(Ref :: bondy_ref:bridge_relay(), Entry :: ext()) -> t().
 
 proxy(Ref, External) ->
@@ -780,20 +698,12 @@ proxy(Ref, External) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_proxy(Entry :: t()) -> wildcard(boolean()).
 
 is_proxy(#entry{is_proxy = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec proxy_details(t()) -> map().
 
 proxy_details(#entry{} = E) ->
@@ -803,10 +713,6 @@ proxy_details(#entry{} = E) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec time_comparator() -> comparator().
 
 time_comparator() ->
@@ -815,10 +721,6 @@ time_comparator() ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec time_comparator(comparator()) -> comparator().
 
 time_comparator(Fun) ->
@@ -832,58 +734,52 @@ time_comparator(Fun) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Most general comparator.
-%% An ordering function to sort entries in the WAMP call matching
-%% algorithm order.
-%%
-%% %% [WAMP] 11.8.3] The following algorithm MUST be applied to find a single
-%% RPC registration to which a call is routed:
-%% <ol>
-%% <li>Check for exact matching registration. If this match exists — use
-%% it.</li>
-%% <li>If there are prefix-based registrations, find the registration with the
-%% longest prefix match. Longest means it has more URI components matched, e.g.
-%% for call URI `a1.b2.c3.d4' registration `a1.b2.c3` has higher priority than
-%% registration `a1.b2'. If this match exists — use it.</li>
-%% <li>If there are wildcard-based registrations, find the registration with the
-%% longest portion of URI components matched before each wildcard. E.g. for
-%% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
-%% registration `a1...d4', see below for more complex examples. If this match
-%% exists — use it.</li>
-%% </ol>
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Most general comparator.
+An ordering function to sort entries in the WAMP call matching
+algorithm order.
+
+[WAMP] 11.8.3] The following algorithm MUST be applied to find a single
+RPC registration to which a call is routed:
+1. Check for exact matching registration. If this match exists — use
+it.
+2. If there are prefix-based registrations, find the registration with the
+longest prefix match. Longest means it has more URI components matched, e.g.
+for call URI `a1.b2.c3.d4` registration `a1.b2.c3` has higher priority than
+registration `a1.b2`. If this match exists — use it.
+3. If there are wildcard-based registrations, find the registration with the
+longest portion of URI components matched before each wildcard. E.g. for
+call URI `a1.b2.c3.d4` registration `a1.b2..d4` has higher priority than
+registration `a1...d4`, see below for more complex examples. If this match
+exists — use it.
+""".
 -spec mg_comparator() -> comparator().
 
 mg_comparator() ->
     mg_comparator(invocation_policy_comparator()).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Most general comparator.
-%% An ordering function to sort entries in the WAMP call matching
-%% algorithm order.
-%%
-%% Meant to work on registration type entries only.
-%%
-%% %% [WAMP] 11.8.3] The following algorithm MUST be applied to find a single
-%% RPC registration to which a call is routed:
-%% <ol>
-%% <li>Check for exact matching registration. If this match exists — use
-%% it.</li>
-%% <li>If there are prefix-based registrations, find the registration with the
-%% longest prefix match. Longest means it has more URI components matched, e.g.
-%% for call URI `a1.b2.c3.d4' registration `a1.b2.c3` has higher priority than
-%% registration `a1.b2'. If this match exists — use it.</li>
-%% <li>If there are wildcard-based registrations, find the registration with the
-%% longest portion of URI components matched before each wildcard. E.g. for
-%% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
-%% registration `a1...d4', see below for more complex examples. If this match
-%% exists — use it.</li>
-%% </ol>
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Most general comparator.
+An ordering function to sort entries in the WAMP call matching
+algorithm order.
+
+Meant to work on registration type entries only.
+
+[WAMP] 11.8.3] The following algorithm MUST be applied to find a single
+RPC registration to which a call is routed:
+1. Check for exact matching registration. If this match exists — use
+it.
+2. If there are prefix-based registrations, find the registration with the
+longest prefix match. Longest means it has more URI components matched, e.g.
+for call URI `a1.b2.c3.d4` registration `a1.b2.c3` has higher priority than
+registration `a1.b2`. If this match exists — use it.
+3. If there are wildcard-based registrations, find the registration with the
+longest portion of URI components matched before each wildcard. E.g. for
+call URI `a1.b2.c3.d4` registration `a1.b2..d4` has higher priority than
+registration `a1...d4`, see below for more complex examples. If this match
+exists — use it.
+""".
 -spec mg_comparator(comparator()) -> comparator().
 
 mg_comparator(Fun) ->
@@ -927,23 +823,21 @@ mg_comparator(Fun) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sorts entries based in their invocation_policy in the following order:
-%% `single < roundrobin < random < first < last < qll < qlls < jch'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sorts entries based in their invocation_policy in the following order:
+`single < roundrobin < random < first < last < qll < qlls < jch`.
+""".
 -spec invocation_policy_comparator() -> comparator().
 
 invocation_policy_comparator() ->
     invocation_policy_comparator(time_comparator()).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sorts entries based in their invocation_policy in the following order:
-%% `single < first < jch < last < qll < qlls < random < roundrobin'.
-%% Meant to work on registration type entries only.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sorts entries based in their invocation_policy in the following order:
+`single < first < jch < last < qll < qlls < random < roundrobin`.
+Meant to work on registration type entries only.
+""".
 -spec invocation_policy_comparator(comparator()) -> comparator().
 
 invocation_policy_comparator(Fun) ->
@@ -966,22 +860,20 @@ invocation_policy_comparator(Fun) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Orders entries by locality, with local entries first. Then applies
-%% `time_comparator/1'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Orders entries by locality, with local entries first. Then applies
+`time_comparator/1`.
+""".
 -spec locality_comparator() -> fun(({t(), t()}) -> boolean()).
 
 locality_comparator() ->
     locality_comparator(time_comparator()).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Orders entries by locality, with local entries first. Then applies
-%% comparator `Fun'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Orders entries by locality, with local entries first. Then applies
+comparator `Fun`.
+""".
 -spec locality_comparator(comparator()) -> comparator().
 
 locality_comparator(Fun) ->
@@ -1039,25 +931,24 @@ created_format(Secs) ->
     calendar:system_time_to_universal_time(Secs, millisecond).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Computes an integer value that can be use to determine the most general
-%% match between a set of URIs.
-%% WAMP proposes the following algorithm to determine which procedure
-%% registration to choose when multiple registrations of differing match policy
-%% are found.
-%%
-%% [WAMP] 11.8.3]
-%% If there are wildcard-based registrations, find the registration with the
-%% longest portion of URI components matched before each wildcard. E.g. for
-%% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
-%% registration `a1...d4'.
-%%
-%% This function creates a binary mask were each ground component is assigned 1
-%% and each wildcard component is assigned 0. So for URI `a1.b2..d4' returns
-%% `2#1101' and for URI `a1...d4' returns `2#1001'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Computes an integer value that can be use to determine the most general
+match between a set of URIs.
+WAMP proposes the following algorithm to determine which procedure
+registration to choose when multiple registrations of differing match policy
+are found.
+
+[WAMP] 11.8.3]
+If there are wildcard-based registrations, find the registration with the
+longest portion of URI components matched before each wildcard. E.g. for
+call URI `a1.b2.c3.d4` registration `a1.b2..d4` has higher priority than
+registration `a1...d4`.
+
+This function creates a binary mask were each ground component is assigned 1
+and each wildcard component is assigned 0. So for URI `a1.b2..d4` returns
+`2#1101` and for URI `a1...d4` returns `2#1001`.
+""".
 -spec wildcard_degree(uri()) -> integer().
 
 wildcard_degree(Uri) ->

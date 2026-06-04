@@ -3,21 +3,19 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc DEPRECATED
-%%
-%% The following table documents the storage layout in plum_db of the token
-%% data and its indices:
-%%
-%% |Datum|Prefix|Key|Value|
-%% |---|---|---|---|
-%% |Refresh Token|{oauth2_refresh_tokens, Realm ++ "," ++ Issuer}|Token| TokenData|
-%% |Refresh Token Index|{oauth2_refresh_tokens, Realm ++ "," ++ Issuer}|Token|Issuer|
-%% |Refresh Token Index|{oauth2_refresh_tokens, Realm ++ "," ++ Issuer ++ "," ++ Username}|DeviceId| Token|
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_oauth2_deprecated).
+-moduledoc """
+**Deprecated.**
+
+The following table documents the storage layout in plum_db of the token
+data and its indices:
+
+|Datum|Prefix|Key|Value|
+|---|---|---|---|
+|Refresh Token|`{oauth2_refresh_tokens, Realm ++ "," ++ Issuer}`|Token| TokenData|
+|Refresh Token Index|`{oauth2_refresh_tokens, Realm ++ "," ++ Issuer}`|Token|Issuer|
+|Refresh Token Index|`{oauth2_refresh_tokens, Realm ++ "," ++ Issuer ++ "," ++ Username}`|DeviceId| Token|
+""".
 
 -include_lib("plum_db/include/plum_db.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -102,32 +100,29 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the issuer a.k.a. ClientId of the token data.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the issuer a.k.a. ClientId of the token data.
+""".
 -spec issuer(TokenData :: token_data()) -> binary().
 
 issuer(#bondy_oauth2_token{issuer = Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the timestamp for the token data.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the timestamp for the token data.
+""".
 -spec issued_at(token_data()) -> pos_integer().
 
 issued_at(#bondy_oauth2_token{issued_at = Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Generates an access token and a refresh token.
-%% The access token is a JWT whereas the refresh token is a binary.
-%%
-%% The function stores the refresh token in the store and creates a number of
-%% store indices.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates an access token and a refresh token.
+The access token is a JWT whereas the refresh token is a binary.
+
+The function stores the refresh token in the store and creates a number of
+store indices.
+""".
 -spec issue_token(
     grant_type(), bondy_realm:uri(), binary(), binary(), [binary()], map()) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
@@ -143,14 +138,13 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
     issue_token(GrantType, RealmUri, Data).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Generates an access token and a refresh token.
-%% The access token is a JWT whereas the refresh token is a binary.
-%%
-%% The function stores the refresh token in the store and creates a number of
-%% store indices.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates an access token and a refresh token.
+The access token is a JWT whereas the refresh token is a binary.
+
+The function stores the refresh token in the store and creates a number of
+store indices.
+""".
 -spec issue_token(grant_type(), bondy_realm:uri(), token_data()) ->
     {ok, JWT :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
@@ -165,11 +159,10 @@ issue_token(GrantType, RealmUri, Data0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the data token_data() associated with `Token' or the tuple
-%% `{error, not_found}'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the data `token_data()` associated with `Token` or the tuple
+`{error, not_found}`.
+""".
 -spec lookup_token(
     Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()) ->
     token_data() | {error, not_found}.
@@ -183,11 +176,9 @@ lookup_token(RealmUri, Issuer0, Token) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% After refreshing a token, the previous refresh token will be revoked
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+After refreshing a token, the previous refresh token will be revoked.
+""".
 -spec refresh_token(
     Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
@@ -242,10 +233,6 @@ refresh_token(RealmUri, Issuer0, Token) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke_token(
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
@@ -262,10 +249,6 @@ revoke_token(undefined, _, _, _) ->
     {error, unsupported_operation}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke_token(
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
@@ -283,10 +266,6 @@ revoke_token(undefined, _, _, _, _) ->
     {error, unsupported_operation}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke_tokens(
     Hint :: token_type() | undefined,
     Realm :: bondy_realm:uri(),
@@ -300,10 +279,6 @@ revoke_tokens(access_token, _RealmUri, _Username) ->
     {error, unsupported_operation}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke_tokens(
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
@@ -318,12 +293,11 @@ revoke_tokens(access_token, _RealmUri, _Issuer, _Username) ->
     {error, unsupported_operation}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes a refresh token from store using an index to match the function
-%% arguments.
-%% This also removes all store indices.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes a refresh token from store using an index to match the function
+arguments.
+This also removes all store indices.
+""".
 -spec revoke_refresh_token(
     Realm :: bondy_realm:uri(),
     IssuerOrData :: binary() | token_data(),
@@ -345,12 +319,11 @@ revoke_refresh_token(RealmUri, Issuer0, Token) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes a refresh token from store using an index to match the function
-%% arguments.
-%% This also removes all store indices.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes a refresh token from store using an index to match the function
+arguments.
+This also removes all store indices.
+""".
 -spec revoke_refresh_token(
     bondy_realm:uri(),
     Issuer :: binary(),
@@ -369,10 +342,6 @@ revoke_refresh_token(RealmUri, Issuer0, Username, DeviceId) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke_refresh_tokens(bondy_realm:uri(), Username :: binary()) -> ok.
 
 revoke_refresh_tokens(RealmUri, Username0) ->
@@ -395,10 +364,6 @@ revoke_refresh_tokens(RealmUri, Username0) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec revoke_refresh_tokens(
     bondy_realm:uri(), Issuer :: binary(), Username :: binary()) -> ok.
 
@@ -422,11 +387,10 @@ revoke_refresh_tokens(RealmUri, Issuer0, Username0) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all refresh tokens whose user has been removed.
-%% This function is used for db maintenance.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all refresh tokens whose user has been removed.
+This function is used for db maintenance.
+""".
 revoke_dangling_tokens(RealmUri, Issuer0) ->
     Issuer = string:casefold(Issuer0),
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
@@ -446,11 +410,10 @@ revoke_dangling_tokens(RealmUri, Issuer0) ->
     plum_db:foreach(Fun, Prefix, ?FOLD_OPTS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Rebuilds refresh_token indices.
-%% This function is used for db maintenance.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Rebuilds refresh_token indices.
+This function is used for db maintenance.
+""".
 rebuild_token_indices(RealmUri, Issuer0) ->
     Issuer = string:casefold(Issuer0),
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
@@ -473,10 +436,6 @@ rebuild_token_indices(RealmUri, Issuer0) ->
     plum_db:foreach(Fun, Prefix, ?FOLD_OPTS).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec decode_jwt(binary()) -> map().
 
 decode_jwt(JWT) when is_binary(JWT) andalso byte_size(JWT) >= 32 ->
@@ -487,20 +446,12 @@ decode_jwt(Term) ->
     error({badarg, [Term]}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify_jwt(binary(), binary()) -> {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT) ->
     verify_jwt(RealmUri, JWT, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify_jwt(RealmUri :: binary(), JWT :: binary(), MatchSpec :: map()) ->
     {ok, map()} | {error, error()}.
 
@@ -633,11 +584,10 @@ delete_token_indices(Uri, Token, #bondy_oauth2_token{} = Data) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes the refresh token from store.
-%% This also removes all store indices for this refresh token.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes the refresh token from store.
+This also removes all store indices for this refresh token.
+""".
 -spec do_revoke_refresh_token(bondy_realm:uri(), binary(), token_data()) -> ok.
 
 do_revoke_refresh_token(RealmUri, Token, #bondy_oauth2_token{} = Data) ->

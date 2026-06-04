@@ -3,12 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
-%% @doc
-%% Handles the packing/unpacking and encoding/decoding of WAMP messages.
-%% @end
-%% =============================================================================
 -module(bondy_wamp_encoding).
+-moduledoc """
+Handles the packing/unpacking and encoding/decoding of WAMP messages.
+""".
 -include("bondy_wamp.hrl").
 
 
@@ -41,10 +39,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_encoding(encoding()) -> boolean().
 
 is_encoding(bert) -> true;
@@ -59,10 +53,6 @@ is_encoding(msgpack) -> true;
 is_encoding(_) -> false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec decode_message_name(subprotocol(), Data :: binary()) ->
     message_name() | no_return().
 
@@ -70,10 +60,6 @@ decode_message_name({_, _, Enc}, Data) ->
     do_decode_message_name(Data, Enc).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec decode(subprotocol(), Data :: binary()) ->
     {Messages :: [wamp_message()], Rest :: binary()} | no_return().
 
@@ -96,10 +82,6 @@ decode({http_longpoll, text, json = Enc}, Data) ->
     decode({http_longpoll, text, json}, Data, opts(Enc, decode)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec decode(subprotocol(), Data :: binary(), Opts :: list()) ->
     {Messages :: [wamp_message()], Rest :: binary()} | no_return().
 
@@ -123,10 +105,6 @@ decode({http_longpoll, text, json}, Data, Opts) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec encode(wamp_message() | list(), encoding()) -> binary() | no_return().
 
 encode(Message0, Enc) when is_tuple(Message0) ->
@@ -172,10 +150,6 @@ encode(Message, Format) when is_list(Message) ->
     error({unsupported_encoding, Format}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec encode(wamp_message() | list(), encoding(), Opts :: list()) ->
     binary() | no_return().
 
@@ -202,11 +176,9 @@ encode(Message, Format, _) when is_list(Message) ->
     error({unsupported_encoding, Format}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns a message in WAMP list format.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a message in WAMP list format.
+""".
 -spec pack(wamp_message()) -> list() | no_return().
 
 pack(#error{} = M) ->
@@ -320,13 +292,11 @@ pack_generic(Type, M) when is_tuple(M) ->
     [Type | T].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Converts a message from a WAMP list external format to
-%% an internal format (erlang record).
-%% See {@link wamp_message} for all message types.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Converts a message from a WAMP list external format to
+an internal format (erlang record).
+See `bondy_wamp_message` for all message types.
+""".
 -spec unpack(list()) -> wamp_message() | no_return().
 
 unpack([?HELLO, RealmUri, Details]) ->
@@ -572,15 +542,14 @@ unpack(M) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the default serializer options for a given `Encoding' and
-%% direction (`encode' | `decode'). Exposed so callers can derive a base set of
-%% serializer-correct options and override individual entries — e.g. a client
-%% prepending `{partial_decode, false}' to fully decode payloads (partial
-%% decoding is a router-side passthrough optimisation, not a client concern)
-%% while preserving each serializer's required options.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the default serializer options for a given `Encoding` and
+direction (`encode` | `decode`). Exposed so callers can derive a base set of
+serializer-correct options and override individual entries — e.g. a client
+prepending `{partial_decode, false}` to fully decode payloads (partial
+decoding is a router-side passthrough optimisation, not a client concern)
+while preserving each serializer's required options.
+""".
 -spec opts(Encoding :: encoding(), Direction :: encode | decode) -> list().
 
 opts(erl, encode) ->
@@ -819,14 +788,13 @@ request_info([?YIELD, ReqId | _]) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% RFC: https://wamp-proto.org/wamp_latest_ietf.html#name-empty-arguments-and-keyword
-%%  - Implementations SHOULD avoid sending empty Arguments lists.
-%%  - Implementations SHOULD avoid sending empty ArgumentsKw dictionaries.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+RFC: https://wamp-proto.org/wamp_latest_ietf.html#name-empty-arguments-and-keyword
+
+- Implementations SHOULD avoid sending empty Arguments lists.
+- Implementations SHOULD avoid sending empty ArgumentsKw dictionaries.
+""".
 pack_optionals(undefined, undefined, _) ->
     [];
 

@@ -3,15 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A user is a role that is able to log into a Bondy Realm.
-%% Users have attributes associated with themelves like username, credentials
-%% (password or authorized keys) and metadata determined by the client
-%% applications. Users can be assigned group memberships.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_rbac_user).
+-moduledoc """
+A user is a role that is able to log into a Bondy Realm.
+Users have attributes associated with themelves like username, credentials
+(password or authorized keys) and metadata determined by the client
+applications. Users can be assigned group memberships.
+""".
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -272,20 +270,12 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Data :: map()) -> User :: t().
 
 new(Data) ->
     new(Data, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Data :: map(), Opts :: new_opts()) -> User :: t().
 
 new(Data, Opts) ->
@@ -293,25 +283,18 @@ new(Data, Opts) ->
     maybe_apply_password(User, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the group names the user's username.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the group names the user's username.".
 username(#{type := ?USER_TYPE, username := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the group names the user `User' is member of.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the group names the user `User` is member of.".
 groups(#{type := ?USER_TYPE, groups := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if user `User' is a member of the group named
-%% `Name'. Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if user `User` is a member of the group named
+`Name`. Otherwise returns `false`.
+""".
 -spec is_member(Name0 :: bondy_rbac_group:name(), User :: t()) -> boolean().
 
 is_member(Name0, #{type := ?USER_TYPE, groups := Val}) ->
@@ -319,11 +302,10 @@ is_member(Name0, #{type := ?USER_TYPE, groups := Val}) ->
     Name == all orelse lists:member(Name, Val).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if user `User' is managed in a SSO Realm, `false' if it
-%% is locally managed.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if user `User` is managed in a SSO Realm, `false` if it
+is locally managed.
+""".
 -spec is_sso_user(User :: t()) -> boolean().
 
 is_sso_user(#{type := ?USER_TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
@@ -333,11 +315,10 @@ is_sso_user(#{type := ?USER_TYPE}) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the URI of the Same Sign-on Realm in case the user is a SSO
-%% user. Otherwise, returns `undefined'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the URI of the Same Sign-on Realm in case the user is a SSO
+user. Otherwise, returns `undefined`.
+""".
 -spec sso_realm_uri(User :: t()) -> optional(uri()).
 
 sso_realm_uri(#{type := ?USER_TYPE, sso_realm_uri := Val})
@@ -348,12 +329,11 @@ sso_realm_uri(#{type := ?USER_TYPE}) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if user `User' is active. Otherwise returns `false'.
-%% A user that is not active cannot establish a session.
-%% See {@link enable/3} and {@link disable/3}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if user `User` is active. Otherwise returns `false`.
+A user that is not active cannot establish a session.
+See `enable/3` and `disable/3`.
+""".
 -spec is_enabled(User :: t()) -> boolean().
 
 is_enabled(#{type := ?USER_TYPE, enabled := Val}) ->
@@ -363,35 +343,33 @@ is_enabled(#{type := ?USER_TYPE}) ->
     true.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if user identified with `Username' is enabled. Otherwise
-%% returns `false'.
-%% A user that is not enabled cannot establish a session.
-%% See {@link enable/2} and {@link disable/3}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if user identified with `Username` is enabled. Otherwise
+returns `false`.
+A user that is not enabled cannot establish a session.
+See `enable/2` and `disable/3`.
+""".
 -spec is_enabled(RealmUri :: uri(), Username :: username_int()) -> boolean().
 
 is_enabled(RealmUri, Username) ->
     is_enabled(fetch(RealmUri, Username)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc If the user `User' is not sso-managed, returns `User' unmodified.
-%% Otherwise, fetches the user's credentials, the enabled status and additional
-%% metadata from the SSO Realm and merges it into `User' using the following
-%% procedure:
-%%
-%% * Copies the `password' and `authorized_keys' from the SSO user into `User'.
-%% * Adds the `meta` contents from the SSO user to a key names `sso' to the
-%% `User' `meta' map.
-%% * Sets the `enabled' property by performing the conjunction (logical AND) of
-%% both user records.
-%%
-%% The call fails with an exception if the SSO user associated with `User' was
-%% not found.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+If the user `User` is not sso-managed, returns `User` unmodified.
+Otherwise, fetches the user's credentials, the enabled status and additional
+metadata from the SSO Realm and merges it into `User` using the following
+procedure:
+
+- Copies the `password` and `authorized_keys` from the SSO user into `User`.
+- Adds the `meta` contents from the SSO user to a key names `sso` to the
+`User` `meta` map.
+- Sets the `enabled` property by performing the conjunction (logical AND) of
+both user records.
+
+The call fails with an exception if the SSO user associated with `User` was
+not found.
+""".
 -spec resolve(User :: t()) -> Resolved :: t() | no_return().
 
 resolve(#{type := ?USER_TYPE, sso_realm_uri := Uri} = User)
@@ -403,10 +381,6 @@ resolve(#{type := ?USER_TYPE} = User) ->
     User.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec resolve(User :: t(), SSOUser :: t()) -> Resolved :: t() | no_return().
 
 resolve(LocalUser, SSOUser) ->
@@ -430,21 +404,17 @@ resolve(LocalUser, SSOUser) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if user `User' has a password. Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns `true` if user `User` has a password. Otherwise returns `false`.".
 -spec has_password(User :: t()) -> boolean().
 
 has_password(#{type := ?USER_TYPE} = User) ->
     maps:is_key(password, User).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the password object or `undefined' if the user does not have a
-%% password. See {@link bondy_password}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the password object or `undefined` if the user does not have a
+password. See `bondy_password`.
+""".
 -spec password(User :: t()) ->
     optional(bondy_password:future() | bondy_password:t()).
 
@@ -464,12 +434,11 @@ password(#{type := ?USER_TYPE}) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if user `User' has authorized keys.
-%% Otherwise returns `false'.
-%% See {@link authorized_keys/1}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if user `User` has authorized keys.
+Otherwise returns `false`.
+See `authorized_keys/1`.
+""".
 -spec has_authorized_keys(User :: t()) -> boolean().
 
 has_authorized_keys(#{type := ?USER_TYPE, authorized_keys := Val}) ->
@@ -479,11 +448,10 @@ has_authorized_keys(#{type := ?USER_TYPE}) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the list of authorized keys for this user. These keys are used
-%% with the WAMP Cryptosign authentication method or equivalent.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the list of authorized keys for this user. These keys are used
+with the WAMP Cryptosign authentication method or equivalent.
+""".
 authorized_keys(#{type := ?USER_TYPE, authorized_keys := Val}) ->
     Val;
 
@@ -491,47 +459,42 @@ authorized_keys(#{type := ?USER_TYPE}) ->
     [].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the metadata map associated with the user `User'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the metadata map associated with the user `User`.".
 -spec meta(User :: t()) -> map().
 
 meta(#{type := ?USER_TYPE, meta := Val}) -> Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a new user to the RBAC store. `User' MUST have been
-%% created using {@link new/1} or {@link new/2}.
-%% This record is globally replicated.
-%%
-%% The call returns an error if the username is already associated with another
-%% user. Notice that this check is currently performed locally only, this means
-%% that a concurrent add on another node will succeed unless this operation
-%% broadcast arrives first. To ensure uniqueness the caller could use a strong
-%% consistency service e.g. a database with ACID guarantees, or act as a
-%% singleton serializing this call.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a new user to the RBAC store. `User` MUST have been
+created using `new/1` or `new/2`.
+This record is globally replicated.
+
+The call returns an error if the username is already associated with another
+user. Notice that this check is currently performed locally only, this means
+that a concurrent add on another node will succeed unless this operation
+broadcast arrives first. To ensure uniqueness the caller could use a strong
+consistency service e.g. a database with ACID guarantees, or act as a
+singleton serializing this call.
+""".
 -spec add(uri(), t()) -> {ok, t()} | {error, add_error()}.
 
 add(RealmUri, User) ->
     add(RealmUri, User, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds a new user to the RBAC store. `User' MUST have been
-%% created using {@link new/1} or {@link new/2}.
-%% This record is globally replicated.
-%%
-%% The call returns an error if the username is already associated with another
-%% user. Notice that this check is currently performed locally only, this means
-%% that a concurrent add on another node will succeed unless this operation
-%% broadcast arrives first. To ensure uniqueness the caller could use a strong
-%% consistency service e.g. a database with ACID guarantees, or act as a
-%% singleton serializing this call.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds a new user to the RBAC store. `User` MUST have been
+created using `new/1` or `new/2`.
+This record is globally replicated.
+
+The call returns an error if the username is already associated with another
+user. Notice that this check is currently performed locally only, this means
+that a concurrent add on another node will succeed unless this operation
+broadcast arrives first. To ensure uniqueness the caller could use a strong
+consistency service e.g. a database with ACID guarantees, or act as a
+singleton serializing this call.
+""".
 -spec add(uri(), t(), add_opts()) -> {ok, t()} | {error, add_error()}.
 
 add(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Opts) ->
@@ -556,11 +519,10 @@ add(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Opts) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Updates an existing user.
-%% This change is globally replicated.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Updates an existing user.
+This change is globally replicated.
+""".
 -spec update(RealmUri :: uri(), Arg :: username() | t(), Data :: map()) ->
     {ok, NewUser :: t()} | {error, update_error()}.
 
@@ -568,11 +530,10 @@ update(RealmUri, Arg, Data) ->
     update(RealmUri, Arg, Data, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Updates an existing user.
-%% This change is globally replicated.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Updates an existing user.
+This change is globally replicated.
+""".
 -spec update(
     RealmUri :: uri(),
     Arg :: username() | t(),
@@ -617,10 +578,6 @@ update(_, anonymous, _, _) ->
     {error, not_allowed}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(RealmUri :: uri(), Arg :: username() | t()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
@@ -628,10 +585,6 @@ remove(RealmUri, Arg) ->
     remove(RealmUri, Arg, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove(uri(), username() | t(), Opts :: map()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
@@ -677,16 +630,15 @@ remove(_, anonymous, _) ->
     {error, reserved_name}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes all users that belongs to realm `RealmUri'.
-%% If the option `dirty` is set to `true` this removes the user directly from
-%% store (triggering a broadcast to other Bondy nodes). If set to `false` (the
-%% default) then for each user the function remove/2 is called.
-%%
-%% Use `dirty' with a value of `true' only when you are removing the realm
-%% entirely.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes all users that belongs to realm `RealmUri`.
+If the option `dirty` is set to `true` this removes the user directly from
+store (triggering a broadcast to other Bondy nodes). If set to `false` (the
+default) then for each user the function remove/2 is called.
+
+Use `dirty` with a value of `true` only when you are removing the realm
+entirely.
+""".
 -spec remove_all(uri(), #{dirty => boolean()}) -> ok.
 
 remove_all(RealmUri, Opts) ->
@@ -707,10 +659,6 @@ remove_all(RealmUri, Opts) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec lookup(RealmUri :: uri(), Username :: username_int()) ->
     {ok, t()} | {error, not_found}.
 
@@ -751,20 +699,12 @@ lookup(RealmUri, Username0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec exists(RealmUri :: uri(), Username :: username_int()) -> boolean().
 
 exists(RealmUri, Username0) ->
     resulto:is_ok(lookup(RealmUri, Username0)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec fetch(uri(), username_int()) -> t() | no_return().
 
 fetch(RealmUri, Username) ->
@@ -777,20 +717,12 @@ fetch(RealmUri, Username) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list(uri()) -> list(t()).
 
 list(RealmUri) ->
     list(RealmUri, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec list(RealmUri :: uri(), Opts :: list_opts()) ->
     [t()]
     | {[t()], plum_db:continuation()}.
@@ -824,10 +756,6 @@ list(RealmUri, Opts) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec change_password(
     RealmUri :: uri(),
     Username :: username(),
@@ -837,10 +765,6 @@ change_password(RealmUri, Username, New) ->
     change_password(RealmUri, Username, New, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec change_password(
     RealmUri :: uri(),
     Username :: username(),
@@ -857,11 +781,10 @@ change_password(RealmUri, Username, New, Old) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sets the value of the `enabled' property to `true'.
-%% See {@link is_enabled/2}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sets the value of the `enabled` property to `true`.
+See `is_enabled/2`.
+""".
 -spec enable(RealmUri :: uri(), Arg :: t() | username()) ->
     ok | {error, any()}.
 
@@ -874,11 +797,10 @@ enable(RealmUri, Arg) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sets the value of the `enabled' property to `false'.
-%% See {@link is_enabled/2}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sets the value of the `enabled` property to `false`.
+See `is_enabled/2`.
+""".
 -spec disable(RealmUri :: uri(), Arg :: t() | binary()) ->
     ok | {error, any()}.
 
@@ -891,10 +813,7 @@ disable(RealmUri, Arg) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the external representation of the user `User'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the external representation of the user `User`.".
 -spec to_external(User :: t()) -> external().
 
 to_external(#{type := ?USER_TYPE, version := ?VERSION} = User) ->
@@ -910,11 +829,10 @@ to_external(#{type := ?USER_TYPE, version := ?VERSION} = User) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds an alias to the user. If the user is an SSO user, the alias is
-%% added on the SSO Realm only.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds an alias to the user. If the user is an SSO user, the alias is
+added on the SSO Realm only.
+""".
 -spec add_alias(
     RealmUri :: uri(), User :: t() | username(), Alias :: username()) ->
     ok | {error, Reason :: any()}.
@@ -931,10 +849,6 @@ add_alias(RealmUri, Username, Alias) ->
     add_alias(RealmUri, fetch(RealmUri, Username), Alias).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec remove_alias(
     RealmUri :: uri(), User :: t() | username(), Alias :: username()) ->
     ok | {error, Reason :: any()}.
@@ -952,11 +866,10 @@ remove_alias(RealmUri, Username, Alias) ->
     remove_alias(RealmUri, fetch(RealmUri, Username), Alias).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds group named `Groupname' to users `Users' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds group named `Groupname` to users `Users` in realm with uri
+`RealmUri`.
+""".
 -spec add_group(
     RealmUri :: uri(),
     Users :: all | t() | list(t()) | username() | list(username()),
@@ -966,11 +879,10 @@ add_group(RealmUri, Users, Groupname) ->
     add_groups(RealmUri, Users, [Groupname]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Adds groups `Groupnames' to users `Users' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Adds groups `Groupnames` to users `Users` in realm with uri
+`RealmUri`.
+""".
 -spec add_groups(
     RealmUri :: uri(),
     Users :: all | t() | list(t()) | username() | list(username()),
@@ -994,11 +906,10 @@ add_groups(RealmUri, Users, Groupnames)  ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes groups `Groupnames' from users `Users' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes groups `Groupnames` from users `Users` in realm with uri
+`RealmUri`.
+""".
 -spec remove_group(
     RealmUri :: uri(),
     Users :: all | t() | list(t()) | username() | list(username()),
@@ -1008,11 +919,10 @@ remove_group(RealmUri, Users, Groupname) ->
     remove_groups(RealmUri, Users, [Groupname]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Removes groups `Groupnames' from users `Users' in realm with uri
-%% `RealmUri'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Removes groups `Groupnames` from users `Users` in realm with uri
+`RealmUri`.
+""".
 -spec remove_groups(
     RealmUri :: uri(),
     Users :: all | t() | list(t()) | username() | list(username()),
@@ -1031,10 +941,7 @@ remove_groups(RealmUri, Users, Groupnames) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Takes a list of usernames and returns any that can't be found.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Takes a list of usernames and returns any that can't be found.".
 -spec unknown(RealmUri :: uri(), Usernames :: [username()]) ->
     Unknown :: [username()].
 
@@ -1060,10 +967,6 @@ unknown(RealmUri, Usernames) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec normalise_username(Term :: username()) -> username() | no_return().
 
 normalise_username(anonymous) ->
@@ -1086,18 +989,11 @@ normalise_username(_) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc bondy_config
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "bondy_config".
 will_merge(_PKey, _New, _Old) ->
     true.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 on_merge({?PLUMDB_PREFIX(RealmUri), _}, New, undefined = Old) ->
     ?LOG_DEBUG(#{
         description => "on_merge",
@@ -1154,10 +1050,7 @@ on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local update
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local update".
 on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
     IsCreate =
         Old == undefined orelse
@@ -1187,10 +1080,7 @@ on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local delete
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local delete".
 on_delete({?PLUMDB_PREFIX(RealmUri), Username}, _Old) ->
     %% 1. We need to revoke all auth tokens/tickets
     _ = revoke_tickets(RealmUri, Username),
@@ -1201,10 +1091,7 @@ on_delete({?PLUMDB_PREFIX(RealmUri), Username}, _Old) ->
     bondy_event_manager:notify({[bondy, user, deleted], RealmUri, Username}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc A local erase
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "A local erase".
 on_erase(_PKey, _Old) ->
     ok.
 
@@ -1216,11 +1103,7 @@ on_erase(_PKey, _Old) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec do_add(RealmUri :: binary(), User :: t(), add_opts()) -> ok | no_return().
 
 do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0, Opts)
@@ -1286,11 +1169,7 @@ maybe_add_sso_user(false, _, _, _, _) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec do_update(
     RealmUri :: binary(),
     User :: t(),
@@ -1563,11 +1442,8 @@ not_exists_check(RealmUri, Username) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Takes into account realm inheritance
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Takes into account realm inheritance".
 groups_exists_check(RealmUri, Groups) ->
     case bondy_rbac_group:unknown(RealmUri, Groups) of
         [] ->

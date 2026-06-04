@@ -3,12 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% A ranch handler for the wamp protocol over either tcp or tls transports.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_wamp_tcp_connection_handler).
+-moduledoc """
+A ranch handler for the wamp protocol over either tcp or tls transports.
+""".
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
 
@@ -64,10 +62,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec start_link(
     Ref :: ranch:ref(), Transport :: module(), ProtoOpts :: any()) ->
     {ok, ConnPid :: pid()}
@@ -670,19 +664,17 @@ send_frame(Frame, St) when is_binary(Frame) ->
     (St#state.transport):send(St#state.socket, Frame).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% The possible values for "LENGTH" are:
-%%
-%% 0: 2**9 octets
-%% 1: 2**10 octets ...
-%% 15: 2**24 octets
-%%
-%% This means a _Client_ can choose the maximum message length between *512*
-%% and *16M* octets.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+The possible values for "LENGTH" are:
+
+- `0`: 2**9 octets
+- `1`: 2**10 octets ...
+- `15`: 2**24 octets
+
+This means a *Client* can choose the maximum message length between **512**
+and **16M** octets.
+""".
 validate_max_len(N) when N >= 0, N =< 15 ->
     trunc(math:pow(2, 9 + N));
 
@@ -691,16 +683,14 @@ validate_max_len(_) ->
     throw(maximum_message_length_unacceptable).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% 0: illegal
-%% 1: JSON
-%% 2: MessagePack
-%% 3: CBOR
-%% 4 - 15: reserved for future serializers
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+- `0`: illegal
+- `1`: JSON
+- `2`: MessagePack
+- `3`: CBOR
+- `4 - 15`: reserved for future serializers
+""".
 validate_encoding(1) ->
     {binary, json};
 
@@ -722,17 +712,15 @@ validate_encoding(N) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% 0: illegal (must not be used)
-%% 1: serializer unsupported
-%% 2: maximum message length unacceptable
-%% 3: use of reserved bits (unsupported feature)
-%% 4: maximum connection count reached
-%% 5 - 15: reserved for future errors
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+- `0`: illegal (must not be used)
+- `1`: serializer unsupported
+- `2`: maximum message length unacceptable
+- `3`: use of reserved bits (unsupported feature)
+- `4`: maximum connection count reached
+- `5 - 15`: reserved for future errors
+""".
 error_number(serializer_unsupported) -> ?RAW_ERROR(1);
 error_number(maximum_message_length_unacceptable) -> ?RAW_ERROR(2);
 error_number(use_of_reserved_bits) -> ?RAW_ERROR(3);

@@ -3,35 +3,34 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A Cowboy WS handler.
-%%
-%% Each WAMP message is transmitted as a separate WebSocket message
-%% (not WebSocket frame)
-%%
-%% The WAMP protocol MUST BE negotiated during the WebSocket opening
-%% handshake between Peers using the WebSocket subprotocol negotiation
-%% mechanism.
-%%
-%% WAMP uses the following WebSocket subprotocol identifiers for
-%% unbatched modes:
-%%
-%% *  "wamp.2.json"
-%% *  "wamp.2.msgpack"
-%%
-%% With "wamp.2.json", _all_ WebSocket messages MUST BE of type *text*
-%% (UTF8 encoded) and use the JSON message serialization.
-%%
-%% With "wamp.2.msgpack", _all_ WebSocket messages MUST BE of type
-%% *binary* and use the MsgPack message serialization.
-%%
-%% To avoid incompatibilities merely due to naming conflicts with
-%% WebSocket subprotocol identifiers, implementers SHOULD register
-%% identifiers for additional serialization formats with the official
-%% WebSocket subprotocol registry.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_wamp_ws_connection_handler).
+-moduledoc """
+A Cowboy WS handler.
+
+Each WAMP message is transmitted as a separate WebSocket message
+(not WebSocket frame)
+
+The WAMP protocol MUST BE negotiated during the WebSocket opening
+handshake between Peers using the WebSocket subprotocol negotiation
+mechanism.
+
+WAMP uses the following WebSocket subprotocol identifiers for
+unbatched modes:
+
+- `wamp.2.json`
+- `wamp.2.msgpack`
+
+With `wamp.2.json`, *all* WebSocket messages MUST BE of type **text**
+(UTF8 encoded) and use the JSON message serialization.
+
+With `wamp.2.msgpack`, *all* WebSocket messages MUST BE of type
+**binary** and use the MsgPack message serialization.
+
+To avoid incompatibilities merely due to naming conflicts with
+WebSocket subprotocol identifiers, implementers SHOULD register
+identifiers for additional serialization formats with the official
+WebSocket subprotocol registry.
+""".
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("http_api.hrl").
@@ -173,13 +172,12 @@ init(Req0, _) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Called once the connection has been upgraded to websockets.
-%% Note that the init/2 function does not run in the same process as the
-%% Websocket callbacks. Any Websocket-specific initialization must be done in
-%% this function.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Called once the connection has been upgraded to websockets.
+Note that the `init/2` function does not run in the same process as the
+Websocket callbacks. Any Websocket-specific initialization must be done in
+this function.
+""".
 websocket_init(#state{protocol_state = undefined} = State) ->
     %% This will close the WS connection
     Frame = {
@@ -202,10 +200,9 @@ websocket_init(#state{protocol_state = PSt} = State) ->
     {[], reset_ping(State), hibernate}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Called for every frame received from the client
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Called for every frame received from the client.
+""".
 websocket_handle(Data, #state{protocol_state = undefined} = State) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above,
@@ -273,12 +270,11 @@ websocket_handle(Data, State) ->
     {[], State, hibernate}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Called for every Erlang message received.
-%% Handles internal erlang messages and WAMP messages BONDY wants to send to the
-%% client. See {@link bondy:send/2}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Called for every Erlang message received.
+Handles internal erlang messages and WAMP messages BONDY wants to send to the
+client. See `bondy:send/2`.
+""".
 websocket_info({?BONDY_REQ, Pid, _RealmUri, M}, State)
 when Pid =:= self() ->
     handle_outbound(State#state.frame_type, M, State);
@@ -330,11 +326,9 @@ websocket_info(Msg, State) ->
     {[], State, hibernate}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Termination
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Termination.
+""".
 %% From : http://ninenines.eu/docs/en/cowboy/2.0/guide/handlers/
 %% Note that while this function may be called in a Websocket handler, it is
 %% generally not useful to do any clean up as the process terminates
@@ -518,12 +512,10 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% The order is undefined
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+The order is undefined.
+""".
 -spec select_subprotocol(list(binary()) | undefined) ->
     {ok, bondy_wamp_protocol:subprotocol(), binary()}
     | no_return().
@@ -558,16 +550,17 @@ do_terminate(State) ->
     bondy_wamp_protocol:terminate(State#state.protocol_state).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% From cow_ws:frame().
-%% -type frame() :: close | ping | pong
-%% 	| {text | binary | close | ping | pong, iodata()}
-%% 	| {close, close_code(), iodata()}
-%% 	| {fragment, fin | nofin, text | binary | continuation, iodata()}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+From `cow_ws:frame()`.
+
+```erlang
+-type frame() :: close | ping | pong
+	| {text | binary | close | ping | pong, iodata()}
+	| {close, close_code(), iodata()}
+	| {fragment, fin | nofin, text | binary | continuation, iodata()}.
+```
+""".
 data_frames(Type, L) when is_list(L) ->
     [{Type, E} || E <- L];
 

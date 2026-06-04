@@ -3,12 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc An event handler to generates WAMP Meta Events based on internal
-%% Bondy events
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_event_wamp_publisher).
+-moduledoc """
+An event handler that generates WAMP Meta Events based on internal
+Bondy events.
+""".
 -behaviour(gen_event).
 
 -include_lib("kernel/include/logger.hrl").

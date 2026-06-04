@@ -4,6 +4,13 @@
 %% =============================================================================
 
 -module(bondy_wamp_protocol).
+-moduledoc """
+Implements the WAMP protocol state machine shared by the WAMP transports
+(WebSocket, raw socket, HTTP SSE and long-poll). It handles subprotocol
+negotiation, the HELLO/CHALLENGE/AUTHENTICATE/WELCOME handshake and
+authentication, and the encoding, decoding and routing of inbound and
+outbound WAMP messages.
+""".
 -behaviour(bondy_sensitive).
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -95,10 +102,6 @@ format_status(#wamp_state{} = State) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init(binary() | subprotocol(), bondy_session:peer(), map()) ->
     {ok, state()} | {error, any(), state()}.
 
@@ -111,30 +114,18 @@ init(Term, Peer, Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec peer(state()) -> {inet:ip_address(), inet:port_number()}.
 
 peer(#wamp_state{context = Ctxt}) ->
     bondy_context:peer(Ctxt).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec agent(state()) -> id().
 
 agent(#wamp_state{context = Ctxt}) ->
     bondy_context:agent(Ctxt).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec realm_uri(state()) -> id().
 
 realm_uri(#wamp_state{context = Ctxt}) ->
@@ -142,53 +133,35 @@ realm_uri(#wamp_state{context = Ctxt}) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec session_id(state()) -> id().
 
 session_id(#wamp_state{context = Ctxt}) ->
     bondy_context:session_id(Ctxt).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec ref(state()) -> bondy_ref:t().
 
 ref(#wamp_state{context = Ctxt}) ->
     bondy_context:ref(Ctxt).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec context(state()) -> bondy_context:t().
 
 context(#wamp_state{context = Ctxt}) ->
     Ctxt.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the auth ticket (e.g. from a `bondy_ticket` cookie) in the protocol
-%% state. Used by HTTP transport sessions to inject the ticket before WAMP
-%% HELLO processing.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sets the auth ticket (e.g. from a `bondy_ticket` cookie) in the protocol
+state. Used by HTTP transport sessions to inject the ticket before WAMP
+HELLO processing.
+""".
 -spec set_auth_claims(map() | undefined, state()) -> state().
 
 set_auth_claims(Claims, #wamp_state{} = St) ->
     St#wamp_state{auth_claims = Claims}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec terminate(state()) -> ok.
 
 
@@ -216,10 +189,6 @@ terminate(_) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate_subprotocol(binary() | subprotocol()) ->
     {ok, subprotocol()} | {error, invalid_subprotocol}.
 
@@ -259,12 +228,10 @@ validate_subprotocol(_) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Handles wamp frames, decoding 1 or more messages, routing them and replying
-%% when required.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Handles wamp frames, decoding 1 or more messages, routing them and replying
+when required.
+""".
 -spec handle_inbound(binary(), state()) ->
     {noreply, state()}
     | {reply, [binary()], state()}
@@ -324,10 +291,6 @@ handle_inbound(Data, St) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_outbound(bondy_wamp_message:message(), state()) ->
     {ok, binary(), state()}
     | {error, any(), state()}
@@ -415,13 +378,11 @@ handle_inbound_messages(Messages, St) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handles one or more messages, routing them and returning a reply
-%% when required.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Handles one or more messages, routing them and returning a reply
+when required.
+""".
 -spec handle_inbound_messages(
     [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
     {noreply, state()}
@@ -617,12 +578,7 @@ maybe_open_session({error, Reason, St}) ->
     stop(Reason, St).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -spec open_session(map(), state()) ->
     {reply, binary(), state()}
     | {stop, binary(), state()}.
@@ -1133,10 +1089,6 @@ abort_message({Code, Term}) when is_atom(Term) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec subprotocol(binary()) ->
     bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
 

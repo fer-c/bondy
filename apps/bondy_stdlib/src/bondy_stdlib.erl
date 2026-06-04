@@ -4,6 +4,12 @@
 %% =============================================================================
 
 -module(bondy_stdlib).
+-moduledoc """
+General-purpose standard library helpers: combinators for `optional()` values
+(`and_then/2`, `or_else/2`, `lazy_or_else/2`), exponential and jittered
+increment functions, and a `retry/1,2` facility implementing exponential backoff
+with jitter.
+""".
 
 -include("bondy_stdlib.hrl").
 
@@ -104,11 +110,12 @@ increment(N, Max) ->
     min(increment(N), Max).
 
 -doc """
-Increment an integer exponentially with randomness or jitter.-behaviour(behaviour).
-Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]' as recommended in:
+Increment an integer exponentially with randomness or jitter.
+
+Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]` as recommended in:
 [Sally Floyd and Van Jacobson, The Synchronization of Periodic Routing Messages,
 April 1994 IEEE/ACM Transactions on Networking](http://ee.lbl.gov/papers/sync_94.pdf).
-Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku <mononcqc@ferd.ca>).
+Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku `<mononcqc@ferd.ca>`).
 """.
 -spec rand_increment(N :: pos_integer()) -> pos_integer().
 
@@ -121,10 +128,10 @@ rand_increment(N) ->
 -doc """
 Increment an integer exponentially with randomness or jitter within a range.
 
-Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]' as recommended in:
+Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]` as recommended in:
 [Sally Floyd and Van Jacobson, The Synchronization of Periodic Routing Messages,
 April 1994 IEEE/ACM Transactions on Networking](http://ee.lbl.gov/papers/sync_94.pdf).
-Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku <mononcqc@ferd.ca>).
+Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku `<mononcqc@ferd.ca>`).
 """.
 -spec rand_increment(N :: pos_integer(), Max :: pos_integer()) -> pos_integer().
 
@@ -180,14 +187,17 @@ Implements exponential backoff with jitter:
 - Function calls exit/1 - Propagated immediately
 - Maximum retries exceeded - Returns last error or `{error, timeout}`
 
-### Paramters
+### Parameters
 - `Fun` Function to execute. Should be side-effect free for reliable retries.
-@param MaxRetries Maximum number of retry attempts (0 means no retries).
-@param BaseDelay Initial delay in milliseconds (must be > 0).
-@param MaxDelay Maximum delay cap in milliseconds (must be >= BaseDelay).
-@returns {ok, Result} | ok on success, {error, Reason} on final failure.
-@example
-Retry expensive operation with longer delays
+- `MaxRetries` Maximum number of retry attempts (0 means no retries).
+- `BaseDelay` Initial delay in milliseconds (must be `> 0`).
+- `MaxDelay` Maximum delay cap in milliseconds (must be `>= BaseDelay`).
+
+Returns `{ok, Result}` or `ok` on success, `{error, Reason}` on final failure.
+
+### Example
+Retry expensive operation with longer delays:
+```erlang
 retry:retry(fun() ->
  case expensive_remote_call() of
      {ok, Data} -> {ok, Data};
@@ -196,6 +206,7 @@ retry:retry(fun() ->
      {error, permanent} -> exit(permanent_failure)
  end
 end, 10, 1000, 30000).
+```
 
 Notice this function will not catch exceptions and thus there will be no retries
 in that scenario.

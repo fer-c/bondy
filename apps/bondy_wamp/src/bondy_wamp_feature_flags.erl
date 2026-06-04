@@ -3,16 +3,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%%%-------------------------------------------------------------------
-%%%  wamp_feature_flags.erl
-%%%
-%%%  Compact bit-mask representation of feature flags.
-%%%  - One integer holds up to 64 (or more) boolean capabilities.
-%%%  - O(1) look-ups, intersections and subset checks.
-%%%
-%%%  Increment ?VERSION whenever you append to CapList.
-%%%-------------------------------------------------------------------
 -module(bondy_wamp_feature_flags).
+-moduledoc """
+Compact bit-mask representation of feature flags.
+
+- One integer holds up to 64 (or more) boolean capabilities.
+- O(1) look-ups, intersections and subset checks.
+
+Increment `?VERSION` whenever you append to `cap_list/0`.
+""".
 
 -include("bondy_wamp.hrl").
 

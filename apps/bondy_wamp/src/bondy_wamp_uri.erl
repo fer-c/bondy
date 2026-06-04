@@ -3,12 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
-%% @doc
-%%
-%% @end
-%% =============================================================================
 -module(bondy_wamp_uri).
+-moduledoc """
+Validation and matching of WAMP URIs.
+
+Provides validation against the loose and strict URI rules (including their
+prefix and empty-component variants) and matching of a ground URI against a
+pattern using the exact, prefix and wildcard match strategies.
+""".
 -include("bondy_wamp.hrl").
 
 -type t()               ::  binary().
@@ -40,20 +42,15 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Sames as `is_valid(Uri, bondy_wamp_config:get(uri_strictness))'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Sames as `is_valid(Uri, bondy_wamp_config:get(uri_strictness))`.
+""".
 -spec is_valid(uri()) -> boolean().
 
 is_valid(Uri) ->
     is_valid(Uri, bondy_wamp_config:get(uri_strictness)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_valid(Uri :: uri(), RuleOrStrategy :: rule() | match_strategy()) ->
     boolean() | no_return().
 
@@ -71,20 +68,12 @@ is_valid(_, _) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate(Uri :: binary()) -> Uri :: t().
 
 validate(Uri) ->
     maybe_error(is_valid(Uri), Uri).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate(Uri :: binary(), Arg :: rule() | match_strategy()) ->
     Uri :: t().
 
@@ -92,11 +81,10 @@ validate(Uri, Arg) ->
     maybe_error(is_valid(Uri, Arg), Uri).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Matches a ground uri `Uri' with `Pattern'. `Uri' cannot be the empty
-%% uri.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Matches a ground uri `Uri` with `Pattern`. `Uri` cannot be the empty
+uri.
+""".
 -spec match(Uri :: t(), Pattern :: t(), Strategy :: match_strategy()) -> any().
 
 match(<<>>, _, Strategy) when Strategy =/= ?PREFIX_MATCH ->
@@ -129,13 +117,14 @@ match(_, _, _) ->
     error(badarg).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Example:
-%% components(<<"com.mycompany.foo.bar">>) ->
-%% [<<"com.mycompany">>, <<"foo">>, <<"bar">>].
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Example:
+
+```erlang
+components(<<"com.mycompany.foo.bar">>) ->
+[<<"com.mycompany">>, <<"foo">>, <<"bar">>].
+```
+""".
 -spec components(t()) -> [binary()] | no_return().
 
 components(Uri) ->

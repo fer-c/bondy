@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_wamp_api).
+-moduledoc """
+Entry point for the Bondy Meta API. Dispatches WAMP `CALL` messages addressed
+to `bondy.*` procedures to the appropriate API handler module and resolves
+legacy procedure URIs to their current equivalents.
+""".
 -behaviour(bondy_wamp_callback).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -40,10 +45,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec handle_call(M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
@@ -149,11 +150,10 @@ do_handle_call(<<"bondy.", _/binary>>, M, _) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Resolves old (next to be deprecated URI) into new URI
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Resolves old (next to be deprecated URI) into new URI.
+""".
 -spec resolve(Uri :: uri()) -> uri() | no_return().
 
 resolve(<<"com.bondy.", _/binary>> = Uri) ->

@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_wamp_utils).
+-moduledoc """
+Utility functions shared across the WAMP message modules, including WAMP
+identifier generation and validation, and validation of message
+option/details maps against their key specifications.
+""".
 -include("bondy_wamp.hrl").
 
 
@@ -24,21 +29,15 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns a random number from a _uniform distribution_ over the range [0, 2^53]
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a random number from a _uniform distribution_ over the range `[0, 2^53]`.
+""".
 -spec rand_uniform() -> integer().
 
 rand_uniform() ->
     rand:uniform(?MAX_ID).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_valid_id(id()) -> boolean().
 
 is_valid_id(N) when is_integer(N) andalso N >= 0 andalso N =< ?MAX_ID ->
@@ -47,19 +46,11 @@ is_valid_id(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 validate_id(Id) ->
     is_valid_id(Id) == true orelse error({invalid_id, Id}),
     Id.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 validate_map(Map, Spec, Extensions) ->
     Opts = #{
         atomic => true, % Fail atomically for the whole map
@@ -69,10 +60,6 @@ validate_map(Map, Spec, Extensions) ->
     validate_map(Map, Spec, Extensions, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 validate_map(Map, Spec, Extensions, Opts0) ->
     Defaults = #{
         atomic => true, % Fail atomically for the whole map

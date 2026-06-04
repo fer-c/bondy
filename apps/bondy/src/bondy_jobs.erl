@@ -3,11 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc Load regulation
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_jobs).
+-moduledoc """
+Load regulation.
+""".
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").

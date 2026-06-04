@@ -3,11 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc Implements the event watcher capability as designed by Lager.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_event_handler_watcher).
+-moduledoc """
+Implements the event watcher capability as designed by Lager.
+""".
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -40,36 +39,20 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start(Manager, {swap, Old, New} = Args)
 when is_tuple(Old) andalso is_tuple(New) ->
     gen_server:start(?MODULE, [Manager, Args], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start(Manager, Handler, Args) ->
     gen_server:start(?MODULE, [Manager, Handler, Args], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link(Manager, {swap, Old, New} = Args)
 when is_tuple(Old) andalso is_tuple(New) ->
     gen_server:start_link(?MODULE, [Manager, Args], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link(Manager, Handler, Args) when is_atom(Handler) ->
     gen_server:start_link(?MODULE, [Manager, Handler, Args], []).
 

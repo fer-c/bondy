@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_registry_remote_index).
+-moduledoc """
+A per-partition ETS index of remote registry entries, keyed by node, entry type
+and entry key. It is used to look up the registry entries belonging to a given
+node, for example when pruning entries after a node leaves the cluster.
+""".
 
 -include("bondy.hrl").
 -include("bondy_registry.hrl").
@@ -48,10 +49,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Index :: integer()) -> t().
 
 new(Index) ->
@@ -70,20 +67,12 @@ new(Index) ->
     Tab.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec add(T :: t(), Entry :: entry()) -> ok.
 
 add(T, Entry) ->
     do(T, Entry, add).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec delete(T :: t(), Entry :: entry()) -> ok.
 
 delete(T, Entry) ->
@@ -91,10 +80,6 @@ delete(T, Entry) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(T :: t(), Node :: node(), Limit :: pos_integer()) ->
     match_result().
 
@@ -108,10 +93,6 @@ match(T, Node, Limit) when is_atom(Node), is_integer(Limit) ->
     ets:select(T, MS, Limit).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(ets:continuation() | eot()) -> match_result().
 
 match(?EOT) ->
@@ -128,22 +109,20 @@ match(Cont) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Generates a dynamic ets table name given a generic name and and index
-%% (partition number).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates a dynamic ets table name given a generic name and and index
+(partition number).
+""".
 gen_table_name(Index) when is_integer(Index) ->
     list_to_atom("bondy_registry_remote_idx_tab_" ++ integer_to_list(Index)).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc If Entry is remote, it adds it to the remote_tab index.
-%% This index is solely used by find_by_node/3 function.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+If Entry is remote, it adds it to the remote_tab index.
+This index is solely used by find_by_node/3 function.
+""".
 do(Op, Entry, T) ->
     case bondy_registry_entry:is_local(Entry) of
         true ->

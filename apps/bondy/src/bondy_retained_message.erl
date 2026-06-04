@@ -3,15 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc When publishing an event a topic the Publisher can ask the Broker to
-%% retain the event being published as the most-recent event on this topic.
-%%
-%% <strong>This is experimental and does not scale with high traffic at the
-%% moment.</strong>
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_retained_message).
+-moduledoc """
+When publishing an event a topic the Publisher can ask the Broker to
+retain the event being published as the most-recent event on this topic.
+
+**This is experimental and does not scale with high traffic at the
+moment.**
+""".
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -78,10 +77,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 get(Realm, Topic) ->
@@ -89,10 +84,6 @@ get(Realm, Topic) ->
     plum_db:get(?DB_PREFIX(Realm), Topic, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec take(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 take(Realm, Topic) ->
@@ -100,20 +91,12 @@ take(Realm, Topic) ->
     plum_db:take(?DB_PREFIX(Realm), Topic, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec size(t()) -> integer().
 
 size(Mssg) ->
     term_size(Mssg).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(continuation() | eot()) -> {[t()] | continuation()} | eot().
 
 match(?EOT) ->
@@ -131,10 +114,6 @@ match(#bondy_retained_continuation{} = Cont) ->
     match(Realm, Topic, SessionId, Strategy, Opts).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
@@ -146,10 +125,6 @@ match(Realm, Topic, SessionId, Strategy) ->
     match(Realm, Topic, SessionId, Strategy, [{limit, 100}]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
@@ -232,10 +207,6 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
@@ -246,10 +217,6 @@ put(Realm, Topic, Event, MatchOpts) ->
     put(Realm, Topic, Event, MatchOpts, 0).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
@@ -291,10 +258,6 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     plum_db:put(?DB_PREFIX(Realm), Topic, Modifier).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec to_event(Retained :: t(), SubscriptionId :: id()) -> wamp_event().
 
 to_event(Retained, SubscriptionId) ->
@@ -308,32 +271,29 @@ to_event(Retained, SubscriptionId) ->
         partial = Retained#bondy_retained_message.partial
     }.
 
-%% -----------------------------------------------------------------------------
-%% @doc Evict expired retained messages from all realms.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Evict expired retained messages from all realms.
+""".
 -spec evict_expired() -> non_neg_integer().
 
 evict_expired() ->
     evict_expired('_').
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Evict expired retained messages from realm `Realm'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Evict expired retained messages from realm `Realm`.
+""".
 -spec evict_expired(uri() | '_') -> non_neg_integer().
 
 evict_expired(Realm) ->
     evict_expired(Realm, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Evict expired retained messages from realm `Realm' or all realms if
-%% wildcard '_' is used.
-%% Evaluates function Fun for each entry passing Realm and Entry as arguments.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Evict expired retained messages from realm `Realm` or all realms if
+wildcard `'_'` is used.
+Evaluates function `Fun` for each entry passing `Realm` and `Entry` as arguments.
+""".
 -spec evict_expired(uri() | '_', evict_fun() | undefined) -> non_neg_integer().
 
 evict_expired(Realm, EvictFun)
@@ -417,14 +377,13 @@ match_fun(Components) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Returns true if both lists have the same length and if each element of
-%% the first list subsumes the corresponding element on the second list.
-%% A term subsumes another term when is equal or when the first term is the
-%% empty binary (wildcard).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns true if both lists have the same length and if each element of
+the first list subsumes the corresponding element on the second list.
+A term subsumes another term when is equal or when the first term is the
+empty binary (wildcard).
+""".
 subsumes(Term, Term) ->
     true;
 

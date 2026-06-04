@@ -4,11 +4,12 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_auth_wamp_cra).
+-moduledoc """
+Implements the WAMP Challenge-Response Authentication (WAMP-CRA) method as a
+`bondy_auth` callback module, issuing a challenge and verifying the client's
+signature against the user's CRA password.
+""".
 -behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
@@ -35,10 +36,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
@@ -65,10 +62,6 @@ init(Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec requirements() -> map().
 
 requirements() ->
@@ -80,10 +73,6 @@ requirements() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(
     DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
     {true, Extra :: map(), NewState :: state()}
@@ -146,10 +135,6 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),

@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_subscribers_sup).
+-moduledoc """
+Supervisor for `bondy_subscriber` processes, the local (internal) WAMP
+subscribers used by `bondy_broker`.
+""".
 -behaviour(supervisor).
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
@@ -33,10 +37,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec start_subscriber(id(), uri(), map(), uri(), map() | function()) ->
     {ok, pid()} | {error, any()}.
 
@@ -44,18 +44,10 @@ start_subscriber(Id, RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     supervisor:start_child(?MODULE, [Id, RealmUri, Opts, Topic, Fun]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 terminate_subscriber(Subscriber) when is_pid(Subscriber)->
     supervisor:terminate_child(?MODULE, Subscriber).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

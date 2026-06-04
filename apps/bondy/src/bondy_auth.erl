@@ -4,16 +4,15 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc This module provides the behaviour to be implemented by the
-%% authentication methods used by Bondy. The module provides the functions
-%% required to setup an authentication context, compute a challenge (in the
-%% case of challenge-response methods and authenticate a user based on the
-%% selected method out of the available methods offered by the Realm and
-%% restricted by the access control system and the user's password capabilities.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_auth).
+-moduledoc """
+This module provides the behaviour to be implemented by the authentication
+methods used by Bondy. The module provides the functions required to setup an
+authentication context, compute a challenge (in the case of challenge-response
+methods) and authenticate a user based on the selected method out of the
+available methods offered by the Realm and restricted by the access control
+system and the user's password capabilities.
+""".
 -behaviour(bondy_sensitive).
 
 -include_lib("partisan/include/partisan_util.hrl").
@@ -235,10 +234,6 @@ init(SessionId, Uri, UserId, Roles, SourceIP) ->
     init(SessionId, Uri, UserId, Roles, SourceIP, #{}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init(
     SessionId :: bondy_session_id:t(),
     Realm :: bondy_realm:t() | uri(),
@@ -291,82 +286,53 @@ when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec methods() -> [binary()].
 
 methods() ->
     maps:keys(?BONDY_AUTHMETHODS_INFO).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec method_info() -> map().
 
 method_info() ->
     ?BONDY_AUTHMETHODS_INFO.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec method_info(Method :: binary()) -> map() | no_return().
 
 method_info(Method) ->
     maps:get(Method, ?BONDY_AUTHMETHODS_INFO).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec session_id(context()) -> bondy_session_id:t().
 
 session_id(#{session_id := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec user_id(context()) -> binary() | undefined.
 
 user_id(#{user_id := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec method(context()) -> [binary()].
 
 method(#{method := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec available_methods(context()) -> [binary()].
 
 available_methods(#{available_methods := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the sublist of `List' containing only the available
-%% authentication methods that can be used with user `User' in realm `Realm'
-%% when connecting from the current IP Address.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the sublist of `List` containing only the available authentication
+methods that can be used with user `User` in realm `Realm` when connecting from
+the current IP Address.
+""".
 -spec available_methods(List :: [binary()], Ctxt :: context()) -> [binary()].
 
 available_methods(List, #{available_methods := Available}) ->
@@ -375,40 +341,24 @@ available_methods(List, #{available_methods := Available}) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec provider(context()) -> [binary()].
 
 provider(#{provider := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec role(context()) -> binary().
 
 role(#{role := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec roles(context()) -> [binary()].
 
 roles(#{roles := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec user(context()) -> bondy_rbac_user:t() | undefined.
 
 user(#{user := Value}) ->
@@ -418,30 +368,18 @@ user(_) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec realm_uri(context()) -> uri().
 
 realm_uri(#{realm_uri := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec sso_realm_uri(context()) -> uri().
 
 sso_realm_uri(#{sso_realm_uri := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authrealm(context()) -> uri().
 
 authrealm(#{sso_realm_uri := undefined, realm_uri := Value}) ->
@@ -451,30 +389,18 @@ authrealm(#{sso_realm_uri := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec source_ip(context()) -> inet:ip_address().
 
 source_ip(#{source_ip := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec host(context()) -> optional(binary()).
 
 host(#{host := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec issuer(context()) -> binary().
 
 issuer(#{host := undefined} = T) ->
@@ -485,10 +411,6 @@ issuer(#{host := Host} = T) ->
     <<Host/binary, "/", Uri/binary>>.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(Method :: binary(), DataIn :: map(), Ctxt :: context()) ->
     {false, NewCtxt :: context()}
     | {true, ChallengeData :: map(), NewCtxt :: context()}
@@ -535,10 +457,6 @@ challenge(Method, DataIn, Ctxt0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(
     Method :: binary(),
     Signature :: binary(),
@@ -592,14 +510,12 @@ authenticate(Method, Signature, DataIn, Ctxt) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the requested role `Role' if user `User' is a member of that
-%% role, otherwise throws a `{no_such_groups, [Name]}' exception.
-%% In case the requested role is the
-%% atom 'undefined' it returns the first group in the user's groups or
-%% undefined if the user is not a member of any group.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the requested role `Role` if user `User` is a member of that role,
+otherwise throws a `{no_such_groups, [Name]}` exception. In case the requested
+role is the atom `undefined` it returns the first group in the user's groups or
+undefined if the user is not a member of any group.
+""".
 -spec valid_roles(
     Role :: binary() | [binary()] | undefined,
     User :: bondy_rbac_user:t()) ->

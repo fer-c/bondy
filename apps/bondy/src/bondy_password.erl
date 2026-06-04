@@ -3,19 +3,16 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A Password object stores a fixed size salted hash of a user's password
-%% and all the metadata required to re-compute the salted hash for comparing a
-%% user input and for implementing several password-based authentication
-%% protocols.
-%%
-%% At the moment this module supports two protocols:
-%% * WAMP Challenge-Response Authentication (CRA), and
-%% * Salted Challenge-Response Authentication Mechanism (SCRAM)
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_password).
+-moduledoc """
+A Password object stores a fixed size salted hash of a user's password and all
+the metadata required to re-compute the salted hash for comparing a user input
+and for implementing several password-based authentication protocols.
+
+At the moment this module supports two protocols:
+- WAMP Challenge-Response Authentication (CRA), and
+- Salted Challenge-Response Authentication Mechanism (SCRAM)
+""".
 
 %% We simply validate/convert the keys as maps_utils:validate does not have the
 %% capability for nesting and unification yet
@@ -113,28 +110,26 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a functional object that takes a single argument
-%% `Opts :: opts()' that when applied calls `new(Password, Opts)'.
-%%
-%% This is used for two reasons:
-%% 1. to encapsulate the string value of the password avoiding exposure i.e.
-%% via logs; and
-%% 2. To delay the processing of the password until the value for `Opts' is
-%% known.
-%%
-%% `Password' must be a binary with a minimum size of 6 bytes and a maximum
-%% size of 256 bytes, otherwise fails with error `invalid_password'.
-%%
-%%
-%% Example:
-%%
-%% ```erlang
-%% > F = bondy_password:future(<<"MyBestKeptSecret">>).
-%% > bondy_password:new(F, Opts).
-%% '''
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Creates a functional object that takes a single argument `Opts :: opts()` that
+when applied calls `new(Password, Opts)`.
+
+This is used for two reasons:
+1. to encapsulate the string value of the password avoiding exposure i.e.
+via logs; and
+2. To delay the processing of the password until the value for `Opts` is
+known.
+
+`Password` must be a binary with a minimum size of 6 bytes and a maximum
+size of 256 bytes, otherwise fails with error `invalid_password`.
+
+Example:
+
+```erlang
+> F = bondy_password:future(<<"MyBestKeptSecret">>).
+> bondy_password:new(F, Opts).
+```
+""".
 -spec future(binary()) -> future().
 
 future(Password) when is_binary(Password) ->
@@ -142,15 +137,13 @@ future(Password) when is_binary(Password) ->
     fun(Opts) -> new(Password, Opts) end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Hash a plaintext password `Password' and the protocol and protocol
-%% params defined in options `Opts', returning t().
-%%
-%% `Password' must be a binary with a minimum size of 6 bytes and a maximum
-%% size of 256 bytes, otherwise fails with error `invalid_password'.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Hash a plaintext password `Password` and the protocol and protocol params
+defined in options `Opts`, returning `t()`.
+
+`Password` must be a binary with a minimum size of 6 bytes and a maximum
+size of 256 bytes, otherwise fails with error `invalid_password`.
+""".
 -spec new(binary() | future(), opts()) -> t() | no_return().
 
 new(Future, Opts) when is_function(Future, 1), is_map(Opts) ->
@@ -171,11 +164,10 @@ new(Password, Opts0) when is_binary(Password), is_map(Opts0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns a new password object from `String' applying the same protocol
-%% and params found in password `PWD'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a new password object from `String` applying the same protocol and
+params found in password `PWD`.
+""".
 -spec replace(Password :: binary() | future(), PW :: t()) ->
     t() | no_return().
 
@@ -186,10 +178,6 @@ replace(Password, PWD) ->
     new(Password, #{protocol => Protocol, params => Params}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec default_opts() -> opts().
 
 default_opts() ->
@@ -197,10 +185,6 @@ default_opts() ->
     default_opts(Protocol).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec default_opts(protocol()) -> opts().
 
 default_opts(Protocol) ->
@@ -210,20 +194,12 @@ default_opts(Protocol) ->
     #{protocol => Protocol, params => Params}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec opts_validator() -> map().
 
 opts_validator() ->
     ?OPTS_VALIDATOR.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_type(t()) -> boolean().
 
 is_type(#{type := password}) ->
@@ -233,10 +209,6 @@ is_type(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec protocol(t()) -> protocol() | undefined.
 
 protocol(#{type := password, version := ?VERSION, protocol := Value}) ->
@@ -252,30 +224,18 @@ protocol(_) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec params(t()) -> params().
 
 params(#{version := ?VERSION, params := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec data(t()) -> data().
 
 data(#{version := ?VERSION, data := Value}) ->
     Value.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec hash_length(t()) -> pos_integer().
 
 hash_length(#{version := <<"1.0">>, hash_pass := Val}) ->
@@ -293,10 +253,6 @@ hash_length(#{} = PW) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec from_term(Term :: proplist:proplist() | map()) -> t().
 
 from_term(Term) when is_list(Term) ->
@@ -307,10 +263,6 @@ from_term(Term) when is_map(Term) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify_hash(Hash :: binary(), Password :: t()) -> boolean().
 
 verify_hash(_Hash, #{version := ?VERSION, protocol := scram} = _PW) ->
@@ -335,10 +287,6 @@ verify_hash(Hash, #{} = PW) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec verify_string(String :: binary(), Password :: t()) -> boolean().
 
 verify_string(String, #{version := ?VERSION, protocol := scram} = PW) ->
@@ -393,10 +341,6 @@ verify_string(Hash, #{} = PW) ->
     verify_string(Hash, add_version(PW)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec upgrade(
     String :: tuple() | binary(), T0 :: map() | proplists:proplist()) ->
     {true, T1 :: t()} | false.

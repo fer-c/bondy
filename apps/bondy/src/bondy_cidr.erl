@@ -4,6 +4,10 @@
 %% =============================================================================
 
 -module(bondy_cidr).
+-moduledoc """
+Parsing, validation and matching of CIDR notation address ranges, represented
+in Erlang as `{inet:ip_address(), Maskbits}` tuples for both IPv4 and IPv6.
+""".
 
 
 
@@ -31,12 +35,12 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Parses a binary string representation of a CIDR notation and returns its
-%% erlang representation as a tuple `t()'.
-%% Fails with a badarg exception if the binary `Bin' is not a valid input.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Parses a binary string representation of a CIDR notation and returns its
+erlang representation as a tuple `t()`.
+
+Fails with a badarg exception if the binary `Bin` is not a valid input.
+""".
 -spec parse(binary()) -> t() | no_return().
 
 parse(Bin) when is_binary(Bin) ->
@@ -53,11 +57,10 @@ parse(_) ->
     error(badarg).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if term `Term' is a valid CIDR notation representation in
-%% erlang. Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if term `Term` is a valid CIDR notation representation in
+erlang. Otherwise returns `false`.
+""".
 -spec is_type(Term :: binary()) -> t() | no_return().
 
 is_type({IP, Maskbits})
@@ -78,11 +81,10 @@ is_type(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if `Left' and `Right' are CIDR notation representations
-%% in erlang and they match. Otherwise returns false.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if `Left` and `Right` are CIDR notation representations
+in erlang and they match. Otherwise returns false.
+""".
 -spec match(Left :: t(), Right :: t()) -> t() | no_return().
 
 match({_, Maskbits} = Left, {_, Maskbits} = Right) ->
@@ -92,10 +94,6 @@ match(_, _) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec mask(t()) -> Subnet :: binary().
 
 mask({{_, _, _, _} = Addr, Maskbits})
@@ -112,11 +110,10 @@ when Maskbits >= 0 andalso Maskbits =< 128 ->
     Subnet.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc returns the real bottom of a netmask. Eg if 192.168.1.1/16 is
-%% provided, return 192.168.0.0/16
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the real bottom of a netmask. Eg if 192.168.1.1/16 is
+provided, return 192.168.0.0/16.
+""".
 -spec anchor_mask(t()) -> t().
 
 

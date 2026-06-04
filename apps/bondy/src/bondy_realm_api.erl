@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_realm_api).
+-moduledoc """
+Implements the `bondy_wamp_api` behaviour for the realm administration WAMP API,
+dispatching procedure calls for creating, updating, deleting and listing realms
+as well as managing their security status and grants.
+""".
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -103,10 +104,7 @@ handle_call(?BONDY_REALM_SECURITY_IS_ENABLED, M, Ctxt) ->
     R = bondy_wamp_message:result(M#call.request_id, #{}, [Boolean]),
     {reply, R};
 
-%% -----------------------------------------------------------------------------
-%% @doc It returns the grants for a given realm URI.
-%% @end
-%% -----------------------------------------------------------------------------
+%% Returns the grants for a given realm URI.
 handle_call(?BONDY_REALM_GRANTS, #call{} = M, Ctxt) ->
     [Uri] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
     

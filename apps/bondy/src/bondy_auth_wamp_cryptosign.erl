@@ -4,14 +4,16 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% ## References
-%% * [BrowserAuth](http://www.browserauth.net)
-%% * [Binding Security Tokens to TLS Channels](https://www.ietf.org/proceedings/90/slides/slides-90-uta-0.pdf)
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_auth_wamp_cryptosign).
+-moduledoc """
+Implements the WAMP Cryptosign authentication method as a `bondy_auth` callback
+module, challenging the client to sign a random nonce with an Ed25519 key and
+verifying the signature against the user's authorized public keys.
+
+## References
+- [BrowserAuth](http://www.browserauth.net)
+- [Binding Security Tokens to TLS Channels](https://www.ietf.org/proceedings/90/slides/slides-90-uta-0.pdf)
+""".
 
 -behaviour(bondy_auth).
 
@@ -37,10 +39,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
@@ -61,10 +59,6 @@ init(Ctxt) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec requirements() -> map().
 
 requirements() ->
@@ -75,10 +69,6 @@ requirements() ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
     {true, Extra :: map(), NewState :: state()}
@@ -118,10 +108,6 @@ challenge(Details, Ctxt, State) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),

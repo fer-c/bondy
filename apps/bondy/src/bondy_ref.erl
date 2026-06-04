@@ -3,26 +3,23 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A `bondy_ref' (reference) acts as a fully qualified name for a
-%% process or callback function in a Bondy network. The reference is used by
-%% Bondy in the `bondy_registry' when registering procedures and subscriptions
-%% so that the `bondy_router' can forward and/or relay a message to a process,
-%% or callback function.
-%%
-%% ## Types
-%% ### Internal
-%%
-%% ### Relay
-%%
-%% ### Client
-%%
-%% ### Callback
-%%
-%% @since 0.1.0
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_ref).
+-moduledoc """
+A `bondy_ref` (reference) acts as a fully qualified name for a
+process or callback function in a Bondy network. The reference is used by
+Bondy in the `bondy_registry` when registering procedures and subscriptions
+so that the `bondy_router` can forward and/or relay a message to a process,
+or callback function.
+
+## Types
+### Internal
+
+### Relay
+
+### Client
+
+### Callback
+""".
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -96,10 +93,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Type :: ref_type()) ->
     t().
 
@@ -107,20 +100,12 @@ new(Type) ->
     new(Type, self()).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Type :: ref_type(), Target :: pid() | mf() | name()) -> t().
 
 new(Type, Target) ->
     new(Type, Target, undefined).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(
     Type :: ref_type(),
     Target :: pid() | mf() | name(),
@@ -131,10 +116,7 @@ new(Type, Target, SessionId) ->
     new(Type, Target, SessionId, Nodestring).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a new reference.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Creates a new reference.".
 -spec new(
     Type :: ref_type(),
     Target :: pid() | mf() | name(),
@@ -165,10 +147,6 @@ new(Type, Target0, SessionId, Nodestring) when is_binary(Nodestring) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec pattern(
     Type :: wildcard(ref_type()),
     Target :: wildcard(pid() | mf() | name()),
@@ -206,71 +184,59 @@ pattern(Type, Target0, SessionId, Node) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the reference type.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the reference type.".
 -spec type(Term :: term()) -> ref_type().
 
 type(#bondy_ref{type = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns all the supported reference types.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns all the supported reference types.".
 -spec types() -> [ref_type()].
 
 types() ->
     ?TYPES.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the Bondy peer binary string name of the node in which the
-%% target of this reference is located and/or connected to.
-%%
-%% See {@link target/1} for a description of the different targets and the
-%% relationship with the node.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the Bondy peer binary string name of the node in which the
+target of this reference is located and/or connected to.
+
+See `target/1` for a description of the different targets and the
+relationship with the node.
+""".
 -spec nodestring(t()) -> nodestring().
 
 nodestring(#bondy_ref{nodestring = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the Bondy peer node in which the target of this reference is
-%% located and/or connected to.
-%%
-%% See {@link target/1} for a description of the different targets and the
-%% relationship with the node.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the Bondy peer node in which the target of this reference is
+located and/or connected to.
+
+See `target/1` for a description of the different targets and the
+relationship with the node.
+""".
 -spec node(t()) -> node().
 
 node(#bondy_ref{nodestring = Val}) ->
     binary_to_atom(Val, utf8).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the session identifier of the reference or the atom `undefined'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the session identifier of the reference or the atom `undefined`.".
 -spec session_id(t()) -> optional(bondy_session_id:t()).
 
 session_id(#bondy_ref{session_id = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `false' if the ref is local and its target is a process which
-%% is not alive (See `erlang:is_process_alive/1') or if the ref is remote (
-%% regardless of its target type) and the remote node is disconnected (See
-%% `partisan:is_connected/1). Otherwise returns `true'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `false` if the ref is local and its target is a process which
+is not alive (See `erlang:is_process_alive/1`) or if the ref is remote (
+regardless of its target type) and the remote node is disconnected (See
+`partisan:is_connected/1`). Otherwise returns `true`.
+""".
 is_alive(#bondy_ref{} = Ref) ->
     case is_local(Ref) of
         true ->
@@ -281,82 +247,58 @@ is_alive(#bondy_ref{} = Ref) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_relay(t()) -> boolean().
 
 is_relay(Ref) ->
     relay =:= type(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_bridge_relay(t()) -> boolean().
 
 is_bridge_relay(Ref) ->
     bridge_relay =:= type(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_client(t()) -> boolean().
 
 is_client(Ref) ->
     client =:= type(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_internal(t()) -> boolean().
 
 is_internal(Ref) ->
     internal =:= type(Ref).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns whether this is a reference to a local target i.e. located on
-%% the caller's node.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns whether this is a reference to a local target i.e. located on
+the caller's node.
+""".
 -spec is_local(Ref :: t()) -> boolean().
 
 is_local(#bondy_ref{nodestring = Val}) ->
     Val =:= bondy_config:nodestring().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns whether this is a reference to a target local to the node
-%% represented by `Nodestring'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns whether this is a reference to a target local to the node
+represented by `Nodestring`.
+""".
 -spec is_local(Ref :: t(), nodestring()) -> boolean().
 
 is_local(#bondy_ref{nodestring = Val}, Nodestring) ->
     Val =:= Nodestring.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns whether this is a reference to the calling process.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns whether this is a reference to the calling process.".
 -spec is_self(Ref :: t()) -> boolean().
 
 is_self(#bondy_ref{} = Ref) ->
     (catch pid(Ref)) =:= self().
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if term `Term' is a reference. Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns `true` if term `Term` is a reference. Otherwise returns `false`.".
 -spec is_type(t()) -> boolean().
 
 is_type(#bondy_ref{}) ->
@@ -366,36 +308,30 @@ is_type(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the target of the reference. A target is a process (`pid()') a
-%% gproc registered name (`{name, GprocName}') or a callback (`mf()').
-%%
-%% If the reference type is `client' the target refers to the
-%% session and/or process owning the network connection to the client.
-%%
-%% If the reference type is `internal' the target refers to an internal
-%% process acting as one of the Bondy client roles e.g. an internal subscriber.
-%% Messages destined to a target located on a different node are relayed by the
-%% router through the cluster distribution layer (Partisan).
-%%
-%% If the reference type is `relay' the target refers to the session
-%% and/or process owning the network connection to the edge or
-%% remote cluster (See {@link bondy_bridge_relay_client} and
-%% {@link bondy_bridge_relay_server} respectively). The relay acts as a proxy
-%% for the actual edge or remote clients, internal and callback targets.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the target of the reference. A target is a process (`pid()`) a
+gproc registered name (`{name, GprocName}`) or a callback (`mf()`).
+
+If the reference type is `client` the target refers to the
+session and/or process owning the network connection to the client.
+
+If the reference type is `internal` the target refers to an internal
+process acting as one of the Bondy client roles e.g. an internal subscriber.
+Messages destined to a target located on a different node are relayed by the
+router through the cluster distribution layer (Partisan).
+
+If the reference type is `relay` the target refers to the session
+and/or process owning the network connection to the edge or
+remote cluster (See `bondy_bridge_relay_client` and
+`bondy_bridge_relay_server` respectively). The relay acts as a proxy
+for the actual edge or remote clients, internal and callback targets.
+""".
 -spec target(t()) -> target().
 
 target(#bondy_ref{target = Val}) ->
     Val.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec target_type(t()) -> wildcard(target_type()).
 
 target_type(#bondy_ref{target = {Type, _}}) ->
@@ -405,10 +341,6 @@ target_type(#bondy_ref{target = '_'}) ->
     '_'.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec name(t()) -> optional(binary()).
 
 name(#bondy_ref{target = {name, Val}}) ->
@@ -418,14 +350,13 @@ name(#bondy_ref{}) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns a pid when target is of type `{pid, binary()}', otherwise
-%% returns the atom `undefined'.
-%% If the reference is not local it fails with exception `not_my_node'. This is
-%% because process identifies can only be used on the node where they were
-%% created (this is because we are using Partisan and not Distributed Erlang).
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a pid when target is of type `{pid, binary()}`, otherwise
+returns the atom `undefined`.
+If the reference is not local it fails with exception `not_my_node`. This is
+because process identifies can only be used on the node where they were
+created (this is because we are using Partisan and not Distributed Erlang).
+""".
 -spec pid(t()) -> optional(pid()) | no_return().
 
 pid(#bondy_ref{target = {pid, Bin}} = Ref) ->
@@ -446,10 +377,6 @@ pid(#bondy_ref{}) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec callback(t()) -> optional(mf()).
 
 callback(#bondy_ref{target = {callback, Val}}) ->
@@ -459,10 +386,6 @@ callback(#bondy_ref{}) ->
     undefined.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec to_uri(t()) -> uri().
 
 to_uri(#bondy_ref{} = Ref) ->
@@ -494,10 +417,6 @@ to_uri(#bondy_ref{} = Ref) ->
     >>.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec to_key(t()) -> uri().
 
 to_key(#bondy_ref{} = Ref) ->
@@ -514,10 +433,6 @@ to_key(#bondy_ref{} = Ref) ->
         Type/binary
     >>.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec from_uri(uri()) -> t().
 
 from_uri(Uri) ->

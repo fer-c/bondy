@@ -4,6 +4,13 @@
 %% =============================================================================
 
 -module(bondy_system_gc).
+-moduledoc """
+A `m:gen_server` that periodically triggers garbage collection on the most
+memory-heavy processes in the node.
+
+On a configurable interval it inspects the processes consuming the most memory
+and garbage-collects those that are waiting, plus itself.
+""".
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 
@@ -30,20 +37,13 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Starts the registry server. The server maintains the in-memory tries we
-%% use for matching and it is also a subscriber for plum_db broadcast and AAE
-%% events in order to keep the trie up-to-date with plum_db.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Starts the system garbage collection server.
+""".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec garbage_collect() -> ok.
 
 garbage_collect() ->

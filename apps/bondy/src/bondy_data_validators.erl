@@ -4,6 +4,11 @@
 %% =============================================================================
 
 -module(bondy_data_validators).
+-moduledoc """
+A collection of data validation functions used to validate and coerce values
+such as usernames, group names, role names, passwords, CIDRs, IP addresses,
+endpoints and realm URIs.
+""".
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 
@@ -43,10 +48,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec cidr(Term :: binary() | tuple()) ->
     {ok, bondy_cidr:t()} | boolean().
 
@@ -64,10 +65,7 @@ cidr(Term)  ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Does not allow reserved names
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Does not allow reserved names.".
 -spec strict_username(Term :: binary()) -> {ok, term()} | boolean().
 
 strict_username(<<"all">>) -> false;
@@ -79,10 +77,7 @@ strict_username(<<"to">>) -> false;
 strict_username(Term) -> username(Term).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Does not allow reserved names
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Does not allow reserved names.".
 -spec aliases(List :: [binary()]) -> {ok, [term()]} | boolean().
 
 aliases(L) when is_list(L) ->
@@ -111,10 +106,9 @@ aliases(L) when is_list(L) ->
 aliases(_) ->
     false.
 
-%% -----------------------------------------------------------------------------
-%% @doc Allows reserved names like "all", "anonymous", etc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Allows reserved names like `"all"`, `"anonymous"`, etc.
+""".
 -spec username(Term :: binary()) -> {ok, term()} | boolean().
 
 username(Term) when is_binary(Term) ->
@@ -132,10 +126,9 @@ username(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Allows reserved names like "all", "anonymous", etc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Allows reserved names like `"all"`, `"anonymous"`, etc.
+""".
 -spec usernames(Term :: [binary()] | binary()) -> {ok, [binary()]} | boolean().
 
 usernames(all) ->
@@ -170,10 +163,9 @@ usernames(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Allows reserved names like "all", "anonymous", etc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Allows reserved names like `"all"`, `"anonymous"`, etc.
+""".
 -spec tls_versions(Term :: [atom()]) -> {ok, [ssl:tls_version()]} | boolean().
 
 tls_versions(L) when is_list(L) ->
@@ -208,20 +200,15 @@ tls_versions(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec groupname(Bin :: binary()) -> boolean().
 
 groupname(Bin) ->
     rolename(Bin).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Allows reserved names like "all", "anonymous", etc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Allows reserved names like `"all"`, `"anonymous"`, etc.
+""".
 -spec groupnames(List :: [binary()]) -> {ok, [binary()]} | false.
 
 groupnames(L) when is_list(L) ->
@@ -256,10 +243,6 @@ groupnames(L) when is_list(L) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec strict_groupname(Bin :: binary()) -> boolean().
 
 strict_groupname(<<"all">>) -> false;
@@ -271,10 +254,6 @@ strict_groupname(<<"to">>) -> false;
 strict_groupname(Bin) -> groupname(Bin).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec rolename(Bin :: binary()) -> {ok, binary() | all | anonymous} | boolean().
 
 rolename(all) ->
@@ -298,10 +277,9 @@ rolename(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Allows reserved names like "all", "anonymous", etc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Allows reserved names like `"all"`, `"anonymous"`, etc.
+""".
 -spec rolenames(Term :: [binary()] | binary()) -> {ok, [binary()]} | false.
 
 rolenames(all) ->
@@ -340,10 +318,6 @@ rolenames(L) when is_list(L) ->
 rolenames(_) ->
     false.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec password(Term :: binary() | fun(() -> binary()) | map()) ->
     {ok, bondy_password:future()} | boolean().
 
@@ -365,10 +339,6 @@ password(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authorized_key(Term :: binary()) -> {ok, binary()} | boolean().
 
 authorized_key(Term) when is_binary(Term) ->
@@ -384,10 +354,6 @@ authorized_key(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec existing_atom(Term :: binary() | atom()) -> {ok, term()} | boolean().
 
 existing_atom(Term) when is_binary(Term) ->
@@ -405,10 +371,6 @@ existing_atom(_) ->
     false.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec realm_uri(Term :: binary()) -> boolean().
 
 realm_uri(Term) ->
@@ -419,10 +381,6 @@ realm_uri(Term) ->
             false
     end.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec ip_address(inet:ip_address() | string()) -> boolean().
 
 ip_address({_, _, _, _} = IP) ->
@@ -438,10 +396,6 @@ ip_address(Term) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec inet_host(inet:ip_address() | inet:hostname()) -> boolean().
 
 inet_host(Term) ->
@@ -458,20 +412,13 @@ inet_host(Term) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Is valid only if 0 =< N =< 65535.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Is valid only if `N` is in the inclusive range 0 to 65535.".
 -spec port_number(N :: inet:port_number()) -> boolean().
 
 port_number(N) ->
     (((N) band bnot 16#ffff) =:= 0).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec endpoint(endpoint() | binary() | list()) -> {ok, endpoint()} | boolean().
 
 endpoint({Host, PortNumber}) ->
@@ -507,10 +454,6 @@ endpoint(_) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec peer({inet:ip_address(), inet:port_number()}) -> boolean().
 
 peer({A, B}) ->

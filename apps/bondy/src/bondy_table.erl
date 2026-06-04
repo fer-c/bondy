@@ -4,6 +4,13 @@
 %% =============================================================================
 
 -module(bondy_table).
+-moduledoc """
+A thin wrapper over ETS tables with key/value semantics.
+
+Provides `new/3`, `get/2,3`, `find/2`, `put/3`, `delete/2` and
+`update_counter/3` over named ETS tables, optionally managed by
+`bondy_table_manager`, and normalises ETS errors into `badtable`/`badkey`.
+""".
 
 -define(TAB, ?MODULE).
 
@@ -33,10 +40,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec new(Name :: atom(), Access :: ets:access(), Managed :: boolean()) -> ok.
 
 new(Name, Access, Managed)
@@ -62,10 +65,6 @@ when is_atom(Name), is_atom(Access), is_boolean(Managed) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Key :: term(), Table :: atom()) -> term() | no_return().
 
 get(Key, Table) when is_atom(Table)  ->
@@ -77,10 +76,6 @@ get(Key, Table) when is_atom(Table)  ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec get(Key :: term(), Table :: atom(), Default :: term()) ->
     term() | no_return().
 
@@ -95,10 +90,6 @@ get(Key, Table, Default) when is_atom(Table)  ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec find(Key :: term(), Table :: atom()) -> {ok, term()} | error.
 
 find(Key, Table) when is_atom(Table)  ->
@@ -110,10 +101,6 @@ find(Key, Table) when is_atom(Table)  ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec put(Key :: term(), Value :: term(), Table :: atom()) -> ok.
 
 put(Key, Value, Table) when is_atom(Table)  ->
@@ -126,10 +113,6 @@ put(Key, Value, Table) when is_atom(Table)  ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec delete(Key :: term(), Table :: atom()) -> ok.
 
 delete(Key, Table) when is_atom(Table) ->
@@ -142,10 +125,6 @@ delete(Key, Table) when is_atom(Table) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec update_counter(Key :: term(), Incr :: update_op(), Table :: atom()) ->
     Result :: integer().
 
