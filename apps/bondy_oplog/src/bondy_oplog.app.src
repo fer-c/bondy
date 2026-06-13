@@ -1,0 +1,30 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_oplog, [
+    {description,
+        "Operation-log write/replication framework and op-based CRDT "
+        "catalogue, built on the bondy_mst Merkle-Search-Tree library."},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {bondy_oplog_app, []}},
+    {applications, [
+        %% Erlang
+        kernel,
+        stdlib,
+        %% External
+        app_config,
+        utils,
+        memory,
+        resulto,
+        telemetry,
+        %% Umbrella
+        bondy_mst
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.
