@@ -187,7 +187,7 @@ An implementation of the `app_config` behaviour.
 ]).
 
 
--define(BONDY, bondy).
+-define(BONDY, bondy_router).
 
 -export([get/1]).
 -export([get/2]).
@@ -328,13 +328,13 @@ listener_protocol_opts(Name) ->
 %% @private
 -doc """
 A utility function we use to extract the version name that is injected by the
-`bondy.app.src` configuration file.
+`bondy_router.app.src` configuration file.
 """.
 set_vsn(Args) ->
     case lists:keyfind(vsn, 1, Args) of
         {vsn, Vsn} ->
             ok = bondy_config:set(status, initialising),
-            application:set_env(bondy, vsn, Vsn);
+            application:set_env(?BONDY, vsn, Vsn);
         false ->
             ok
     end.
@@ -355,7 +355,7 @@ setup_partisan_channels() ->
         ?BONDY_AAE_CHANNEL => #{parallelism => 2, compression => false}
     },
     Channels =
-        case application:get_env(bondy, channels, []) of
+        case application:get_env(?BONDY, channels, []) of
             [] ->
                 DefaultChannels;
 

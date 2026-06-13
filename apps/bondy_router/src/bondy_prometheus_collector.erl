@@ -30,7 +30,7 @@ deregister_cleanup(_) -> ok.
     prometheus_registry:registry(), prometheus_collector:callback()) -> ok.
 
 collect_mf(_Registry, CB) ->
-    case lists:keyfind(bondy, 1, application:which_applications()) of
+    case lists:keyfind(bondy_router, 1, application:which_applications()) of
         false -> ok;
         _ -> do_collect(CB)
     end.

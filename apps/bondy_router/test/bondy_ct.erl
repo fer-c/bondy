@@ -169,7 +169,7 @@
     {wamp,[
         {uri_strictness,loose}
     ]},
-    {bondy,[
+    {bondy_router,[
           {wamp,
           [{dealer,
                [{features,
@@ -672,11 +672,11 @@ start_bondy() ->
                 end || {App, Env} <- ?ENV
             ],
 
-            {bondy, BondyEnv} = lists:keyfind(bondy, 1, ?ENV),
-            length(BondyEnv) == length(application:get_all_env(bondy))
+            {bondy_router, BondyEnv} = lists:keyfind(bondy_router, 1, ?ENV),
+            length(BondyEnv) == length(application:get_all_env(bondy_router))
             orelse exit(configuration_error),
 
-            maybe_error(application:ensure_all_started(bondy)),
+            maybe_error(application:ensure_all_started(bondy_router)),
             persistent_term:put({?MODULE, bondy_started}, true),
             ok;
         true ->
@@ -692,7 +692,7 @@ stop_bondy() ->
     ok = application:stop(gproc),
     ok = application:stop(jobs),
     persistent_term:put({?MODULE, bondy_started}, false),
-    application:stop(bondy).
+    application:stop(bondy_router).
 
 
 %% -----------------------------------------------------------------------------

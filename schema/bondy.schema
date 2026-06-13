@@ -65,20 +65,20 @@
 %% terminate their connections when the router is shutting down.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "shutdown.grace_period", "bondy.shutdown_grace_period", [
+{mapping, "shutdown.grace_period", "bondy_router.shutdown_grace_period", [
 {default, "30s"},
 {datatype, {duration, s}}
 ]}.
 
 
 {mapping, "serializers.json.float_format",
-  "bondy.json.float_format", [
+  "bondy_router.json.float_format", [
   {datatype, string},
   {default, "[{decimals, 16}]"}
 ]}.
 
 
-{translation, "bondy.json.float_format",
+{translation, "bondy_router.json.float_format",
   fun(Conf) ->
 
     case cuttlefish:conf_get("serializers.json.float_format", Conf) of
@@ -113,7 +113,7 @@
 
 
 {mapping, "router.forward.ack",
-  "bondy.router.forward.ack",
+  "bondy_router.router.forward.ack",
   [
     {default, off},
     {datatype, flag}
@@ -121,7 +121,7 @@
 }.
 
 {mapping, "router.forward.retransmission",
-  "bondy.router.forward.retransmission",
+  "bondy_router.router.forward.retransmission",
   [
     {default, off},
     {datatype, flag}
@@ -129,7 +129,7 @@
 }.
 
 
-{translation, "bondy.router.forward",
+{translation, "bondy_router.router.forward",
   fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix("router.forward", Conf0),
     Fwd =
@@ -156,7 +156,7 @@
 %% statically configure realms and its users, groups, sources and permissions.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "security.config_file", "bondy.security.config_file", [
+{mapping, "security.config_file", "bondy_router.security.config_file", [
   {datatype, file}
 ]}.
 
@@ -165,7 +165,7 @@
 %% to connect a non existing realm.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "security.automatically_create_realms", "bondy.security.automatically_create_realms", [
+{mapping, "security.automatically_create_realms", "bondy_router.security.automatically_create_realms", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -175,7 +175,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.allow_anonymous_user",
-"bondy.security.allow_anonymous_user", [
+"bondy_router.security.allow_anonymous_user", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -187,7 +187,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.protocol",
-"bondy.security.password.protocol", [
+"bondy_router.security.password.protocol", [
   {default, cra},
   {datatype, {enum, [cra, scram]}}
 ]}.
@@ -208,7 +208,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.protocol.upgrade.enabled",
-  "bondy.security.password.protocol_upgrade_enabled", [
+  "bondy_router.security.password.protocol_upgrade_enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -219,13 +219,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.min_length",
-"bondy.security.password.min_length", [
+"bondy_router.security.password.min_length", [
   {default, 6},
   {datatype, integer}
 ]}.
 
 
-{translation, "bondy.security.password.min_length",
+{translation, "bondy_router.security.password.min_length",
   fun(Conf) ->
     case cuttlefish:conf_get("security.password.min_length", Conf) of
         Value when is_integer(Value), Value >= 3, Value =< 256 ->
@@ -245,12 +245,12 @@
 %% -----------------------------------------------------------------------------
 
 {mapping, "security.password.max_length",
-"bondy.security.password.max_length", [
+"bondy_router.security.password.max_length", [
   {default, 254},
   {datatype, integer}
 ]}.
 
-{translation, "bondy.security.password.max_length",
+{translation, "bondy_router.security.password.max_length",
   fun(Conf) ->
     Min = cuttlefish:conf_get("security.password.min_length", Conf),
     case cuttlefish:conf_get("security.password.max_length", Conf) of
@@ -269,7 +269,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.scram.kdf",
-  "bondy.security.password.scram.kdf", [
+  "bondy_router.security.password.scram.kdf", [
   {default, pbkdf2},
   %% argon2id13 RETIRED UNTIL NEW IMPLEMENTATION IS DONE
   %% {datatype, {enum, [pbkdf2, argon2id13]}}
@@ -282,7 +282,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.cra.kdf",
-  "bondy.security.password.cra.kdf", [
+  "bondy_router.security.password.cra.kdf", [
   {default, pbkdf2},
   {datatype, {enum, [pbkdf2]}},
   hidden
@@ -295,12 +295,12 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.pbkdf2.iterations",
-  "bondy.security.password.pbkdf2.iterations", [
+  "bondy_router.security.password.pbkdf2.iterations", [
   {default, "10000"},
   {datatype, integer}
 ]}.
 
-{translation, "bondy.security.password.pbkdf2.iterations",
+{translation, "bondy_router.security.password.pbkdf2.iterations",
   fun(Conf) ->
     case cuttlefish:conf_get("security.password.pbkdf2.iterations", Conf) of
         Value when is_integer(Value), Value >= 4096, Value =< 65536 ->
@@ -326,14 +326,14 @@
 %% argon2id13 RETIRED UNTIL NEW IMPLEMENTATION IS DONE
 %% {mapping,
 %%   "security.password.argon2id13.iterations",
-%%   "bondy.security.password.argon2id13.iterations", [
+%%   "bondy_router.security.password.argon2id13.iterations", [
 %%   {default, moderate},
 %%   {datatype, [
 %%     {enum, [interactive, moderate, sensitive]}, integer
 %%   ]}
 %% ]}.
 
-%% {translation, "bondy.security.password.argon2id13.iterations",
+%% {translation, "bondy_router.security.password.argon2id13.iterations",
 %%   fun(Conf) ->
 %%     case cuttlefish:conf_get("security.password.argon2id13.iterations", Conf) of
 %%         Value when is_integer(Value), Value >= 1, Value =< 4294967295 ->
@@ -364,14 +364,14 @@
 %% RETIRED TILL NEW IMPLEMENTATION IS DONE
 %% {mapping,
 %%   "security.password.argon2id13.memory",
-%%   "bondy.security.password.argon2id13.memory", [
+%%   "bondy_router.security.password.argon2id13.memory", [
 %%   {default, interactive},
 %%   {datatype, [
 %%     {enum, [interactive, moderate, sensitive]}, bytesize
 %%   ]}
 %% ]}.
 
-%% {translation, "bondy.security.password.argon2id13.memory",
+%% {translation, "bondy_router.security.password.argon2id13.memory",
 %%   fun(Conf) ->
 %%     case cuttlefish:conf_get("security.password.argon2id13.memory", Conf) of
 %%         Value when is_integer(Value), Value >= 8192, Value =< 1073741824 ->
@@ -393,7 +393,7 @@
 %% -----------------------------------------------------------------------------
 %%
 {mapping, "security.ticket.expiry_time",
-  "bondy.security.ticket.expiry_time_secs",[
+  "bondy_router.security.ticket.expiry_time_secs",[
   {default, "30d"},
   {datatype, {duration, s}}
 ]}.
@@ -405,7 +405,7 @@
 %% -----------------------------------------------------------------------------
 %%
 {mapping, "security.ticket.max_expiry_time",
-  "bondy.security.ticket.max_expiry_time_secs",[
+  "bondy_router.security.ticket.max_expiry_time_secs",[
 {default, "30d"},
 {datatype, {duration, s}}
 ]}.
@@ -419,7 +419,7 @@
 %% -----------------------------------------------------------------------------
 %%
 {mapping, "security.ticket.scope.local.persistence",
-  "bondy.security.ticket.local.persistence", [
+  "bondy_router.security.ticket.local.persistence", [
   {default, on},
   {datatype, flag}
 ]}.
@@ -432,7 +432,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 %%
-{mapping, "security.ticket.scope.sso.persistence", "bondy.security.ticket.sso.persistence",[
+{mapping, "security.ticket.scope.sso.persistence", "bondy_router.security.ticket.sso.persistence",[
 {default, on},
 {datatype, flag}
 ]}.
@@ -446,7 +446,7 @@
 %% -----------------------------------------------------------------------------
 %%
 {mapping, "security.ticket.scope.client_local.persistence",
-"bondy.security.ticket.client_local.persistence", [
+"bondy_router.security.ticket.client_local.persistence", [
 {default, on},
 {datatype, flag}
 ]}.
@@ -460,7 +460,7 @@
 %% -----------------------------------------------------------------------------
 %%
 {mapping, "security.ticket.scope.client_sso.persistence",
-"bondy.security.ticket.client_sso.persistence", [
+"bondy_router.security.ticket.client_sso.persistence", [
 {default, on},
 {datatype, flag}
 ]}.
@@ -475,7 +475,7 @@
 %% -----------------------------------------------------------------------------
 %%
 {mapping, "security.ticket.allow_not_found",
-"bondy.security.ticket.allow_not_found", [
+"bondy_router.security.ticket.allow_not_found", [
 {default, on},
 {datatype, flag}
 ]}.
@@ -504,12 +504,12 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.ticket.authmethods",
-"bondy.security.ticket.authmethods", [
+"bondy_router.security.ticket.authmethods", [
   {default, "all"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.security.ticket.authmethods",
+{translation, "bondy_router.security.ticket.authmethods",
   fun(Conf) ->
     case cuttlefish:conf_get("security.ticket.authmethods", Conf) of
         Value when is_list(Value) ->
@@ -553,7 +553,7 @@
 }.
 
 {mapping, "security.oidc.providers.enabled",
-"bondy.security.oidc.providers.enabled", [
+"bondy_router.security.oidc.providers.enabled", [
     {default, off},
     {datatype, flag}
 ]}.
@@ -561,34 +561,34 @@
 %% $provider_id will be used together with login_path and redirect_path to build
 %% the login and redirect callbacks.
 {mapping, "security.oidc.providers.$provider_id.issuer",
-"bondy.security.oidc.providers", [
+"bondy_router.security.oidc.providers", [
   {datatype, string}
 ]}.
 
 {mapping, "security.oidc.providers.$provider_id.client_id",
-"bondy.security.oidc.providers", [
+"bondy_router.security.oidc.providers", [
   {datatype, string}
 ]}.
 
 {mapping, "security.oidc.providers.$provider_id.client_secret",
-"bondy.security.oidc.providers", [
+"bondy_router.security.oidc.providers", [
   {datatype, string}
 ]}.
 
 %% Example:  /oidc/aws_cognito/login
 {mapping, "security.oidc.providers.$provider_id.login_path",
-"bondy.security.oidc.providers", [
+"bondy_router.security.oidc.providers", [
     {datatype, string}
 ]}.
 
 %% Example:  security.oidc.providers.aws.client_id = /oidc/aws_cognito/callback
 {mapping, "security.oidc.providers.$provider_id.redirect_path",
-"bondy.security.oidc.providers", [
+"bondy_router.security.oidc.providers", [
     {datatype, string}
 ]}.
 
 
-{translation, "bondy.security.oidc.providers", fun(Conf0) ->
+{translation, "bondy_router.security.oidc.providers", fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix("security.oidc.providers", Conf0),
 
     {Enabled, Providers0} = lists:foldl(
@@ -634,7 +634,7 @@ end}.
 %% (when available) the OS trust store.
 %% If not set, Bondy will try to use the api_gateway.https.cacertfile value
 %% as a fallback.
-{mapping, "cert_manager.cacertfile", "bondy.cert_manager.cacertfile", [
+{mapping, "cert_manager.cacertfile", "bondy_router.cert_manager.cacertfile", [
   {datatype, file},
   {commented, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
@@ -648,7 +648,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.enabled",
-"bondy.load_regulation_enabled", [
+"bondy_router.load_regulation_enabled", [
   {default, on},
   {datatype, {flag, on, off}},
   hidden
@@ -660,7 +660,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.type",
-"bondy.router_pool.type", [
+"bondy_router.router_pool.type", [
   {default, transient},
   {datatype, {enum, [permanent, transient]}},
   hidden
@@ -674,7 +674,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size",
-"bondy.router_pool.size", [
+"bondy_router.router_pool.size", [
   {default, 16},
   {validators, ["pos_integer"]},
   {datatype, integer},
@@ -689,7 +689,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity",
-"bondy.router_pool.capacity", [
+"bondy_router.router_pool.capacity", [
   {default, 2000000},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -701,14 +701,14 @@ end}.
 %% number of active erlang processes handling session events (default = 32).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "load_regulation.session_manager.pool.size", "bondy.session_manager_pool.size", [
+{mapping, "load_regulation.session_manager.pool.size", "bondy_router.session_manager_pool.size", [
   {default, 32},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "load_regulation.job_manager.pool.size",
-"bondy.job_manager_pool.size", [
+"bondy_router.job_manager_pool.size", [
   {default, 16},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -719,7 +719,7 @@ end}.
 %% are evicted. This is the sum of all queues (1 per worker)
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.job_manager.queue.size",
-"bondy.job_manager_queue.max_size", [
+"bondy_router.job_manager_queue.max_size", [
   {default, 160000},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -729,7 +729,7 @@ end}.
 %% @doc The duration of a job in the FIFO queue after which it is evicted.
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.job_manager.queue.ttl",
-"bondy.job_manager_queue.ttl", [
+"bondy_router.job_manager_queue.ttl", [
   {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
@@ -749,7 +749,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "registry.partitions",
-"bondy.registry.partitions", [
+"bondy_router.registry.partitions", [
   {default, 32},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -761,7 +761,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "registry.partition_spawn_opts.message_queue_data",
-  "bondy.registry.partition_spawn_opts.message_queue_data", [
+  "bondy_router.registry.partition_spawn_opts.message_queue_data", [
   {default, off_heap},
   {datatype, {enum, [off_heap, on_heap]}},
   hidden
@@ -777,7 +777,7 @@ end}.
 
 
 {mapping, "admin_api.http.enabled",
-"bondy.admin_api_http.enabled", [
+"bondy_router.admin_api_http.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -785,7 +785,7 @@ end}.
 %% @doc http.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.http.port",
-"bondy.admin_api_http.transport_opts.socket_opts.port", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.port", [
   {default, 18081},
   {validators, ["port_number"]},
   {datatype, integer},
@@ -796,19 +796,19 @@ end}.
 %% exposing the API Gateway managed APIs.. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "admin_api.http.ip",
-"bondy.admin_api_http.ip", [
+"bondy_router.admin_api_http.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
 
 %% @doc The IP version to use. Either 4 or 6.
 {mapping, "admin_api.http.ip_version",
-"bondy.admin_api_http.transport_opts.socket_opts.ip_version", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.admin_api_http.transport_opts.socket_opts.ip_version",
+{translation, "bondy_router.admin_api_http.transport_opts.socket_opts.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("admin_api.http.ip_version", Conf),
       try
@@ -830,7 +830,7 @@ end}.
 
 %% The Cowboy acceptors_pool_size for the Admin API http listener
 {mapping, "admin_api.http.acceptors_pool_size",
-"bondy.admin_api_http.transport_opts.num_acceptors", [
+"bondy_router.admin_api_http.transport_opts.num_acceptors", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 100}
@@ -838,7 +838,7 @@ end}.
 
 %% The Cowboy max number of connections for the Admin API http listener
 {mapping, "admin_api.http.max_connections",
-"bondy.admin_api_http.transport_opts.max_connections", [
+"bondy_router.admin_api_http.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 10000}
@@ -848,7 +848,7 @@ end}.
 %% The backlog value defines the maximum length that the queue of pending
 %% connections can grow to. Defaults to 1024.
 {mapping, "admin_api.http.backlog",
-"bondy.admin_api_http.transport_opts.socket_opts.backlog", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.backlog", [
 {datatype, integer},
 {validators, ["pos_integer"]},
 {default, 1024}
@@ -858,7 +858,7 @@ end}.
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
 {mapping, "admin_api.http.keepalive",
-"bondy.admin_api_http.transport_opts.socket_opts.keepalive", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -866,20 +866,20 @@ end}.
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "admin_api.http.nodelay",
-"bondy.admin_api_http.transport_opts.socket_opts.nodelay", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 
 %% {mapping, "admin_api.http.reuseaddr",
-%% "bondy.admin_api_http.transport_opts.socket_opts.reuseaddr", [
+%% "bondy_router.admin_api_http.transport_opts.socket_opts.reuseaddr", [
 %%   {datatype, {flag, on, off}},
 %%   {default, on}
 %% ]}.
 
 {mapping, "admin_api.http.reuseport",
-"bondy.admin_api_http.transport_opts.socket_opts.reuseport", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.reuseport", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -887,13 +887,13 @@ end}.
 
 %% The minimum size of the send buffer to use for the socket.
 {mapping, "admin_api.http.sndbuf",
-"bondy.admin_api_http.transport_opts.socket_opts.sndbuf", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
 {mapping, "admin_api.http.recbuf",
-"bondy.admin_api_http.transport_opts.socket_opts.recbuf", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -905,7 +905,7 @@ end}.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
 {mapping, "admin_api.http.buffer",
-"bondy.admin_api_http.transport_opts.socket_opts.buffer", [
+"bondy_router.admin_api_http.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
@@ -917,12 +917,12 @@ end}.
 %% This option is ignored when buffer is set.
 %% Set min or max to 0 to disable.
 {mapping, "admin_api.http.buffer.min",
-"bondy.admin_api_http.protocol_opts.dynamic_buffer.min", [
+"bondy_router.admin_api_http.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
 ]}.
 
 {mapping, "admin_api.http.buffer.max",
-"bondy.admin_api_http.protocol_opts.dynamic_buffer.max", [
+"bondy_router.admin_api_http.protocol_opts.dynamic_buffer.max", [
   {datatype, bytesize}
 ]}.
 
@@ -932,7 +932,7 @@ end}.
 %% number of times Cowboy need to request more packets from the port driver at t
 %% he expense of potentially higher memory being used.
 {mapping, "admin_api.http.active_n",
-"bondy.admin_api_http.protocol_opts.active_n", [
+"bondy_router.admin_api_http.protocol_opts.active_n", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -940,21 +940,21 @@ end}.
 
 %% Maximum allowed time for the listening process handshake call to finish.
 {mapping, "admin_api.http.handshake_timeout",
-"bondy.admin_api_http.transport_opts.handshake_timeout", [
+"bondy_router.admin_api_http.transport_opts.handshake_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no data received before Cowboy closes the connection.
 {mapping, "admin_api.http.idle_timeout",
-"bondy.admin_api_http.protocol_opts.idle_timeout", [
+"bondy_router.admin_api_http.protocol_opts.idle_timeout", [
   {default, "15s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with nothing received at all before Cowboy closes the connection.
 {mapping, "admin_api.http.inactivity_timeout",
-"bondy.admin_api_http.protocol_opts.inactivity_timeout", [
+"bondy_router.admin_api_http.protocol_opts.inactivity_timeout", [
   {default, "5m"},
   {datatype, {duration, ms}}
 ]}.
@@ -963,28 +963,28 @@ end}.
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
 {mapping, "admin_api.http.linger.timeout",
-"bondy.admin_api_http.protocol_opts.linger_timeout", [
+"bondy_router.admin_api_http.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no requests before Cowboy closes the connection.
 {mapping, "admin_api.http.request_timeout",
-"bondy.admin_api_http.protocol_opts.request_timeout", [
+"bondy_router.admin_api_http.protocol_opts.request_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Whether the protocol_opts.idle_timeout gets reset when sending data to the socket.
 {mapping, "admin_api.http.reset_idle_timeout_on_send",
-"bondy.admin_api_http.protocol_opts.reset_idle_timeout_on_send", [
+"bondy_router.admin_api_http.protocol_opts.reset_idle_timeout_on_send", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% Maximum number of requests allowed per connection.
 {mapping, "admin_api.http.max_keepalive",
-"bondy.admin_api_http.protocol_opts.max_keepalive", [
+"bondy_router.admin_api_http.protocol_opts.max_keepalive", [
   {default, 1000},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -992,62 +992,62 @@ end}.
 
 
 {mapping, "admin_api.http.initial_stream_flow_size",
-"bondy.admin_api_http.protocol_opts.initial_stream_flow_size", [
+"bondy_router.admin_api_http.protocol_opts.initial_stream_flow_size", [
   {default, "65535"}, % bytes
   {datatype, bytesize}
 ]}.
 
 {mapping, "admin_api.http.max_empty_lines",
-"bondy.admin_api_http.protocol_opts.max_empty_lines", [
+"bondy_router.admin_api_http.protocol_opts.max_empty_lines", [
   {default, 5},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.http.max_header_name_length",
-"bondy.admin_api_http.protocol_opts.max_header_name_length", [
+"bondy_router.admin_api_http.protocol_opts.max_header_name_length", [
   {default, 64},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.http.max_header_value_length",
-"bondy.admin_api_http.protocol_opts.max_header_value_length", [
+"bondy_router.admin_api_http.protocol_opts.max_header_value_length", [
   {default, 4096},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.http.max_headers",
-"bondy.admin_api_http.protocol_opts.max_headers", [
+"bondy_router.admin_api_http.protocol_opts.max_headers", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.http.max_method_length",
-"bondy.admin_api_http.protocol_opts.max_method_length", [
+"bondy_router.admin_api_http.protocol_opts.max_method_length", [
   {default, 32},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.http.max_request_line_length",
-"bondy.admin_api_http.protocol_opts.max_request_line_length", [
+"bondy_router.admin_api_http.protocol_opts.max_request_line_length", [
   {default, 8000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.http.max_skip_body_length",
-"bondy.admin_api_http.protocol_opts.max_skip_body_length", [
+"bondy_router.admin_api_http.protocol_opts.max_skip_body_length", [
   {default, 1000000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.http.sendfile",
-"bondy.admin_api_http.protocol_opts.sendfile", [
+"bondy_router.admin_api_http.protocol_opts.sendfile", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -1057,7 +1057,7 @@ end}.
 %% This is used to capture the source IP address which will be used for matching
 %% against RBAC Source assignments.
 {mapping, "admin_api.http.proxy_protocol",
-"bondy.admin_api_http.proxy_protocol.enabled", [
+"bondy_router.admin_api_http.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -1068,7 +1068,7 @@ end}.
 %% headers will be dropped. If 'relaxed' the connection is always accepted and
 %% Bondy will log when there is no header or if it is invalid.
 {mapping, "admin_api.http.proxy_protocol.mode",
-"bondy.admin_api_http.proxy_protocol.mode", [
+"bondy_router.admin_api_http.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -1080,7 +1080,7 @@ end}.
 
 %% @doc Whether CORS headers are enabled for the Admin API HTTP listener.
 {mapping, "admin_api.http.cors.enabled",
-"bondy.admin_api_http.cors.enabled", [
+"bondy_router.admin_api_http.cors.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -1090,34 +1090,34 @@ end}.
 %% comma-separated list of origins e.g.
 %% "https://app.example.com, https://admin.example.com".
 {mapping, "admin_api.http.cors.allowed_origins",
-"bondy.admin_api_http.cors.allowed_origins", [
+"bondy_router.admin_api_http.cors.allowed_origins", [
   {default, "*"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP methods for CORS requests.
 {mapping, "admin_api.http.cors.allowed_methods",
-"bondy.admin_api_http.cors.allowed_methods", [
+"bondy_router.admin_api_http.cors.allowed_methods", [
   {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP headers for CORS requests.
 {mapping, "admin_api.http.cors.allowed_headers",
-"bondy.admin_api_http.cors.allowed_headers", [
+"bondy_router.admin_api_http.cors.allowed_headers", [
   {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
   {datatype, string}
 ]}.
 
 %% @doc The max age in seconds for CORS preflight cache.
 {mapping, "admin_api.http.cors.max_age",
-"bondy.admin_api_http.cors.max_age", [
+"bondy_router.admin_api_http.cors.max_age", [
   {default, 86400},
   {datatype, integer},
   {validators, ["non_neg_integer"]}
 ]}.
 
-{translation, "bondy.admin_api_http.cors",
+{translation, "bondy_router.admin_api_http.cors",
   fun(Conf) ->
     Prefix = "admin_api.http.cors",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -1150,7 +1150,7 @@ end}.
 %% @doc Whether static security headers are enabled for the Admin API HTTP
 %% listener.
 {mapping, "admin_api.http.security_headers.enabled",
-"bondy.admin_api_http.security_headers.enabled", [
+"bondy_router.admin_api_http.security_headers.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -1158,14 +1158,14 @@ end}.
 %% @doc The value for the Strict-Transport-Security header.
 %% Only meaningful for HTTPS listeners.
 {mapping, "admin_api.http.security_headers.hsts",
-"bondy.admin_api_http.security_headers.hsts", [
+"bondy_router.admin_api_http.security_headers.hsts", [
   {datatype, string}
 ]}.
 
 %% @doc The value for the X-Frame-Options header.
 %% Set to an empty string to disable.
 {mapping, "admin_api.http.security_headers.frame_options",
-"bondy.admin_api_http.security_headers.frame_options", [
+"bondy_router.admin_api_http.security_headers.frame_options", [
   {default, "SAMEORIGIN"},
   {datatype, string}
 ]}.
@@ -1173,26 +1173,26 @@ end}.
 %% @doc The value for the X-Content-Type-Options header.
 %% Set to an empty string to disable.
 {mapping, "admin_api.http.security_headers.content_type_options",
-"bondy.admin_api_http.security_headers.content_type_options", [
+"bondy_router.admin_api_http.security_headers.content_type_options", [
   {default, "nosniff"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
 {mapping, "admin_api.http.security_headers.content_security_policy",
-"bondy.admin_api_http.security_headers.content_security_policy", [
+"bondy_router.admin_api_http.security_headers.content_security_policy", [
   {datatype, string}
 ]}.
 
 %% @doc The value for the Server response header.
 %% Set to "bondy" to emit "bondy/<version>", or an empty string to suppress.
 {mapping, "admin_api.http.server_header",
-"bondy.admin_api_http.server_header", [
+"bondy_router.admin_api_http.server_header", [
   {default, "bondy"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.admin_api_http.security_headers",
+{translation, "bondy_router.admin_api_http.security_headers",
   fun(Conf) ->
     Prefix = "admin_api.http.security_headers",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -1214,7 +1214,7 @@ end}.
 
 
 {mapping, "admin_api.https.enabled",
-"bondy.admin_api_https.enabled", [
+"bondy_router.admin_api_https.enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -1222,7 +1222,7 @@ end}.
 %% @doc https.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.https.port",
-"bondy.admin_api_https.transport_opts.socket_opts.port", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.port", [
   {default, 18084},
   {validators, ["port_number"]},
   {datatype, integer},
@@ -1233,19 +1233,19 @@ end}.
 %% exposing the API Gateway managed APIs.. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "admin_api.https.ip",
-"bondy.admin_api_https.ip", [
+"bondy_router.admin_api_https.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
 
 %% @doc The IP version to use. Either 4 or 6.
 {mapping, "admin_api.https.ip_version",
-"bondy.admin_api_https.transport_opts.socket_opts.ip_version", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.admin_api_https.transport_opts.socket_opts.ip_version",
+{translation, "bondy_router.admin_api_https.transport_opts.socket_opts.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("admin_api.https.ip_version", Conf),
       try
@@ -1267,7 +1267,7 @@ end}.
 
 %% The Cowboy acceptors_pool_size for the Admin API https listener
 {mapping, "admin_api.https.acceptors_pool_size",
-"bondy.admin_api_https.transport_opts.num_acceptors", [
+"bondy_router.admin_api_https.transport_opts.num_acceptors", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 100}
@@ -1275,7 +1275,7 @@ end}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "admin_api.https.max_connections",
-"bondy.admin_api_https.transport_opts.max_connections", [
+"bondy_router.admin_api_https.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 10000}
@@ -1284,7 +1284,7 @@ end}.
 %% The backlog value defines the maximum length that the queue of pending
 %% connections can grow to. Defaults to 1024.
 {mapping, "admin_api.https.backlog",
-"bondy.admin_api_https.transport_opts.socket_opts.backlog", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.backlog", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 1024}
@@ -1295,7 +1295,7 @@ end}.
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
 {mapping, "admin_api.https.keepalive",
-"bondy.admin_api_https.transport_opts.socket_opts.keepalive", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -1304,20 +1304,20 @@ end}.
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "admin_api.https.nodelay",
-"bondy.admin_api_https.transport_opts.socket_opts.nodelay", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 
 %% {mapping, "admin_api.https.reuseaddr",
-%% "bondy.admin_api_https.transport_opts.socket_opts.reuseaddr", [
+%% "bondy_router.admin_api_https.transport_opts.socket_opts.reuseaddr", [
 %%   {datatype, {flag, on, off}},
 %%   {default, on}
 %% ]}.
 
 {mapping, "admin_api.https.reuseport",
-"bondy.admin_api_https.transport_opts.socket_opts.reuseport", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.reuseport", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -1325,13 +1325,13 @@ end}.
 
 %% The minimum size of the send buffer to use for the socket.
 {mapping, "admin_api.https.sndbuf",
-"bondy.admin_api_https.transport_opts.socket_opts.sndbuf", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
 {mapping, "admin_api.https.recbuf",
-"bondy.admin_api_https.transport_opts.socket_opts.recbuf", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -1343,7 +1343,7 @@ end}.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
 {mapping, "admin_api.https.buffer",
-"bondy.admin_api_https.transport_opts.socket_opts.buffer", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
@@ -1355,12 +1355,12 @@ end}.
 %% This option is ignored when buffer is set.
 %% Set min or max to 0 to disable.
 {mapping, "admin_api.https.buffer.min",
-"bondy.admin_api_https.protocol_opts.dynamic_buffer.min", [
+"bondy_router.admin_api_https.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
 ]}.
 
 {mapping, "admin_api.https.buffer.max",
-"bondy.admin_api_https.protocol_opts.dynamic_buffer.max", [
+"bondy_router.admin_api_https.protocol_opts.dynamic_buffer.max", [
   {datatype, bytesize}
 ]}.
 
@@ -1370,7 +1370,7 @@ end}.
 %% number of times Cowboy need to request more packets from the port driver at t
 %% he expense of potentially higher memory being used.
 {mapping, "admin_api.https.active_n",
-"bondy.admin_api_https.protocol_opts.active_n", [
+"bondy_router.admin_api_https.protocol_opts.active_n", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -1378,21 +1378,21 @@ end}.
 
 %% Maximum allowed time for the listening process handshake call to finish.
 {mapping, "admin_api.https.handshake_timeout",
-"bondy.admin_api_https.transport_opts.handshake_timeout", [
+"bondy_router.admin_api_https.transport_opts.handshake_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no data received before Cowboy closes the connection.
 {mapping, "admin_api.https.idle_timeout",
-"bondy.admin_api_https.protocol_opts.idle_timeout", [
+"bondy_router.admin_api_https.protocol_opts.idle_timeout", [
   {default, "15s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with nothing received at all before Cowboy closes the connection.
 {mapping, "admin_api.https.inactivity_timeout",
-"bondy.admin_api_https.protocol_opts.inactivity_timeout", [
+"bondy_router.admin_api_https.protocol_opts.inactivity_timeout", [
   {default, "5m"},
   {datatype, {duration, ms}}
 ]}.
@@ -1401,28 +1401,28 @@ end}.
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
 {mapping, "admin_api.https.linger.timeout",
-"bondy.admin_api_https.protocol_opts.linger_timeout", [
+"bondy_router.admin_api_https.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no requests before Cowboy closes the connection.
 {mapping, "admin_api.https.request_timeout",
-"bondy.admin_api_https.protocol_opts.request_timeout", [
+"bondy_router.admin_api_https.protocol_opts.request_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Whether the idle_timeout gets reset when sending data to the socket.
 {mapping, "admin_api.https.reset_idle_timeout_on_send",
-"bondy.admin_api_https.protocol_opts.reset_idle_timeout_on_send", [
+"bondy_router.admin_api_https.protocol_opts.reset_idle_timeout_on_send", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% Maximum number of requests allowed per connection.
 {mapping, "admin_api.https.max_keepalive",
-"bondy.admin_api_https.protocol_opts.max_keepalive", [
+"bondy_router.admin_api_https.protocol_opts.max_keepalive", [
   {default, 1000},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -1430,62 +1430,62 @@ end}.
 
 
 {mapping, "admin_api.https.initial_stream_flow_size",
-"bondy.admin_api_https.protocol_opts.initial_stream_flow_size", [
+"bondy_router.admin_api_https.protocol_opts.initial_stream_flow_size", [
   {default, "65535"}, % bytes
   {datatype, bytesize}
 ]}.
 
 {mapping, "admin_api.https.max_empty_lines",
-"bondy.admin_api_https.protocol_opts.max_empty_lines", [
+"bondy_router.admin_api_https.protocol_opts.max_empty_lines", [
   {default, 5},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.https.max_header_name_length",
-"bondy.admin_api_https.protocol_opts.max_header_name_length", [
+"bondy_router.admin_api_https.protocol_opts.max_header_name_length", [
   {default, 64},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.https.max_header_value_length",
-"bondy.admin_api_https.protocol_opts.max_header_value_length", [
+"bondy_router.admin_api_https.protocol_opts.max_header_value_length", [
   {default, 4096},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.https.max_headers",
-"bondy.admin_api_https.protocol_opts.max_headers", [
+"bondy_router.admin_api_https.protocol_opts.max_headers", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.https.max_method_length",
-"bondy.admin_api_https.protocol_opts.max_method_length", [
+"bondy_router.admin_api_https.protocol_opts.max_method_length", [
   {default, 32},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.https.max_request_line_length",
-"bondy.admin_api_https.protocol_opts.max_request_line_length", [
+"bondy_router.admin_api_https.protocol_opts.max_request_line_length", [
   {default, 8000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.https.max_skip_body_length",
-"bondy.admin_api_https.protocol_opts.max_skip_body_length", [
+"bondy_router.admin_api_https.protocol_opts.max_skip_body_length", [
   {default, 1000000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "admin_api.https.sendfile",
-"bondy.admin_api_https.protocol_opts.sendfile", [
+"bondy_router.admin_api_https.protocol_opts.sendfile", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -1494,7 +1494,7 @@ end}.
 %% This is used to capture the source IP address which will be used for matching
 %% against RBAC Source assignments.
 {mapping, "admin_api.https.proxy_protocol",
-"bondy.admin_api_https.proxy_protocol.enabled", [
+"bondy_router.admin_api_https.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -1505,7 +1505,7 @@ end}.
 %% headers will be dropped. If 'relaxed' the connection is always accepted and
 %% Bondy will log when there is no header or if it is invalid.
 {mapping, "admin_api.https.proxy_protocol.mode",
-"bondy.admin_api_https.proxy_protocol.mode", [
+"bondy_router.admin_api_https.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -1517,7 +1517,7 @@ end}.
 
 %% @doc Whether CORS headers are enabled for the Admin API HTTPS listener.
 {mapping, "admin_api.https.cors.enabled",
-"bondy.admin_api_https.cors.enabled", [
+"bondy_router.admin_api_https.cors.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -1526,34 +1526,34 @@ end}.
 %% Can be "*" (wildcard), "auto" (derive from request host), or a
 %% comma-separated list of origins.
 {mapping, "admin_api.https.cors.allowed_origins",
-"bondy.admin_api_https.cors.allowed_origins", [
+"bondy_router.admin_api_https.cors.allowed_origins", [
   {default, "*"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP methods for CORS requests.
 {mapping, "admin_api.https.cors.allowed_methods",
-"bondy.admin_api_https.cors.allowed_methods", [
+"bondy_router.admin_api_https.cors.allowed_methods", [
   {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP headers for CORS requests.
 {mapping, "admin_api.https.cors.allowed_headers",
-"bondy.admin_api_https.cors.allowed_headers", [
+"bondy_router.admin_api_https.cors.allowed_headers", [
   {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
   {datatype, string}
 ]}.
 
 %% @doc The max age in seconds for CORS preflight cache.
 {mapping, "admin_api.https.cors.max_age",
-"bondy.admin_api_https.cors.max_age", [
+"bondy_router.admin_api_https.cors.max_age", [
   {default, 86400},
   {datatype, integer},
   {validators, ["non_neg_integer"]}
 ]}.
 
-{translation, "bondy.admin_api_https.cors",
+{translation, "bondy_router.admin_api_https.cors",
   fun(Conf) ->
     Prefix = "admin_api.https.cors",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -1585,7 +1585,7 @@ end}.
 %% @doc Whether static security headers are enabled for the Admin API HTTPS
 %% listener.
 {mapping, "admin_api.https.security_headers.enabled",
-"bondy.admin_api_https.security_headers.enabled", [
+"bondy_router.admin_api_https.security_headers.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -1593,39 +1593,39 @@ end}.
 %% @doc The value for the Strict-Transport-Security header.
 %% Set to an empty string to disable.
 {mapping, "admin_api.https.security_headers.hsts",
-"bondy.admin_api_https.security_headers.hsts", [
+"bondy_router.admin_api_https.security_headers.hsts", [
   {default, "max-age=31536000; includeSubDomains"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the X-Frame-Options header.
 {mapping, "admin_api.https.security_headers.frame_options",
-"bondy.admin_api_https.security_headers.frame_options", [
+"bondy_router.admin_api_https.security_headers.frame_options", [
   {default, "SAMEORIGIN"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the X-Content-Type-Options header.
 {mapping, "admin_api.https.security_headers.content_type_options",
-"bondy.admin_api_https.security_headers.content_type_options", [
+"bondy_router.admin_api_https.security_headers.content_type_options", [
   {default, "nosniff"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
 {mapping, "admin_api.https.security_headers.content_security_policy",
-"bondy.admin_api_https.security_headers.content_security_policy", [
+"bondy_router.admin_api_https.security_headers.content_security_policy", [
   {datatype, string}
 ]}.
 
 %% @doc The value for the Server response header.
 {mapping, "admin_api.https.server_header",
-"bondy.admin_api_https.server_header", [
+"bondy_router.admin_api_https.server_header", [
   {default, "bondy"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.admin_api_https.security_headers",
+{translation, "bondy_router.admin_api_https.security_headers",
   fun(Conf) ->
     Prefix = "admin_api.https.security_headers",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -1644,7 +1644,7 @@ end}.
 %% @doc Default cert location for https can be overridden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.certfile",
-"bondy.admin_api_https.transport_opts.socket_opts.certfile", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.certfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
@@ -1652,7 +1652,7 @@ end}.
 %% @doc Default key location for https can be overridden with the
 %%admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.keyfile",
-"bondy.admin_api_https.transport_opts.socket_opts.keyfile", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.keyfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
@@ -1660,7 +1660,7 @@ end}.
 %% @doc Default signing authority location for https can be overridden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.cacertfile",
-"bondy.admin_api_https.transport_opts.socket_opts.cacertfile", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.cacertfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
@@ -1668,7 +1668,7 @@ end}.
 %% @doc SSL verification mode for Admin API HTTPS connections. Set to
 %% verify_peer to require client certificates (mTLS).
 {mapping, "admin_api.https.verify",
-"bondy.admin_api_https.transport_opts.socket_opts.verify", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.verify", [
   {datatype, {enum, [verify_peer, verify_none]}},
   {default, verify_none}
 ]}.
@@ -1676,7 +1676,7 @@ end}.
 %% @doc Whether to reject connections where the client does not provide a
 %% certificate when verify is set to verify_peer.
 {mapping, "admin_api.https.fail_if_no_peer_cert",
-"bondy.admin_api_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -1684,13 +1684,13 @@ end}.
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
 {mapping, "admin_api.https.versions",
-"bondy.admin_api_https.transport_opts.socket_opts.versions", [
+"bondy_router.admin_api_https.transport_opts.socket_opts.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
 
 
-{translation, "bondy.admin_api_https.transport_opts.socket_opts.versions",
+{translation, "bondy_router.admin_api_https.transport_opts.socket_opts.versions",
   fun(Conf) ->
     case cuttlefish:conf_get("admin_api.https.versions", Conf) of
         Value when is_list(Value) ->
@@ -1730,7 +1730,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "api_gateway.config_file",
-"bondy.api_gateway.config_file", [
+"bondy_router.api_gateway.config_file", [
   {datatype, file}
 ]}.
 
@@ -1741,7 +1741,7 @@ end}.
 
 
 {mapping, "api_gateway.http.enabled",
-"bondy.api_gateway_http.enabled", [
+"bondy_router.api_gateway_http.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -1749,7 +1749,7 @@ end}.
 %% @doc api_gateway.http.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.http.port",
-"bondy.api_gateway_http.transport_opts.socket_opts.port", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.port", [
   {default, 18080},
   {validators, ["port_number"]},
   {datatype, integer},
@@ -1760,19 +1760,19 @@ end}.
 %% exposing the API Gateway managed APIs.. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "api_gateway.http.ip",
-"bondy.api_gateway_http.ip", [
+"bondy_router.api_gateway_http.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
 
 %% @doc The IP version to use. Either 4 or 6.
 {mapping, "api_gateway.http.ip_version",
-"bondy.api_gateway_http.transport_opts.socket_opts.ip_version", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.api_gateway_http.transport_opts.socket_opts.ip_version",
+{translation, "bondy_router.api_gateway_http.transport_opts.socket_opts.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("api_gateway.http.ip_version", Conf),
       try
@@ -1794,7 +1794,7 @@ end}.
 
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
 {mapping, "api_gateway.http.acceptors_pool_size",
-"bondy.api_gateway_http.transport_opts.num_acceptors", [
+"bondy_router.api_gateway_http.transport_opts.num_acceptors", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 200}
@@ -1803,7 +1803,7 @@ end}.
 
 %% The Cowboy max number of connections for the Admin API http listener
 {mapping, "api_gateway.http.max_connections",
-"bondy.api_gateway_http.transport_opts.max_connections", [
+"bondy_router.api_gateway_http.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 500000}
@@ -1812,7 +1812,7 @@ end}.
 %% The backlog value defines the maximum length that the queue of pending
 %% connections can grow to. Defaults to 1024.
 {mapping, "api_gateway.http.backlog",
-"bondy.api_gateway_http.transport_opts.socket_opts.backlog", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.backlog", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 1024}
@@ -1826,7 +1826,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "api_gateway.http.keepalive",
-"bondy.api_gateway_http.transport_opts.socket_opts.keepalive", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -1835,32 +1835,32 @@ end}.
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "api_gateway.http.nodelay",
-"bondy.api_gateway_http.transport_opts.socket_opts.nodelay", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% {mapping, "api_gateway.http.reuseaddr",
-%% "bondy.api_gateway_http.transport_opts.socket_opts.reuseaddr", [
+%% "bondy_router.api_gateway_http.transport_opts.socket_opts.reuseaddr", [
 %%   {datatype, {flag, on, off}},
 %%   {default, on}
 %% ]}.
 
 {mapping, "api_gateway.http.reuseport",
-"bondy.api_gateway_http.transport_opts.socket_opts.reuseport", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.reuseport", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
 
 %% The minimum size of the send buffer to use for the socket.
 {mapping, "api_gateway.http.sndbuf",
-"bondy.api_gateway_http.transport_opts.socket_opts.sndbuf", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
 {mapping, "api_gateway.http.recbuf",
-"bondy.api_gateway_http.transport_opts.socket_opts.recbuf", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -1872,7 +1872,7 @@ end}.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
 {mapping, "api_gateway.http.buffer",
-"bondy.api_gateway_http.transport_opts.socket_opts.buffer", [
+"bondy_router.api_gateway_http.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
@@ -1884,12 +1884,12 @@ end}.
 %% It is enabled by default.
 %% Set min or max to 0 to disable.
 {mapping, "api_gateway.http.buffer.min",
-"bondy.api_gateway_http.protocol_opts.dynamic_buffer.min", [
+"bondy_router.api_gateway_http.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
 ]}.
 
 {mapping, "api_gateway.http.buffer.max",
-"bondy.api_gateway_http.protocol_opts.dynamic_buffer.max", [
+"bondy_router.api_gateway_http.protocol_opts.dynamic_buffer.max", [
   {datatype, bytesize}
 ]}.
 
@@ -1898,7 +1898,7 @@ end}.
 %% number of times Cowboy need to request more packets from the port driver at t
 %% he expense of potentially higher memory being used.
 {mapping, "api_gateway.http.active_n",
-"bondy.api_gateway_http.protocol_opts.active_n", [
+"bondy_router.api_gateway_http.protocol_opts.active_n", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -1906,21 +1906,21 @@ end}.
 
 %% Maximum allowed time for the listening process handshake call to finish.
 {mapping, "api_gateway.http.handshake_timeout",
-"bondy.api_gateway_http.transport_opts.handshake_timeout", [
+"bondy_router.api_gateway_http.transport_opts.handshake_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no data received before Cowboy closes the connection.
 {mapping, "api_gateway.http.idle_timeout",
-"bondy.api_gateway_http.protocol_opts.idle_timeout", [
+"bondy_router.api_gateway_http.protocol_opts.idle_timeout", [
   {default, "15s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with nothing received at all before Cowboy closes the connection.
 {mapping, "api_gateway.http.inactivity_timeout",
-"bondy.api_gateway_http.protocol_opts.inactivity_timeout", [
+"bondy_router.api_gateway_http.protocol_opts.inactivity_timeout", [
   {default, "5m"},
   {datatype, {duration, ms}}
 ]}.
@@ -1929,28 +1929,28 @@ end}.
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
 {mapping, "api_gateway.http.linger.timeout",
-"bondy.api_gateway_http.protocol_opts.linger_timeout", [
+"bondy_router.api_gateway_http.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no requests before Cowboy closes the connection.
 {mapping, "api_gateway.http.request_timeout",
-"bondy.api_gateway_http.protocol_opts.request_timeout", [
+"bondy_router.api_gateway_http.protocol_opts.request_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Whether the idle_timeout gets reset when sending data to the socket.
 {mapping, "api_gateway.http.reset_idle_timeout_on_send",
-"bondy.api_gateway_http.protocol_opts.reset_idle_timeout_on_send", [
+"bondy_router.api_gateway_http.protocol_opts.reset_idle_timeout_on_send", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% Maximum number of requests allowed per connection.
 {mapping, "api_gateway.http.max_keepalive",
-"bondy.api_gateway_http.protocol_opts.max_keepalive", [
+"bondy_router.api_gateway_http.protocol_opts.max_keepalive", [
   {default, 1000},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -1958,62 +1958,62 @@ end}.
 
 
 {mapping, "api_gateway.http.initial_stream_flow_size",
-"bondy.api_gateway_http.protocol_opts.initial_stream_flow_size", [
+"bondy_router.api_gateway_http.protocol_opts.initial_stream_flow_size", [
   {default, "65535"}, % bytes
   {datatype, bytesize}
 ]}.
 
 {mapping, "api_gateway.http.max_empty_lines",
-"bondy.api_gateway_http.protocol_opts.max_empty_lines", [
+"bondy_router.api_gateway_http.protocol_opts.max_empty_lines", [
   {default, 5},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.http.max_header_name_length",
-"bondy.api_gateway_http.protocol_opts.max_header_name_length", [
+"bondy_router.api_gateway_http.protocol_opts.max_header_name_length", [
   {default, 64},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.http.max_header_value_length",
-"bondy.api_gateway_http.protocol_opts.max_header_value_length", [
+"bondy_router.api_gateway_http.protocol_opts.max_header_value_length", [
   {default, 4096},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.http.max_headers",
-"bondy.api_gateway_http.protocol_opts.max_headers", [
+"bondy_router.api_gateway_http.protocol_opts.max_headers", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.http.max_method_length",
-"bondy.api_gateway_http.protocol_opts.max_method_length", [
+"bondy_router.api_gateway_http.protocol_opts.max_method_length", [
   {default, 32},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.http.max_request_line_length",
-"bondy.api_gateway_http.protocol_opts.max_request_line_length", [
+"bondy_router.api_gateway_http.protocol_opts.max_request_line_length", [
   {default, 8000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.http.max_skip_body_length",
-"bondy.api_gateway_http.protocol_opts.max_skip_body_length", [
+"bondy_router.api_gateway_http.protocol_opts.max_skip_body_length", [
   {default, 1000000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.http.sendfile",
-"bondy.api_gateway_http.protocol_opts.sendfile", [
+"bondy_router.api_gateway_http.protocol_opts.sendfile", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -2022,7 +2022,7 @@ end}.
 %% This is used to capture the source IP address which will be used for matching
 %% against RBAC Source assignments.
 {mapping, "api_gateway.http.proxy_protocol",
-"bondy.api_gateway_http.proxy_protocol.enabled", [
+"bondy_router.api_gateway_http.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -2033,7 +2033,7 @@ end}.
 %% headers will be dropped. If 'relaxed' the connection is always accepted and
 %% Bondy will log when there is no header or if it is invalid.
 {mapping, "api_gateway.http.proxy_protocol.mode",
-"bondy.api_gateway_http.proxy_protocol.mode", [
+"bondy_router.api_gateway_http.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -2045,7 +2045,7 @@ end}.
 
 %% @doc Whether CORS headers are enabled for the API Gateway HTTP listener.
 {mapping, "api_gateway.http.cors.enabled",
-"bondy.api_gateway_http.cors.enabled", [
+"bondy_router.api_gateway_http.cors.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -2054,34 +2054,34 @@ end}.
 %% Can be "*" (wildcard), "auto" (derive from request host), or a
 %% comma-separated list of origins.
 {mapping, "api_gateway.http.cors.allowed_origins",
-"bondy.api_gateway_http.cors.allowed_origins", [
+"bondy_router.api_gateway_http.cors.allowed_origins", [
   {default, "*"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP methods for CORS requests.
 {mapping, "api_gateway.http.cors.allowed_methods",
-"bondy.api_gateway_http.cors.allowed_methods", [
+"bondy_router.api_gateway_http.cors.allowed_methods", [
   {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP headers for CORS requests.
 {mapping, "api_gateway.http.cors.allowed_headers",
-"bondy.api_gateway_http.cors.allowed_headers", [
+"bondy_router.api_gateway_http.cors.allowed_headers", [
   {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
   {datatype, string}
 ]}.
 
 %% @doc The max age in seconds for CORS preflight cache.
 {mapping, "api_gateway.http.cors.max_age",
-"bondy.api_gateway_http.cors.max_age", [
+"bondy_router.api_gateway_http.cors.max_age", [
   {default, 86400},
   {datatype, integer},
   {validators, ["non_neg_integer"]}
 ]}.
 
-{translation, "bondy.api_gateway_http.cors",
+{translation, "bondy_router.api_gateway_http.cors",
   fun(Conf) ->
     Prefix = "api_gateway.http.cors",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -2113,7 +2113,7 @@ end}.
 %% @doc Whether static security headers are enabled for the API Gateway HTTP
 %% listener.
 {mapping, "api_gateway.http.security_headers.enabled",
-"bondy.api_gateway_http.security_headers.enabled", [
+"bondy_router.api_gateway_http.security_headers.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -2121,38 +2121,38 @@ end}.
 %% @doc The value for the Strict-Transport-Security header.
 %% Only meaningful for HTTPS listeners.
 {mapping, "api_gateway.http.security_headers.hsts",
-"bondy.api_gateway_http.security_headers.hsts", [
+"bondy_router.api_gateway_http.security_headers.hsts", [
   {datatype, string}
 ]}.
 
 %% @doc The value for the X-Frame-Options header.
 {mapping, "api_gateway.http.security_headers.frame_options",
-"bondy.api_gateway_http.security_headers.frame_options", [
+"bondy_router.api_gateway_http.security_headers.frame_options", [
   {default, "SAMEORIGIN"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the X-Content-Type-Options header.
 {mapping, "api_gateway.http.security_headers.content_type_options",
-"bondy.api_gateway_http.security_headers.content_type_options", [
+"bondy_router.api_gateway_http.security_headers.content_type_options", [
   {default, "nosniff"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
 {mapping, "api_gateway.http.security_headers.content_security_policy",
-"bondy.api_gateway_http.security_headers.content_security_policy", [
+"bondy_router.api_gateway_http.security_headers.content_security_policy", [
   {datatype, string}
 ]}.
 
 %% @doc The value for the Server response header.
 {mapping, "api_gateway.http.server_header",
-"bondy.api_gateway_http.server_header", [
+"bondy_router.api_gateway_http.server_header", [
   {default, "bondy"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.api_gateway_http.security_headers",
+{translation, "bondy_router.api_gateway_http.security_headers",
   fun(Conf) ->
     Prefix = "api_gateway.http.security_headers",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -2174,7 +2174,7 @@ end}.
 
 
 {mapping, "api_gateway.https.enabled",
-"bondy.api_gateway_https.enabled", [
+"bondy_router.api_gateway_https.enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -2182,7 +2182,7 @@ end}.
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.https.port",
-"bondy.api_gateway_https.transport_opts.socket_opts.port", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.port", [
   {default, 18083},
   {datatype, integer},
   {validators, ["port_number"]},
@@ -2193,19 +2193,19 @@ end}.
 %% exposing the API Gateway managed APIs.. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "api_gateway.https.ip",
-"bondy.api_gateway_https.ip", [
+"bondy_router.api_gateway_https.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
 
 %% @doc The IP version to use. Either 4 or 6.
 {mapping, "api_gateway.https.ip_version",
-"bondy.api_gateway_https.transport_opts.socket_opts.ip_version", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.api_gateway_https.transport_opts.socket_opts.ip_version",
+{translation, "bondy_router.api_gateway_https.transport_opts.socket_opts.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("api_gateway.https.ip_version", Conf),
       try
@@ -2228,7 +2228,7 @@ end}.
 
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
 {mapping, "api_gateway.https.acceptors_pool_size",
-"bondy.api_gateway_https.transport_opts.num_acceptors", [
+"bondy_router.api_gateway_https.transport_opts.num_acceptors", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 200}
@@ -2236,7 +2236,7 @@ end}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "api_gateway.https.max_connections",
-"bondy.api_gateway_https.transport_opts.max_connections", [
+"bondy_router.api_gateway_https.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 500000}
@@ -2244,7 +2244,7 @@ end}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "api_gateway.https.backlog",
-"bondy.api_gateway_https.transport_opts.socket_opts.backlog", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.backlog", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 1024}
@@ -2257,7 +2257,7 @@ end}.
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
 {mapping, "api_gateway.https.keepalive",
-"bondy.api_gateway_https.transport_opts.socket_opts.keepalive", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -2266,32 +2266,32 @@ end}.
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "api_gateway.https.nodelay",
-"bondy.api_gateway_https.transport_opts.socket_opts.nodelay", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% {mapping, "api_gateway.https.reuseaddr",
-%% "bondy.api_gateway_https.transport_opts.socket_opts.reuseaddr", [
+%% "bondy_router.api_gateway_https.transport_opts.socket_opts.reuseaddr", [
 %%   {datatype, {flag, on, off}},
 %%   {default, on}
 %% ]}.
 
 {mapping, "api_gateway.https.reuseport",
-"bondy.api_gateway_https.transport_opts.socket_opts.reuseport", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.reuseport", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
 
 %% The minimum size of the send buffer to use for the socket.
 {mapping, "api_gateway.https.sndbuf",
-"bondy.api_gateway_https.transport_opts.socket_opts.sndbuf", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
 {mapping, "api_gateway.https.recbuf",
-"bondy.api_gateway_https.transport_opts.socket_opts.recbuf", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -2303,7 +2303,7 @@ end}.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
 {mapping, "api_gateway.https.buffer",
-"bondy.api_gateway_https.transport_opts.socket_opts.buffer", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
@@ -2314,11 +2314,11 @@ end}.
 %% This option is ignored when buffer is set
 %% It is enabled by default.
 %% Set min or max to 0 to disable.
-{mapping, "api_gateway.https.buffer.min", "bondy.api_gateway_https.protocol_opts.dynamic_buffer.min", [
+{mapping, "api_gateway.https.buffer.min", "bondy_router.api_gateway_https.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
 ]}.
 
-{mapping, "api_gateway.https.buffer.max", "bondy.api_gateway_https.protocol_opts.dynamic_buffer.max", [
+{mapping, "api_gateway.https.buffer.max", "bondy_router.api_gateway_https.protocol_opts.dynamic_buffer.max", [
   {datatype, bytesize}
 ]}.
 
@@ -2328,7 +2328,7 @@ end}.
 %% number of times Cowboy need to request more packets from the port driver at t
 %% he expense of potentially higher memory being used.
 {mapping, "api_gateway.https.active_n",
-"bondy.api_gateway_https.protocol_opts.active_n", [
+"bondy_router.api_gateway_https.protocol_opts.active_n", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -2336,21 +2336,21 @@ end}.
 
 %% Maximum allowed time for the listening process handshake call to finish.
 {mapping, "api_gateway.https.handshake_timeout",
-"bondy.api_gateway_https.transport_opts.handshake_timeout", [
+"bondy_router.api_gateway_https.transport_opts.handshake_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no data received before Cowboy closes the connection.
 {mapping, "api_gateway.https.idle_timeout",
-"bondy.api_gateway_https.protocol_opts.idle_timeout", [
+"bondy_router.api_gateway_https.protocol_opts.idle_timeout", [
   {default, "15s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with nothing received at all before Cowboy closes the connection.
 {mapping, "api_gateway.https.inactivity_timeout",
-"bondy.api_gateway_https.protocol_opts.inactivity_timeout", [
+"bondy_router.api_gateway_https.protocol_opts.inactivity_timeout", [
   {default, "5m"},
   {datatype, {duration, ms}}
 ]}.
@@ -2359,28 +2359,28 @@ end}.
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
 {mapping, "api_gateway.https.linger.timeout",
-"bondy.api_gateway_https.protocol_opts.linger_timeout", [
+"bondy_router.api_gateway_https.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Time in ms with no requests before Cowboy closes the connection.
 {mapping, "api_gateway.https.request_timeout",
-"bondy.api_gateway_https.protocol_opts.request_timeout", [
+"bondy_router.api_gateway_https.protocol_opts.request_timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% Whether the idle_timeout gets reset when sending data to the socket.
 {mapping, "api_gateway.https.reset_idle_timeout_on_send",
-"bondy.api_gateway_https.protocol_opts.reset_idle_timeout_on_send", [
+"bondy_router.api_gateway_https.protocol_opts.reset_idle_timeout_on_send", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% Maximum number of requests allowed per connection.
 {mapping, "api_gateway.https.max_keepalive",
-"bondy.api_gateway_https.protocol_opts.max_keepalive", [
+"bondy_router.api_gateway_https.protocol_opts.max_keepalive", [
   {default, 1000},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -2388,62 +2388,62 @@ end}.
 
 
 {mapping, "api_gateway.https.initial_stream_flow_size",
-"bondy.api_gateway_https.protocol_opts.initial_stream_flow_size", [
+"bondy_router.api_gateway_https.protocol_opts.initial_stream_flow_size", [
   {default, "65535"}, % bytes
   {datatype, bytesize}
 ]}.
 
 {mapping, "api_gateway.https.max_empty_lines",
-"bondy.api_gateway_https.protocol_opts.max_empty_lines", [
+"bondy_router.api_gateway_https.protocol_opts.max_empty_lines", [
   {default, 5},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.https.max_header_name_length",
-"bondy.api_gateway_https.protocol_opts.max_header_name_length", [
+"bondy_router.api_gateway_https.protocol_opts.max_header_name_length", [
   {default, 64},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.https.max_header_value_length",
-"bondy.api_gateway_https.protocol_opts.max_header_value_length", [
+"bondy_router.api_gateway_https.protocol_opts.max_header_value_length", [
   {default, 4096},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.https.max_headers",
-"bondy.api_gateway_https.protocol_opts.max_headers", [
+"bondy_router.api_gateway_https.protocol_opts.max_headers", [
   {default, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.https.max_method_length",
-"bondy.api_gateway_https.protocol_opts.max_method_length", [
+"bondy_router.api_gateway_https.protocol_opts.max_method_length", [
   {default, 32},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.https.max_request_line_length",
-"bondy.api_gateway_https.protocol_opts.max_request_line_length", [
+"bondy_router.api_gateway_https.protocol_opts.max_request_line_length", [
   {default, 8000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.https.max_skip_body_length",
-"bondy.api_gateway_https.protocol_opts.max_skip_body_length", [
+"bondy_router.api_gateway_https.protocol_opts.max_skip_body_length", [
   {default, 1000000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 {mapping, "api_gateway.https.sendfile",
-"bondy.api_gateway_https.protocol_opts.sendfile", [
+"bondy_router.api_gateway_https.protocol_opts.sendfile", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -2452,7 +2452,7 @@ end}.
 %% This is used to capture the source IP address which will be used for matching
 %% against RBAC Source assignments.
 {mapping, "api_gateway.https.proxy_protocol",
-"bondy.api_gateway_https.proxy_protocol.enabled", [
+"bondy_router.api_gateway_https.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -2463,7 +2463,7 @@ end}.
 %% headers will be dropped. If 'relaxed' the connection is always accepted and
 %% Bondy will log when there is no header or if it is invalid.
 {mapping, "api_gateway.https.proxy_protocol.mode",
-"bondy.api_gateway_https.proxy_protocol.mode", [
+"bondy_router.api_gateway_https.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -2475,7 +2475,7 @@ end}.
 
 %% @doc Whether CORS headers are enabled for the API Gateway HTTPS listener.
 {mapping, "api_gateway.https.cors.enabled",
-"bondy.api_gateway_https.cors.enabled", [
+"bondy_router.api_gateway_https.cors.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -2484,34 +2484,34 @@ end}.
 %% Can be "*" (wildcard), "auto" (derive from request host), or a
 %% comma-separated list of origins.
 {mapping, "api_gateway.https.cors.allowed_origins",
-"bondy.api_gateway_https.cors.allowed_origins", [
+"bondy_router.api_gateway_https.cors.allowed_origins", [
   {default, "*"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP methods for CORS requests.
 {mapping, "api_gateway.https.cors.allowed_methods",
-"bondy.api_gateway_https.cors.allowed_methods", [
+"bondy_router.api_gateway_https.cors.allowed_methods", [
   {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP headers for CORS requests.
 {mapping, "api_gateway.https.cors.allowed_headers",
-"bondy.api_gateway_https.cors.allowed_headers", [
+"bondy_router.api_gateway_https.cors.allowed_headers", [
   {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
   {datatype, string}
 ]}.
 
 %% @doc The max age in seconds for CORS preflight cache.
 {mapping, "api_gateway.https.cors.max_age",
-"bondy.api_gateway_https.cors.max_age", [
+"bondy_router.api_gateway_https.cors.max_age", [
   {default, 86400},
   {datatype, integer},
   {validators, ["non_neg_integer"]}
 ]}.
 
-{translation, "bondy.api_gateway_https.cors",
+{translation, "bondy_router.api_gateway_https.cors",
   fun(Conf) ->
     Prefix = "api_gateway.https.cors",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -2543,7 +2543,7 @@ end}.
 %% @doc Whether static security headers are enabled for the API Gateway HTTPS
 %% listener.
 {mapping, "api_gateway.https.security_headers.enabled",
-"bondy.api_gateway_https.security_headers.enabled", [
+"bondy_router.api_gateway_https.security_headers.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -2551,39 +2551,39 @@ end}.
 %% @doc The value for the Strict-Transport-Security header.
 %% Set to an empty string to disable.
 {mapping, "api_gateway.https.security_headers.hsts",
-"bondy.api_gateway_https.security_headers.hsts", [
+"bondy_router.api_gateway_https.security_headers.hsts", [
   {default, "max-age=31536000; includeSubDomains"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the X-Frame-Options header.
 {mapping, "api_gateway.https.security_headers.frame_options",
-"bondy.api_gateway_https.security_headers.frame_options", [
+"bondy_router.api_gateway_https.security_headers.frame_options", [
   {default, "SAMEORIGIN"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the X-Content-Type-Options header.
 {mapping, "api_gateway.https.security_headers.content_type_options",
-"bondy.api_gateway_https.security_headers.content_type_options", [
+"bondy_router.api_gateway_https.security_headers.content_type_options", [
   {default, "nosniff"},
   {datatype, string}
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
 {mapping, "api_gateway.https.security_headers.content_security_policy",
-"bondy.api_gateway_https.security_headers.content_security_policy", [
+"bondy_router.api_gateway_https.security_headers.content_security_policy", [
   {datatype, string}
 ]}.
 
 %% @doc The value for the Server response header.
 {mapping, "api_gateway.https.server_header",
-"bondy.api_gateway_https.server_header", [
+"bondy_router.api_gateway_https.server_header", [
   {default, "bondy"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.api_gateway_https.security_headers",
+{translation, "bondy_router.api_gateway_https.security_headers",
   fun(Conf) ->
     Prefix = "api_gateway.https.security_headers",
     Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
@@ -2601,7 +2601,7 @@ end}.
 
 %% @doc Default cert location for https can be overridden
 %% with the api_gateway.ssl config variable, for example:
-{mapping, "api_gateway.https.certfile", "bondy.api_gateway_https.transport_opts.socket_opts.certfile", [
+{mapping, "api_gateway.https.certfile", "bondy_router.api_gateway_https.transport_opts.socket_opts.certfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
@@ -2609,7 +2609,7 @@ end}.
 %% @doc Default key location for https can be overridden with the
 %%api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.keyfile",
-"bondy.api_gateway_https.transport_opts.socket_opts.keyfile", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.keyfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
@@ -2617,7 +2617,7 @@ end}.
 %% @doc Default signing authority location for https can be overridden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "api_gateway.https.cacertfile",
-"bondy.api_gateway_https.transport_opts.socket_opts.cacertfile", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.cacertfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
@@ -2625,7 +2625,7 @@ end}.
 %% @doc SSL verification mode for API Gateway HTTPS connections. Set to
 %% verify_peer to require client certificates (mTLS).
 {mapping, "api_gateway.https.verify",
-"bondy.api_gateway_https.transport_opts.socket_opts.verify", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.verify", [
   {datatype, {enum, [verify_peer, verify_none]}},
   {default, verify_none}
 ]}.
@@ -2633,7 +2633,7 @@ end}.
 %% @doc Whether to reject connections where the client does not provide a
 %% certificate when verify is set to verify_peer.
 {mapping, "api_gateway.https.fail_if_no_peer_cert",
-"bondy.api_gateway_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -2641,13 +2641,13 @@ end}.
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
 {mapping, "api_gateway.https.versions",
-"bondy.api_gateway_https.transport_opts.socket_opts.versions", [
+"bondy_router.api_gateway_https.transport_opts.socket_opts.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
 
 
-{translation, "bondy.api_gateway_https.transport_opts.socket_opts.versions",
+{translation, "bondy_router.api_gateway_https.transport_opts.socket_opts.versions",
   fun(Conf) ->
     case cuttlefish:conf_get("api_gateway.https.versions", Conf) of
         Value when is_list(Value) ->
@@ -2685,7 +2685,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "wamp.connection_lifetime",
-"bondy.wamp_connection_lifetime", [
+"bondy_router.wamp_connection_lifetime", [
   {default, session},
   %% {datatype, {enum, [session, connection]}},
   {datatype, {enum, [session]}},
@@ -2699,7 +2699,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "wamp.call_timeout",
-"bondy.wamp_call_timeout", [
+"bondy_router.wamp_call_timeout", [
   {default, "30s"}, % Long enough but not infinity
   {datatype, {duration, ms}}
 ]}.
@@ -2715,20 +2715,20 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "wamp.max_call_timeout",
-"bondy.wamp_max_call_timeout", [
+"bondy_router.wamp_max_call_timeout", [
 {default, "10m"}, % Long enough but not infinity
 {datatype, {duration, ms}}
 ]}.
 
 {mapping, "wamp.message_retention.enabled",
-"bondy.wamp_message_retention.enabled", [
+"bondy_router.wamp_message_retention.enabled", [
   {datatype, flag},
   {default, on}
 ]}.
 
 %% How will Bondy store the retained messages.
 {mapping, "wamp.message_retention.storage_type",
-"bondy.wamp_message_retention.storage_type", [
+"bondy_router.wamp_message_retention.storage_type", [
   {default, ram},
   {datatype, {enum, [ram, disk, ram_disk]}}
 ]}.
@@ -2737,7 +2737,7 @@ end}.
 %% Once the max has been reached no more events will be stored.
 %% A value of 0 means no limit is enforced.
 {mapping, "wamp.message_retention.max_messages",
-"bondy.wamp_message_retention.max_messages", [
+"bondy_router.wamp_message_retention.max_messages", [
   {default, "1000000"},
   {validators, ["pos_integer"]},
   {datatype, integer}
@@ -2748,7 +2748,7 @@ end}.
 %% Once the max has been reached no more events will be stored.
 %% A value of 0 means no limit is enforced.
 {mapping, "wamp.message_retention.max_memory",
-"bondy.wamp_message_retention.max_memory", [
+"bondy_router.wamp_message_retention.max_memory", [
   {default, "1GB"},
   {datatype, bytesize}
 ]}.
@@ -2756,7 +2756,7 @@ end}.
 %% The max size for an event message.
 %% All events whose size exceeds this value will not be retained.
 {mapping, "wamp.message_retention.max_message_size",
-"bondy.wamp_message_retention.max_message_size", [
+"bondy_router.wamp_message_retention.max_message_size", [
   {default, "64KB"},
   {datatype, bytesize}
 ]}.
@@ -2765,13 +2765,13 @@ end}.
 %% messages not specifying a specific TTL.
 %% A value of 0 means a message will not be expired.
 {mapping, "wamp.message_retention.default_ttl",
-"bondy.wamp_message_retention.default_ttl", [
+"bondy_router.wamp_message_retention.default_ttl", [
   {default, "0"},
   {datatype, [integer, {duration, s}]}
 ]}.
 
 {mapping, "request_timeout",
-"bondy.request_timeout", [
+"bondy_router.request_timeout", [
   {default, "20s"}, % Long enough but not infinity
   {datatype, {duration, ms}},
   hidden
@@ -2786,91 +2786,91 @@ end}.
 
 
 {mapping, "wamp.broker.acknowledge_event_received",
-"bondy.wamp.broker.features.acknowledge_event_received", [
+"bondy_router.wamp.broker.features.acknowledge_event_received", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.broker.acknowledge_subscriber_received",
-"bondy.wamp.broker.features.acknowledge_subscriber_received", [
+"bondy_router.wamp.broker.features.acknowledge_subscriber_received", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.broker.event_history",
-"bondy.wamp.broker.features.event_history", [
+"bondy_router.wamp.broker.features.event_history", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.broker.event_retention",
-"bondy.wamp.broker.features.event_retention", [
+"bondy_router.wamp.broker.features.event_retention", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.broker.pattern_based_subscription",
-"bondy.wamp.broker.features.pattern_based_subscription", [
+"bondy_router.wamp.broker.features.pattern_based_subscription", [
   {default, true},
   {datatype, {flag, on, off}}
 ]}.
 {mapping, "wamp.broker.payload_passthru_mode",
-"bondy.wamp.broker.features.payload_passthru_mode", [
+"bondy_router.wamp.broker.features.payload_passthru_mode", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.broker.publication_trustlevels",
-"bondy.wamp.broker.features.publication_trustlevels", [
+"bondy_router.wamp.broker.features.publication_trustlevels", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.broker.publisher_exclusion",
-"bondy.wamp.broker.features.publisher_exclusion", [
+"bondy_router.wamp.broker.features.publisher_exclusion", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.broker.publisher_identification",
-"bondy.wamp.broker.features.publisher_identification", [
+"bondy_router.wamp.broker.features.publisher_identification", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.broker.reflection",
-"bondy.wamp.broker.features.reflection", [
+"bondy_router.wamp.broker.features.reflection", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.broker.session_meta_api",
-"bondy.wamp.broker.features.session_meta_api", [
+"bondy_router.wamp.broker.features.session_meta_api", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.broker.sharded_subscription",
-"bondy.wamp.broker.features.sharded_subscription", [
+"bondy_router.wamp.broker.features.sharded_subscription", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.broker.subscriber_blackwhite_listing",
-"bondy.wamp.broker.features.subscriber_blackwhite_listing", [
+"bondy_router.wamp.broker.features.subscriber_blackwhite_listing", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.broker.subscription_meta_api",
-"bondy.wamp.broker.features.subscription_meta_api", [
+"bondy_router.wamp.broker.features.subscription_meta_api", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.broker.subscription_revocation",
-"bondy.wamp.broker.features.subscription_revocation", [
+"bondy_router.wamp.broker.features.subscription_revocation", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
@@ -2879,101 +2879,101 @@ end}.
 
 
 {mapping, "wamp.dealer.call_canceling",
-"bondy.wamp.dealer.features.call_canceling", [
+"bondy_router.wamp.dealer.features.call_canceling", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.call_reroute",
-"bondy.wamp.dealer.features.call_reroute", [
+"bondy_router.wamp.dealer.features.call_reroute", [
   {default, true},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.dealer.call_timeout",
-"bondy.wamp.dealer.features.call_timeout", [
+"bondy_router.wamp.dealer.features.call_timeout", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.call_trustlevels",
-"bondy.wamp.dealer.features.call_trustlevels", [
+"bondy_router.wamp.dealer.features.call_trustlevels", [
   {default, false},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.caller_auth_claims",
-"bondy.wamp.dealer.features.caller_auth_claims", [
+"bondy_router.wamp.dealer.features.caller_auth_claims", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.caller_identification",
-"bondy.wamp.dealer.features.caller_identification", [
+"bondy_router.wamp.dealer.features.caller_identification", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.pattern_based_registration",
-"bondy.wamp.dealer.features.pattern_based_registration", [
+"bondy_router.wamp.dealer.features.pattern_based_registration", [
   {default, true},
   {datatype, {flag, on, off}}
 ]}.
 {mapping, "wamp.dealer.payload_passthru_mode",
-"bondy.wamp.dealer.features.payload_passthru_mode", [
+"bondy_router.wamp.dealer.features.payload_passthru_mode", [
   {default, false},
   %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.dealer.progressive_call_results",
-"bondy.wamp.dealer.features.progressive_call_results", [
+"bondy_router.wamp.dealer.features.progressive_call_results", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.dealer.progressive_calls",
-"bondy.wamp.dealer.features.progressive_calls", [
+"bondy_router.wamp.dealer.features.progressive_calls", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.dealer.reflection",
-"bondy.wamp.dealer.features.reflection", [
+"bondy_router.wamp.dealer.features.reflection", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.dealer.registration_meta_api",
-"bondy.wamp.dealer.features.registration_meta_api", [
+"bondy_router.wamp.dealer.features.registration_meta_api", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.registration_revocation",
-"bondy.wamp.dealer.features.registration_revocation", [
+"bondy_router.wamp.dealer.features.registration_revocation", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.dealer.session_meta_api",
-"bondy.wamp.dealer.features.session_meta_api", [
+"bondy_router.wamp.dealer.features.session_meta_api", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.sharded_registration",
-"bondy.wamp.dealer.features.sharded_registration", [
+"bondy_router.wamp.dealer.features.sharded_registration", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
   hidden
 ]}.
 {mapping, "wamp.dealer.shared_registration",
-"bondy.wamp.dealer.features.shared_registration", [
+"bondy_router.wamp.dealer.features.shared_registration", [
   {default, true},
   {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.testament_meta_api",
-"bondy.wamp.dealer.features.testament_meta_api", [
+"bondy_router.wamp.dealer.features.testament_meta_api", [
   {default, false},
     %% Disabled until implemented
   {datatype, {flag, off, off}},
@@ -2998,19 +2998,19 @@ end}.
 %% wamp.serializers.erl = 15
 %% wamp.serializers.bert = 4
 {mapping, "wamp.serializers.erl",
-"bondy.wamp_serializers.erl", [
+"bondy_router.wamp_serializers.erl", [
   {datatype, integer},
   {default, 15}
 ]}.
 
 {mapping, "wamp.serializers.bert",
-"bondy.wamp_serializers.bert", [
+"bondy_router.wamp_serializers.bert", [
   {datatype, integer},
   {default, 4}
 ]}.
 
 % {translation,
-% "bondy.wamp_serializers",
+% "bondy_router.wamp_serializers",
 % fun(Conf0) ->
 %     Conf1 = cuttlefish_variable:filter_by_prefix(
 %       "wamp.serializers", Conf0),
@@ -3045,7 +3045,7 @@ end}.
 %% handle pings. However, notice web browsers will typically kill websocket
 %% connections after 60s and will not initiate PINGs.
 {mapping, "wamp.websocket.ping.enabled",
-"bondy.wamp_websocket.ping.enabled", [
+"bondy_router.wamp_websocket.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -3056,7 +3056,7 @@ end}.
 %% the next.
 %% Notice this is not the same as wamp.websocket.idle_timeout.
 {mapping, "wamp.websocket.ping.idle_timeout",
-"bondy.wamp_websocket.ping.idle_timeout", [
+"bondy_router.wamp_websocket.ping.idle_timeout", [
   {default, "20s"},
   {datatype, {duration, ms}}
 ]}.
@@ -3066,7 +3066,7 @@ end}.
 %% Once that time has passed this counts as a fail attempt
 %% (see wamp.websocket.ping.max_attempts).
 {mapping, "wamp.websocket.ping.timeout",
-"bondy.wamp_websocket.ping.timeout", [
+"bondy_router.wamp_websocket.ping.timeout", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
@@ -3074,7 +3074,7 @@ end}.
 %% @doc If wamp.websocket.ping.enabled is 'on', this parameter controls how many
 %% missed pings are allowed to timeout before Bondy closes the connection.
 {mapping, "wamp.websocket.ping.max_attempts",
-"bondy.wamp_websocket.ping.max_attempts",
+"bondy_router.wamp_websocket.ping.max_attempts",
   [
     {default, 2},
     {datatype, integer},
@@ -3091,7 +3091,7 @@ end}.
 %% If the client supports Websocket PING control messages, enabled them,
 %% otherwise e.g. web browsers set wamp.websocket.ping.enabled to on.
 {mapping, "wamp.websocket.idle_timeout",
-"bondy.wamp_websocket.idle_timeout", [
+"bondy_router.wamp_websocket.idle_timeout", [
   {default, "8h"},
   {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
@@ -3103,7 +3103,7 @@ end}.
 %%
 %% A value of zero means un unbounded size (internally translated to 'infinity')
 {mapping, "wamp.websocket.max_frame_size",
-"bondy.wamp_websocket.max_frame_size", [
+"bondy_router.wamp_websocket.max_frame_size", [
   {default, "4MB"},
   {datatype, bytesize}
 ]}.
@@ -3116,18 +3116,18 @@ end}.
 %% When enabled this option overrides the buffer option.
 %% This option is ignored when the socket buffer is set
 {mapping, "wamp.websocket.buffer.min",
-"bondy.wamp_websocket.protocol_opts.dynamic_buffer.min", [
+"bondy_router.wamp_websocket.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
 ]}.
 
 {mapping, "wamp.websocket.buffer.max",
-"bondy.wamp_websocket.protocol_opts.dynamic_buffer.max", [
+"bondy_router.wamp_websocket.protocol_opts.dynamic_buffer.max", [
   {datatype, bytesize}
 ]}.
 
 
 
-% {translation, "bondy.wamp_websocket.max_frame_size",
+% {translation, "bondy_router.wamp_websocket.max_frame_size",
 %  fun(Conf) ->
 %   TheLimit = cuttlefish:conf_get("wamp.websocket.max_frame_size", Conf),
 %   case TheLimit of
@@ -3144,7 +3144,7 @@ end}.
 %% Defines if Websocket compression (permessage-deflate extension) is enabled
 %% or not. If enabled it will be negotiated with supporting clients.
 {mapping, "wamp.websocket.compression_enabled",
-"bondy.wamp_websocket.compress", [
+"bondy_router.wamp_websocket.compress", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -3155,12 +3155,12 @@ end}.
 %% * 1 (best_speed) gives best speed
 %% * 9 (best_compression) gives best compression
 {mapping, "wamp.websocket.deflate.level",
-"bondy.wamp_websocket.deflate_opts.level", [
+"bondy_router.wamp_websocket.deflate_opts.level", [
   {default, 5},
   {datatype, integer}
 ]}.
 
-{translation, "bondy.wamp_websocket.deflate_opts.level",
+{translation, "bondy_router.wamp_websocket.deflate_opts.level",
  fun(Conf) ->
   case cuttlefish:conf_get("wamp.websocket.deflate.level", Conf) of
       Int when is_integer(Int) andalso Int >= 0 andalso Int =< 9 -> Int;
@@ -3176,12 +3176,12 @@ end}.
 %% state. An integer between 1 and 9, where 1 uses minimum memory but is slow
 %% and reduces compression ratio while 9 uses maximum memory for optimal speed.
 {mapping, "wamp.websocket.deflate.mem_level",
-"bondy.wamp_websocket.deflate_opts.mem_level", [
+"bondy_router.wamp_websocket.deflate_opts.mem_level", [
   {default, 8},
   {datatype, integer}
 ]}.
 
-{translation, "bondy.wamp_websocket.deflate_opts.mem_level",
+{translation, "bondy_router.wamp_websocket.deflate_opts.mem_level",
  fun(Conf) ->
   case cuttlefish:conf_get("wamp.websocket.deflate.mem_level", Conf) of
       Int when is_integer(Int) andalso Int >= 1 andalso Int =< 9 -> Int;
@@ -3209,21 +3209,21 @@ end}.
 %% Strategy affects only the compression ratio, but not the correctness of the
 %% compressed output even if it is not set appropriately.
 {mapping, "wamp.websocket.deflate.strategy",
-"bondy.wamp_websocket.deflate_opts.strategy", [
+"bondy_router.wamp_websocket.deflate_opts.strategy", [
   {default, default},
   {datatype, {enum, [default, filtered, huffman_only, rle]}}
 ]}.
 
 %%  Using no_takeover can severely limit the usefulness of compression.
 {mapping, "wamp.websocket.deflate.server_context_takeover",
-"bondy.wamp_websocket.deflate_opts.server_context_takeover", [
+"bondy_router.wamp_websocket.deflate_opts.server_context_takeover", [
   {default, takeover},
   {datatype, {enum, [takeover, no_takeover]}}
 ]}.
 
 %%  Using no_takeover can severely limit the usefulness of compression.
 {mapping, "wamp.websocket.deflate.client_context_takeover",
-"bondy.wamp_websocket.deflate_opts.client_context_takeover", [
+"bondy_router.wamp_websocket.deflate_opts.client_context_takeover", [
   {default, takeover},
   {datatype, {enum, [takeover, no_takeover]}}
 ]}.
@@ -3232,12 +3232,12 @@ end}.
 %% It is to be in the range 8 through 15. Larger values result in better
 %% compression at the expense of memory usage.
 {mapping, "wamp.websocket.deflate.server_max_window_bits",
-"bondy.wamp_websocket.deflate_opts.server_max_window_bits", [
+"bondy_router.wamp_websocket.deflate_opts.server_max_window_bits", [
   {default, 11},
   {datatype, integer}
 ]}.
 
-{translation, "bondy.wamp_websocket.deflate_opts.server_max_window_bits",
+{translation, "bondy_router.wamp_websocket.deflate_opts.server_max_window_bits",
  fun(Conf) ->
   case cuttlefish:conf_get("wamp.websocket.deflate.server_max_window_bits", Conf) of
       Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
@@ -3252,12 +3252,12 @@ end}.
 %% It is to be in the range 8 through 15. Larger values result in better
 %% compression at the expense of memory usage.
 {mapping, "wamp.websocket.deflate.client_max_window_bits",
-"bondy.wamp_websocket.deflate_opts.client_max_window_bits", [
+"bondy_router.wamp_websocket.deflate_opts.client_max_window_bits", [
   {default, 11},
   {datatype, integer}
 ]}.
 
-{translation, "bondy.wamp_websocket.deflate_opts.client_max_window_bits",
+{translation, "bondy_router.wamp_websocket.deflate_opts.client_max_window_bits",
  fun(Conf) ->
   case cuttlefish:conf_get("wamp.websocket.deflate.client_max_window_bits", Conf) of
       Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
@@ -3270,7 +3270,7 @@ end}.
 
 %% Max queued messages per transport
 {mapping, "wamp.transport_queue.max_messages",
-"bondy.transport_queue.max_messages", [
+"bondy_router.transport_queue.max_messages", [
     {default, 1000},
     {datatype, integer},
     {validators, ["pos_integer"]}
@@ -3278,14 +3278,14 @@ end}.
 
 %% Max queued bytes per transport
 {mapping, "wamp.transport_queue.max_bytes",
-"bondy.transport_queue.max_bytes", [
+"bondy_router.transport_queue.max_bytes", [
     {default, "10MB"},
     {datatype, bytesize}
 ]}.
 
 %% TTL for individual messages
 {mapping, "wamp.transport_queue.message_ttl",
-"bondy.transport_queue.message_ttl", [
+"bondy_router.transport_queue.message_ttl", [
   {default, "5m"},
   {datatype, {duration, ms}}
 ]}.
@@ -3293,28 +3293,28 @@ end}.
 %% Session idle timeout — auto-closes the transport session if no HTTP request
 %% touches it within this window
 {mapping, "wamp.transport_queue.transport_ttl",
-"bondy.transport_queue.transport_ttl", [
+"bondy_router.transport_queue.transport_ttl", [
   {default, "1h"},
   {datatype, {duration, ms}}
 ]}.
 
 %% How often the TTL eviction sweep runs
 {mapping, "wamp.transport_queue.eviction_interval",
-"bondy.transport_queue.eviction_interval", [
+"bondy_router.transport_queue.eviction_interval", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% How often the TTL eviction sweep runs
 {mapping, "wamp.transport_queue.partitions",
-"bondy.transport_queue.partitions", [
+"bondy_router.transport_queue.partitions", [
     {datatype, integer},
     {validators, ["pos_integer"]}
 ]}.
 
 %% What to do when queue limits are exceeded
 {mapping, "wamp.transport_queue.overflow_strategy",
-"bondy.transport_queue.overflow_strategy", [
+"bondy_router.transport_queue.overflow_strategy", [
   {default, drop_oldest},
   {datatype, {enum, [drop_oldest]}}
 ]}.
@@ -3329,7 +3329,7 @@ end}.
 %% before the longpoll reply is sent, stripping the response (including CORS
 %% headers) that browser clients depend on.
 {mapping, "wamp.longpoll.poll_timeout",
-"bondy.wamp_longpoll.poll_timeout", [
+"bondy_router.wamp_longpoll.poll_timeout", [
   {default, "30s"},
   {datatype, {duration, ms}}
 ]}.
@@ -3338,13 +3338,13 @@ end}.
 %% MUST be strictly greater than `wamp.longpoll.poll_timeout` so the server has
 %% time to reply before the connection is torn down for inactivity.
 {mapping, "wamp.longpoll.idle_timeout",
-"bondy.wamp_longpoll.idle_timeout", [
+"bondy_router.wamp_longpoll.idle_timeout", [
   {default, "10m"},
   {datatype, {duration, ms}}
 ]}.
 
 {mapping, "wamp.longpoll.reset_idle_timeout_on_send",
-"bondy.wamp_longpoll.reset_idle_timeout_on_send", [
+"bondy_router.wamp_longpoll.reset_idle_timeout_on_send", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -3354,7 +3354,7 @@ end}.
 %% =============================================================================
 
 {mapping, "wamp.sse.ping.enabled",
-"bondy.wamp_sse.ping.enabled", [
+"bondy_router.wamp_sse.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -3362,19 +3362,19 @@ end}.
 %% Interval between SSE keepalive comments (`:keepalive\n\n`) sent to prevent
 %% intermediary timeouts
 {mapping, "wamp.sse.ping.interval",
-"bondy.wamp_sse.ping.interval", [
+"bondy_router.wamp_sse.ping.interval", [
   {default, "20s"},
   {datatype, {duration, ms}}
 ]}.
 
 {mapping, "wamp.sse.idle_timeout",
-"bondy.wamp_sse.idle_timeout", [
+"bondy_router.wamp_sse.idle_timeout", [
   {default, "10m"},
   {datatype, {duration, ms}}
 ]}.
 
 {mapping, "wamp.sse.reset_idle_timeout_on_send",
-"bondy.wamp_sse.reset_idle_timeout_on_send", [
+"bondy_router.wamp_sse.reset_idle_timeout_on_send", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -3388,7 +3388,7 @@ end}.
 
 
 {mapping, "wamp.tcp.enabled",
-"bondy.wamp_tcp.enabled", [
+"bondy_router.wamp_tcp.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -3396,7 +3396,7 @@ end}.
 %% @doc wamp.tcp.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tcp.port",
-"bondy.wamp_tcp.transport_opts.socket_opts.port", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.port", [
   {default, 18082},
   {validators, ["port_number"]},
   {datatype, integer}
@@ -3406,19 +3406,19 @@ end}.
 %% exposing the WAMP raw socket transport. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "wamp.tcp.ip",
-"bondy.wamp_tcp.transport_opts.ip", [
+"bondy_router.wamp_tcp.transport_opts.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
 
 %% @doc The IP version to use. Either 4 or 6.
 {mapping, "wamp.tcp.ip_version",
-"bondy.wamp_tcp.transport_opts.socket_opts.ip_version", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.wamp_tcp.transport_opts.socket_opts.ip_version",
+{translation, "bondy_router.wamp_tcp.transport_opts.socket_opts.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("wamp.tcp.ip_version", Conf),
       try
@@ -3440,7 +3440,7 @@ end}.
 
 %% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
 {mapping, "wamp.tcp.acceptors_pool_size",
-"bondy.wamp_tcp.transport_opts.num_acceptors", [
+"bondy_router.wamp_tcp.transport_opts.num_acceptors", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 200}
@@ -3448,7 +3448,7 @@ end}.
 
 %% The ranch max number of connections for the WAMP raw socket tcp listener
 {mapping, "wamp.tcp.max_connections",
-"bondy.wamp_tcp.transport_opts.max_connections", [
+"bondy_router.wamp_tcp.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 100000}
@@ -3456,7 +3456,7 @@ end}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "wamp.tcp.backlog",
-"bondy.wamp_tcp.transport_opts.socket_opts.backlog", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.backlog", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 1024}
@@ -3468,13 +3468,13 @@ end}.
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
 {mapping, "wamp.tcp.keepalive",
-"bondy.wamp_tcp.transport_opts.socket_opts.keepalive", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 {mapping, "wamp.tcp.linger.timeout",
-"bondy.wamp_tcp.transport_opts.socket_opts.linger_timeout", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.linger_timeout", [
   {default, "1s"},
   {validators, ["duration or -1..0"]},
   {datatype, [{duration, ms}, integer]}
@@ -3483,33 +3483,33 @@ end}.
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "wamp.tcp.nodelay",
-"bondy.wamp_tcp.transport_opts.socket_opts.nodelay", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 
 %% {mapping, "wamp.tcp.reuseaddr",
-%% "bondy.wamp_tcp.transport_opts.socket_opts.reuseaddr", [
+%% "bondy_router.wamp_tcp.transport_opts.socket_opts.reuseaddr", [
 %%   {datatype, {flag, on, off}},
 %%   {default, on}
 %% ]}.
 
 {mapping, "wamp.tcp.reuseport",
-"bondy.wamp_tcp.transport_opts.socket_opts.reuseport", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.reuseport", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
 
 %% The minimum size of the send buffer to use for the socket.
 {mapping, "wamp.tcp.sndbuf",
-"bondy.wamp_tcp.transport_opts.socket_opts.sndbuf", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
 {mapping, "wamp.tcp.recbuf",
-"bondy.wamp_tcp.transport_opts.socket_opts.recbuf", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -3521,7 +3521,7 @@ end}.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
 {mapping, "wamp.tcp.buffer",
-"bondy.wamp_tcp.transport_opts.socket_opts.buffer", [
+"bondy_router.wamp_tcp.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
@@ -3538,7 +3538,7 @@ end}.
 %% numbers of connections. A better solution in most cases is to let the client
 %% handle pings.
 {mapping, "wamp.tcp.ping.enabled",
-"bondy.wamp_tcp.ping.enabled", [
+"bondy_router.wamp_tcp.ping.enabled", [
 {default, on},
 {datatype, {flag, on, off}}
 ]}.
@@ -3549,7 +3549,7 @@ end}.
 %% the next.
 %% Notice this is not the same as wamp.tcp.idle_timeout.
 {mapping, "wamp.tcp.ping.idle_timeout",
-"bondy.wamp_tcp.ping.idle_timeout", [
+"bondy_router.wamp_tcp.ping.idle_timeout", [
 {default, "20s"},
 {datatype, {duration, ms}}
 ]}.
@@ -3559,7 +3559,7 @@ end}.
 %% Once that time has passed this counts as a fail attempt
 %% (see wamp.tcp.ping.max_attempts).
 {mapping, "wamp.tcp.ping.timeout",
-"bondy.wamp_tcp.ping.timeout", [
+"bondy_router.wamp_tcp.ping.timeout", [
 {default, "10s"},
 {datatype, {duration, ms}}
 ]}.
@@ -3568,7 +3568,7 @@ end}.
 %% missed pings are considered a timeout. Thus, after this number of attempts
 %% Bondy will drop the connection.
 {mapping, "wamp.tcp.ping.max_attempts",
-"bondy.wamp_tcp.ping.max_attempts",
+"bondy_router.wamp_tcp.ping.max_attempts",
 [
   {default, 2},
   {datatype, integer},
@@ -3585,7 +3585,7 @@ end}.
 %% If the client supports tcp PING control messages, enabled them,
 %% otherwise e.g. web browsers set wamp.tcp.ping.enabled to on.
 {mapping, "wamp.tcp.idle_timeout",
-"bondy.wamp_tcp.idle_timeout", [
+"bondy_router.wamp_tcp.idle_timeout", [
 {default, "8h"},
 {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
@@ -3594,7 +3594,7 @@ end}.
 %% the source IP address which will be used for matching against RBAC Source
 %% assignments.
 {mapping, "wamp.tcp.proxy_protocol",
-"bondy.wamp_tcp.proxy_protocol.enabled", [
+"bondy_router.wamp_tcp.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -3605,7 +3605,7 @@ end}.
 %% always accepted and Bondy will log when there is not Proxy Procotol header
 %% or if it is invalid.
 {mapping, "wamp.tcp.proxy_protocol.mode",
-"bondy.wamp_tcp.proxy_protocol.mode", [
+"bondy_router.wamp_tcp.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -3621,7 +3621,7 @@ end}.
 
 
 {mapping, "wamp.tls.enabled",
-"bondy.wamp_tls.enabled", [
+"bondy_router.wamp_tls.enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -3630,7 +3630,7 @@ end}.
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tls.port",
-"bondy.wamp_tls.transport_opts.socket_opts.port", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.port", [
   {default, 18085},
   {validators, ["port_number"]},
   {datatype, integer}
@@ -3640,19 +3640,19 @@ end}.
 %% exposing the WAMP raw socket transport. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "wamp.tls.ip",
-"bondy.wamp_tls.transport_opts.ip", [
+"bondy_router.wamp_tls.transport_opts.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
 
 %% @doc The IP version to use. Either 4 or 6.
 {mapping, "wamp.tls.ip_version",
-"bondy.wamp_tls.transport_opts.socket_opts.ip_version", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.wamp_tls.transport_opts.socket_opts.ip_version",
+{translation, "bondy_router.wamp_tls.transport_opts.socket_opts.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("wamp.tls.ip_version", Conf),
       try
@@ -3674,21 +3674,21 @@ end}.
 
 %% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
 {mapping, "wamp.tls.acceptors_pool_size",
-"bondy.wamp_tls.transport_opts.num_acceptors", [
+"bondy_router.wamp_tls.transport_opts.num_acceptors", [
   {datatype, integer},
   {default, 200}
 ]}.
 
 %% The ranch max number of connections for the WAMP raw socket tcp listener
 {mapping, "wamp.tls.max_connections",
-"bondy.wamp_tls.transport_opts.max_connections", [
+"bondy_router.wamp_tls.transport_opts.max_connections", [
   {datatype, integer},
   {default, 100000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "wamp.tls.backlog",
-"bondy.wamp_tls.transport_opts.socket_opts.backlog", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.backlog", [
   {datatype, integer},
   {default, 1024}
 ]}.
@@ -3700,14 +3700,14 @@ end}.
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
 {mapping, "wamp.tls.keepalive",
-"bondy.wamp_tls.transport_opts.socket_opts.keepalive", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 
 {mapping, "wamp.tls.linger.timeout",
-"bondy.wamp_tls.transport_opts.socket_opts.linger_timeout", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.linger_timeout", [
   {default, "1s"},
   {validators, ["duration or -1..0"]},
   {datatype, [{duration, ms}, integer]}
@@ -3716,32 +3716,32 @@ end}.
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "wamp.tls.nodelay",
-"bondy.wamp_tls.transport_opts.socket_opts.nodelay", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 
 %% {mapping, "wamp.tls.reuseaddr",
-%% "bondy.wamp_tls.transport_opts.socket_opts.reuseaddr", [
+%% "bondy_router.wamp_tls.transport_opts.socket_opts.reuseaddr", [
 %%   {datatype, {flag, on, off}},
 %%   {default, on}
 %% ]}.
 
 {mapping, "wamp.tls.reuseport",
-"bondy.wamp_tls.transport_opts.socket_opts.reuseport", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.reuseport", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
 %% The minimum size of the send buffer to use for the socket.
 {mapping, "wamp.tls.sndbuf",
-"bondy.wamp_tls.transport_opts.socket_opts.sndbuf", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
 {mapping, "wamp.tls.recbuf",
-"bondy.wamp_tls.transport_opts.socket_opts.recbuf", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -3753,7 +3753,7 @@ end}.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
 {mapping, "wamp.tls.buffer",
-"bondy.wamp_tls.transport_opts.socket_opts.buffer", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
@@ -3769,7 +3769,7 @@ end}.
 %% numbers of connections. A better solution in most cases is to let the client
 %% handle pings.
 {mapping, "wamp.tls.ping.enabled",
-"bondy.wamp_tls.ping.enabled", [
+"bondy_router.wamp_tls.ping.enabled", [
 {default, on},
 {datatype, {flag, on, off}}
 ]}.
@@ -3777,7 +3777,7 @@ end}.
 %% @doc If wamp.tls.ping.enabled is 'on', this parameter controls the interval
 %% in which Bondy sends WebSockets PING control messages.
 {mapping, "wamp.tls.ping.interval",
-"bondy.wamp_tls.ping.interval", [
+"bondy_router.wamp_tls.ping.interval", [
 {default, "30s"},
 {datatype, {duration, ms}}
 ]}.
@@ -3786,7 +3786,7 @@ end}.
 %% Bondy will wait for a ping response. Once that time has passed this counts
 %% as a fail attempt (see max_attempts).
 {mapping, "wamp.tls.ping.timeout",
-"bondy.wamp_tls.ping.timeout", [
+"bondy_router.wamp_tls.ping.timeout", [
 {default, "10s"},
 {datatype, {duration, ms}}
 ]}.
@@ -3797,7 +3797,7 @@ end}.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
 "wamp.tls.ping.max_attempts",
-"bondy.wamp_tls.ping.max_attempts",
+"bondy_router.wamp_tls.ping.max_attempts",
 [
   {default, 3},
   {datatype, [integer, {atom, infinity}]}
@@ -3813,7 +3813,7 @@ end}.
 %% If the client supports tls PING control messages, enabled them,
 %% otherwise e.g. web browsers set wamp.tls.ping.enabled to on.
 {mapping, "wamp.tls.idle_timeout",
-"bondy.wamp_tls.idle_timeout", [
+"bondy_router.wamp_tls.idle_timeout", [
 {default, "8h"},
 {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
@@ -3821,7 +3821,7 @@ end}.
 %% @doc Default cert location for https can be overridden
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.certfile",
-"bondy.wamp_tls.transport_opts.socket_opts.certfile", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.certfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
@@ -3829,7 +3829,7 @@ end}.
 %% @doc Default key location for https can be overridden with the
 %%wamp.tls config variable, for example:
 {mapping, "wamp.tls.keyfile",
-"bondy.wamp_tls.transport_opts.socket_opts.keyfile", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.keyfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
@@ -3837,7 +3837,7 @@ end}.
 %% @doc Default signing authority location for https can be overridden
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.cacertfile",
-"bondy.wamp_tls.transport_opts.socket_opts.cacertfile", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.cacertfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
@@ -3845,13 +3845,13 @@ end}.
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
 {mapping, "wamp.tls.versions",
-"bondy.wamp_tls.transport_opts.socket_opts.versions", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
 
 
-{translation, "bondy.wamp_tls.transport_opts.socket_opts.versions",
+{translation, "bondy_router.wamp_tls.transport_opts.socket_opts.versions",
   fun(Conf) ->
     case cuttlefish:conf_get("wamp.tls.versions", Conf) of
         Value when is_list(Value) ->
@@ -3879,7 +3879,7 @@ end}.
 
 %% @doc SSL verification mode for WAMP TLS connections
 {mapping, "wamp.tls.verify",
-"bondy.wamp_tls.transport_opts.socket_opts.verify", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.verify", [
   {datatype, {enum, [verify_peer, verify_none]}},
   {default, verify_none}
 ]}.
@@ -3887,7 +3887,7 @@ end}.
 %% @doc Whether to reject connections where the client does not provide a
 %% certificate when verify is set to verify_peer.
 {mapping, "wamp.tls.fail_if_no_peer_cert",
-"bondy.wamp_tls.transport_opts.socket_opts.fail_if_no_peer_cert", [
+"bondy_router.wamp_tls.transport_opts.socket_opts.fail_if_no_peer_cert", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -3896,7 +3896,7 @@ end}.
 %% the source IP address which will be used for matching against RBAC Source
 %% assignments.
 {mapping, "wamp.tls.proxy_protocol",
-"bondy.wamp_tls.proxy_protocol.enabled", [
+"bondy_router.wamp_tls.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -3907,7 +3907,7 @@ end}.
 %% always accepted and Bondy will log when there is not Proxy Procotol header
 %% or if it is invalid.
 {mapping, "wamp.tls.proxy_protocol.mode",
-"bondy.wamp_tls.proxy_protocol.mode", [
+"bondy_router.wamp_tls.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -3922,7 +3922,7 @@ end}.
 %% @doc Defines whether a Bondy node should perform a cluster leave operation
 %% automatically when it is being shutdown.
 {mapping, "cluster.automatic_leave",
-"bondy.automatic_leave", [
+"bondy_router.automatic_leave", [
   {default, off},
   {datatype, flag}
 ]}.
@@ -4009,58 +4009,58 @@ end}.
 ]}.
 
 {mapping, "cluster.channels.default.parallelism",
-"bondy.channels.undefined.parallelism", [
+"bondy_router.channels.undefined.parallelism", [
   {default, 1},
   {datatype, integer}
 ]}.
 
 {mapping, "cluster.channels.default.compression",
-"bondy.channels.undefined.compression", [
+"bondy_router.channels.undefined.compression", [
   {default, off},
   {datatype, [flag, integer]}
 ]}.
 
 
 {mapping, "cluster.channels.data.parallelism",
-"bondy.channels.data.parallelism", [
+"bondy_router.channels.data.parallelism", [
   {default, 2},
   {datatype, integer}
 ]}.
 
 {mapping, "cluster.channels.data.compression",
-"bondy.channels.data.compression", [
+"bondy_router.channels.data.compression", [
   {default, off},
   {datatype, [flag, integer]}
 ]}.
 
 
 {mapping, "cluster.channels.control_plane.parallelism",
-"bondy.channels.partisan_membership.parallelism", [
+"bondy_router.channels.partisan_membership.parallelism", [
   {default, 1},
   {datatype, integer}
 ]}.
 
 {mapping, "cluster.channels.control_plane.compression",
-"bondy.channels.partisan_membership.compression", [
+"bondy_router.channels.partisan_membership.compression", [
   {default, on},
   {datatype, [flag, integer]}
 ]}.
 
 
 {mapping, "cluster.channels.wamp_relay.parallelism",
-"bondy.channels.wamp_relay.parallelism", [
+"bondy_router.channels.wamp_relay.parallelism", [
   {default, 2},
   {datatype, integer}
 ]}.
 
 {mapping, "cluster.channels.wamp_relay.compression",
-"bondy.channels.wamp_relay.compression", [
+"bondy_router.channels.wamp_relay.compression", [
   {default, false},
   {datatype, [flag, integer]}
 ]}.
 
 %% {translation,
-%% "bondy.channels",
+%% "bondy_router.channels",
 %% fun(Conf0) ->
 %%     Conf = cuttlefish_variable:filter_by_prefix(
 %%       "cluster.channels", Conf0
@@ -4464,7 +4464,7 @@ end}.
 
 %% @see platform_lib_dir
 {mapping, "platform_lib_dir",
-"bondy.platform_lib_dir", [
+"bondy_router.platform_lib_dir", [
   {datatype, directory},
   {default, "{{platform_lib_dir}}"},
   hidden
@@ -4473,14 +4473,14 @@ end}.
 
 %% @see platform_data_dir
 {mapping, "platform_data_dir",
-"bondy.platform_data_dir", [
+"bondy_router.platform_data_dir", [
   {datatype, directory},
   {default, "{{platform_data_dir}}"}
 ]}.
 
 %% @see platform_tmp_dir
 {mapping, "platform_tmp_dir",
-"bondy.platform_tmp_dir", [
+"bondy_router.platform_tmp_dir", [
   {datatype, directory},
   {default, "{{platform_tmp_dir}}"}
 ]}.
@@ -4488,7 +4488,7 @@ end}.
 
 %% @see platform_log_dir
 {mapping, "platform_log_dir",
-"bondy.platform_log_dir", [
+"bondy_router.platform_log_dir", [
   {datatype, directory},
   {default, "{{platform_log_dir}}"}
 ]}.

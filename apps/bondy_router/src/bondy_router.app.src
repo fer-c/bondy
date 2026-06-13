@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-{application, bondy,
+{application, bondy_router,
  [
     {description,
         "Bondy is an open source, always-on and scalable "
