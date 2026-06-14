@@ -17,6 +17,14 @@ defmodule Bench do
   # __DIR__ is bench/lib, so the bondy umbrella root is two up.
   @project_root Path.expand("../..", __DIR__)
   @rebar_default_lib Path.join([@project_root, "_build", "default", "lib"])
+  # Some umbrella deps (e.g. bondy_mst) are rebar3 checkouts, which build to
+  # _build/default/checkouts/<dep>/ebin rather than .../lib — scan both.
+  @rebar_default_checkouts Path.join([
+                             @project_root,
+                             "_build",
+                             "default",
+                             "checkouts"
+                           ])
   @output_dir Path.join([@project_root, "bench", "_output"])
 
   @doc """
@@ -135,9 +143,12 @@ defmodule Bench do
   end
 
   defp prepend_beam_paths! do
-    # Default first so production deps win on dup; bench second so
-    # leveled (only in bench profile) is reachable.
-    Enum.each([@rebar_default_lib, @rebar_bench_lib], fn root ->
+    # The rebar3 `default` profile lib holds every production dep including
+    # leveled (a normal dependency of :bondy_db in this umbrella); the
+    # checkouts dir holds rebar3 checkout deps (e.g. bondy_mst). (A separate
+    # `bench` profile root was once listed here but never defined; dropped to
+    # fix a nil File.ls/1 crash.)
+    Enum.each([@rebar_default_lib, @rebar_default_checkouts], fn root ->
       case File.ls(root) do
         {:ok, deps} ->
           Enum.each(deps, fn dep ->
