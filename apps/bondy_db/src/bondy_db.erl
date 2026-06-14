@@ -473,18 +473,22 @@ open_table_provision(
                 {ok, InstanceIds, CacheHandles} ->
                     case provision_indexes(Db, NS, Merged, ShardCount, Backend) of
                         {ok, IndexMap} ->
-                            %% Mandatory startup backfill (IDX-4): re-fold the
-                            %% (possibly durable, possibly peer-bootstrapped)
-                            %% primary into every index before returning. For an
-                            %% ets-backed index the shards start empty, so this
-                            %% is the only way they get populated; for a
-                            %% leveled-backed index the cells persist across
-                            %% restart, so this is a (currently unconditional)
-                            %% re-fold that converges idempotently — see D-8,
-                            %% cold-start trust-vs-rebuild is a separate change.
-                            %% Also freshens every secondary shard so a finite
-                            %% `max_lag` read passes even on an empty shard.
-                            ok = backfill_indexes(NS, IndexMap),
+                            %% Cold-start index recovery (§6.6.1–6.6.3). For each
+                            %% index, load every shard's durable trust marker
+                            %% (`index_load_rebuild_marker/1`): a shard that is
+                            %% built + clean (marker present, kept complete
+                            %% `<= snapshot_wm` by the §6.6.2 compaction flush
+                            %% barrier) is TRUSTED and only freshened; a shard
+                            %% with no marker (a newly-declared index, or one
+                            %% left incomplete by a pre-restart drop, or any
+                            %% ephemeral/ETS shard whose cells were wiped on
+                            %% restart) is REBUILT from the primary. This
+                            %% replaces the old unconditional O(table) backfill —
+                            %% the common durable restart is now trust + bounded
+                            %% tail-replay, never a full re-derive. Freshening
+                            %% (or the rebuild's own freshen) keeps a finite
+                            %% `max_lag` read passing even on an empty shard.
+                            ok = cold_start_indexes(NS, IndexMap),
                             {ok, #{
                                 db_name => DbName,
                                 db_topology => Topology,
@@ -570,6 +574,33 @@ effective_topology(ets, #{
     {bondy_db_topology_memory, S};
 effective_topology(ets, #{ets_provider := S}) ->
     {bondy_db_topology_memory, S}.
+
+%% @private
+%% The projection backend for an index, given the originating TABLE's backend.
+%% This is the single decision seam (PLUM_DB_TO_BONDY_DB_DESIGN.md §6.6.5):
+%% index durability FOLLOWS the table by default — an `ets` table gets `ets`
+%% indices, a `leveled` table gets `leveled` indices — so index cells live next
+%% to the data they index and inherit its lifecycle (cold-start trust marker,
+%% compaction flush barrier).
+%%
+%% The only knob today is a GLOBAL `force_ets_indices` kill-switch (app env
+%% `{bondy_db, force_ets_indices}`): on a durable (`leveled`) table it routes
+%% indices to the DB's ephemeral memory provider instead — rollout safety, and
+%% the niche where ETS indices on a durable table win (hot + small +
+%% frequently-compacted). It NEVER makes an ephemeral table's indices durable:
+%% durable indices over RAM-only data that is itself rebuilt from peers is
+%% nonsensical (§6.6.5), so `ets` always maps to `ets`.
+%%
+%% A per-table / per-index override is a trivial later add HERE — the `Spec` is
+%% in scope, so a future `index_backend` key on the spec would slot in without
+%% touching the call sites. Kept as a clean seam rather than a knob for now.
+index_backend(ets, _Spec) ->
+    ets;
+index_backend(leveled, _Spec) ->
+    case application:get_env(bondy_db, force_ets_indices, false) of
+        true -> ets;
+        _ -> leveled
+    end.
 
 -doc """
 Release the resources owned by `Table`. Stops every per-shard oplog
@@ -1820,7 +1851,7 @@ provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
     Name = bondy_oplog_index_spec:name(Spec),
     SecShardCount = maps:get(sec_shard_count, Spec, DefaultShardCount),
     CoalesceMs = bondy_oplog_index_spec:coalesce_ms(Spec),
-    {Topology, EffState} = effective_topology(Backend, Db),
+    {Topology, EffState} = effective_topology(index_backend(Backend, Spec), Db),
     case Topology:open_table(Name, SecShardCount, #{}, EffState) of
         {ok, TableState, _NewState} ->
             case
@@ -1996,16 +2027,68 @@ index_descriptors(Specs, DefaultShardCount) ->
     ].
 
 %% @private
-%% Startup backfill (IDX-4): rebuild every declared index from the primary
-%% once, after the writers are up. Best-effort — a failure leaves the
-%% index marked for rebuild (reads refuse), recoverable by a later trigger
-%% — so it never fails `open_table`.
-backfill_indexes(NS, IndexMap) ->
+%% Cold-start index recovery (§6.6.1–6.6.3). For each declared index, decide
+%% per shard whether to TRUST (the durable trust marker is present — built and
+%% kept complete `<= snapshot_wm` by the §6.6.2 flush barrier) or REBUILD (no
+%% marker: a new index, a pre-restart drop, or a wiped ephemeral shard). If
+%% ANY shard of an index is unmarked, rebuild the whole index from the primary
+%% (`rebuild_sync` is per-index and re-derives + freshens every shard);
+%% otherwise just freshen the trusted shards so a finite `max_lag` read passes.
+%% Best-effort — a failure leaves the index marked for rebuild (reads refuse),
+%% recoverable by a later trigger — so it never fails `open_table`.
+cold_start_indexes(NS, IndexMap) ->
     maps:foreach(
-        fun(Name, _Provision) ->
-            _ = bondy_oplog_index_rebuild:rebuild_sync(NS, Name)
+        fun(Name, #{sec_shard_count := SecShardCount}) ->
+            case load_index_trust_markers(NS, Name, SecShardCount) of
+                trusted ->
+                    %% Every shard built + clean: trust the persisted cells,
+                    %% just freshen so finite-`max_lag` reads pass.
+                    freshen_index_shards(NS, Name, SecShardCount);
+                needs_rebuild ->
+                    %% At least one shard is unmarked — rebuild the index from
+                    %% the primary (re-derives + freshens all shards).
+                    _ = bondy_oplog_index_rebuild:rebuild_sync(NS, Name)
+            end
         end,
         IndexMap
+    ).
+
+%% @private
+%% Load every shard's durable trust marker into its in-memory `needs_rebuild`
+%% flag and report whether the whole index is trusted. Loading sets the flag
+%% from disk even for trusted shards (so a later read sees the right state).
+load_index_trust_markers(NS, Name, SecShardCount) ->
+    Flags = [
+        shard_needs_rebuild(NS, Name, Shard)
+     || Shard <- lists:seq(0, SecShardCount - 1)
+    ],
+    case lists:member(true, Flags) of
+        true -> needs_rebuild;
+        false -> trusted
+    end.
+
+%% @private
+shard_needs_rebuild(NS, Name, Shard) ->
+    case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
+        {ok, Entry} ->
+            bondy_oplog_core_registry:index_load_rebuild_marker(Entry);
+        _ ->
+            %% No registry entry (shouldn't happen post-provision) — be safe
+            %% and force a rebuild.
+            true
+    end.
+
+%% @private
+%% Freshen every shard of a trusted index (bump AE) so a finite `max_lag` read
+%% passes without a rebuild — including an empty shard, which a write path
+%% would otherwise leave sentinel-stale forever.
+freshen_index_shards(NS, Name, SecShardCount) ->
+    Now = erlang:monotonic_time(millisecond),
+    lists:foreach(
+        fun(Shard) ->
+            _ = bondy_oplog_core_registry:bump_ae(NS, Name, Shard, Now)
+        end,
+        lists:seq(0, SecShardCount - 1)
     ).
 
 %% =============================================================================

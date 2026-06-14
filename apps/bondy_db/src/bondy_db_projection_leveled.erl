@@ -115,7 +115,7 @@ every cell is guaranteed to have — `value_equals_state` cells omit
     put_batch/2,
     range/5,
     delete/3,
-    clear/1,
+    clear/2,
     info/1
 ]).
 
@@ -336,46 +336,37 @@ delete(#{bookie := Pid}, Bucket, Key) when
     end.
 
 -doc """
-Delete every cell in this Bookie's `?HEAD_TAG` keyspace (the optional
-`clear/1` callback). Folds all keys across all buckets — keyed off the
-always-present `?SK_STATE` subkey so each cell is counted once — and
-removes both subkeys of every cell in one atomic `book_mput/2`.
+Bucket-scoped wipe of one index's cells (the optional `clear/2` callback).
+`BucketSuffix` is `bondy_oplog_index_key:bucket_suffix/1`
+(`<<"/$idx/", IndexName>>`); every index bucket ends with it
+(`bondy_oplog_index_key:bucket/2`), regardless of realm.
 
-**Scope.** This wipes the WHOLE Bookie, so it is correct only on a
-topology that dedicates a Bookie to this logical shard (`per_entity`,
-`single_bookie`). A topology that co-locates several logical tables in
-one Bookie (`shared_shards`) must NOT route a clearable projection — a
-rebuildable secondary index — onto a shared Bookie, or this would also
-delete the co-located tables' cells.
+Two phases, ledger-only:
+
+1. `book_bucketlist/4` enumerates the Bookie's buckets and keeps those whose
+   binary **ends with** `BucketSuffix`. This is cheap — there are few buckets
+   — and skips the keys of every co-located table.
+2. For each matching bucket, `book_keylist/4` folds its keys (keyed off the
+   always-present `?SK_STATE` subkey so each cell is counted once) into
+   `remove` specs for both subkeys, then one atomic `book_mput/2` per bucket.
+
+**Scope correctness.** Because only buckets ending with `BucketSuffix` are
+touched, this is correct on **every** topology — including `shared_shards`
+and `single_bookie` where the Bookie holds other tables' cells (their
+primary buckets have no `/$idx/` infix; their other indexes have a different
+suffix). The one residual constraint: two logical tables co-located in the
+**same** Bookie must not declare the **same** `IndexName` — the suffix omits
+the `EntityType`, so they would share it. See
+`bondy_oplog_index_key:bucket_suffix/1`.
 
 Used by `bondy_oplog_index_rebuild` to drop orphaned index terms before
 re-folding a secondary index from the primary.
 """.
--spec clear(handle()) -> ok.
+-spec clear(handle(), BucketSuffix :: binary()) -> ok.
 
-clear(#{bookie := Pid}) ->
-    FoldFun =
-        fun
-            (Bucket, {Key, ?SK_STATE}, Acc) ->
-                [
-                    {remove, Bucket, Key, ?SK_STATE, null},
-                    {remove, Bucket, Key, ?SK_VALUE, null}
-                    | Acc
-                ];
-            (_Bucket, {_Key, _SubKey}, Acc) ->
-                Acc
-        end,
-    {async, Folder} =
-        leveled_bookie:book_keylist(Pid, ?HEAD_TAG, {FoldFun, []}),
-    case Folder() of
-        [] ->
-            ok;
-        ObjectSpecs ->
-            case leveled_bookie:book_mput(Pid, ObjectSpecs) of
-                ok -> ok;
-                pause -> ok
-            end
-    end.
+clear(#{bookie := Pid}, BucketSuffix) when is_binary(BucketSuffix) ->
+    Buckets = matching_buckets(Pid, BucketSuffix),
+    lists:foreach(fun(Bucket) -> clear_bucket(Pid, Bucket) end, Buckets).
 
 -spec info(handle()) -> #{atom() => term()}.
 
@@ -391,6 +382,57 @@ info(#{bookie := Pid}) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% List every bucket in the Bookie's ?HEAD_TAG keyspace whose binary ends
+%% with `Suffix`. Ledger-only fold over buckets (cheap — bounded by the
+%% number of distinct buckets, not keys).
+matching_buckets(Pid, Suffix) ->
+    FoldFun =
+        fun(Bucket, Acc) ->
+            case is_bucket_suffix(Suffix, Bucket) of
+                true -> [Bucket | Acc];
+                false -> Acc
+            end
+        end,
+    {async, Folder} =
+        leveled_bookie:book_bucketlist(Pid, ?HEAD_TAG, {FoldFun, []}, all),
+    Folder().
+
+%% True when binary `Bucket` ends with binary `Suffix`.
+is_bucket_suffix(Suffix, Bucket) when is_binary(Bucket) ->
+    SS = byte_size(Suffix),
+    BS = byte_size(Bucket),
+    BS >= SS andalso binary:part(Bucket, BS - SS, SS) =:= Suffix;
+is_bucket_suffix(_Suffix, _Bucket) ->
+    %% Non-binary bucket (not produced by this layer) — never a match.
+    false.
+
+%% Remove every cell of one bucket. Folds the bucket's keys keyed off the
+%% always-present `?SK_STATE` subkey (so each cell is counted once) into
+%% remove specs for both subkeys, then one atomic `book_mput/2`.
+clear_bucket(Pid, Bucket) ->
+    FoldFun =
+        fun
+            (B, {Key, ?SK_STATE}, Acc) ->
+                [
+                    {remove, B, Key, ?SK_STATE, null},
+                    {remove, B, Key, ?SK_VALUE, null}
+                    | Acc
+                ];
+            (_B, {_Key, _SubKey}, Acc) ->
+                Acc
+        end,
+    {async, Folder} =
+        leveled_bookie:book_keylist(Pid, ?HEAD_TAG, Bucket, {FoldFun, []}),
+    case Folder() of
+        [] ->
+            ok;
+        ObjectSpecs ->
+            case leveled_bookie:book_mput(Pid, ObjectSpecs) of
+                ok -> ok;
+                pause -> ok
+            end
+    end.
 
 %% Read the state subkey, returning {ok, Hlc, StateBytes} | not_found.
 read_state_subkey(Pid, Bucket, Key) ->

@@ -16,6 +16,17 @@
 %% clear the pending record after this long so compaction can resume.
 -define(CATCH_UP_TIMEOUT_MS, 30000).
 
+%% The substrate's reserved primary-index id (matches `bondy_db`'s `?INDEX`
+%% and `bondy_oplog_index_rebuild`'s `?INDEX`). A registry shard whose index
+%% id is anything else is a secondary index.
+-define(PRIMARY_INDEX, primary).
+
+%% Bounded wait for a secondary-index writer flush during the compaction
+%% flush barrier (§6.6.2). Generous — a normal flush drains only a ~5 ms
+%% coalesce buffer — so it only ever trips on a genuinely wedged/dead
+%% writer, which then takes the §6.6.3 rebuild backstop.
+-define(IDX_FLUSH_TIMEOUT_MS, 5000).
+
 %% Ephemeral fused-writer mode (fused-writer rollout, Step 3). When
 %% `#state.fused` is set, the instance drains its own WAL and installs
 %% inline (no applier, no install cast). These mirror the applier's drain
@@ -293,6 +304,16 @@ without protocol changes.
     %% Token source disambiguating a `{catch_up_done, _}` / compaction
     %% watchdog from a superseded cycle.
     compaction_token = 0 :: non_neg_integer(),
+    %% Cached namespace of this instance's `bondy_db` table, used by the
+    %% compaction flush barrier (`drive_secondary_indexes/1`) to locate the
+    %% table's secondary-index writers via the registry. Resolved lazily on
+    %% the first catalogue compaction by scanning the registry for the
+    %% primary-shard entry carrying THIS `instance_id` (read-only ETS, so
+    %% deadlock-free — never an applier call). `unresolved` until then; then
+    %% the NS atom, or `none` when this instance has no `bondy_db` primary
+    %% registry entry (a bare-oplog instance). Only catalogue
+    %% (projection-backed) instances reach the resolver.
+    secondary_index_ns = unresolved :: atom(),
     %% Ephemeral fused-writer flag. `true` only for ephemeral (ets
     %% projection) instances that opt into the single-process write
     %% path where the applier's `cell_apply` and this instance's MST
@@ -4171,7 +4192,31 @@ begin_async_catch_up(State, Started, Frontier) ->
 %% `interpret_cog` (the projection is the authoritative read source).
 %% Verified by
 %% `bondy_oplog_catalogue_compaction_test:crdt_kernel_compaction_matches_from_scratch`.
-finalize_catalogue_compaction(State, Started, Frontier) ->
+finalize_catalogue_compaction(State0, Started, Frontier) ->
+    %% Index flush barrier (§6.6.2). Drive the secondary indexes durably to
+    %% >= Frontier BEFORE the MST tail is truncated. Every index op for an
+    %% event <= Frontier has already been DISPATCHED to the secondary writers
+    %% (local events at apply time; remote events by the async catch-up that
+    %% runs before this finalize). Those ops live in the writers' buffers,
+    %% independent of the MST — but a crash AFTER the truncate and BEFORE a
+    %% writer flushes would lose them (their source events are gone from the
+    %% MST). So flush every target index writer here first: the durable index
+    %% then holds everything <= Frontier (= the new snapshot watermark) by
+    %% construction, keeping cold-start a trust + bounded tail-replay, never
+    %% an O(table) re-derive.
+    %%
+    %% Deadlock-free: this is an instance->writer call and the writer's flush
+    %% never calls back into the instance or applier (one-directional edge —
+    %% contrast the instance<->applier cycle that forced the async catch-up).
+    %% A wedged/dead writer is caught and its shard marked for rebuild (the
+    %% §6.6.3 backstop) so truncation still proceeds.
+    %%
+    %% NOTE (§6.6.2, partial): this covers the common case where the ops were
+    %% dispatched. The saturation/drop case (index ops never dispatched) still
+    %% relies on the writer-crash/drop `needs_rebuild` + background rebuild
+    %% from the (un-truncated) projection; re-deriving the dropped window here
+    %% needs the applier and therefore the async path (see the design note).
+    State = drive_secondary_indexes(State0),
     {ok, CkptUs} = tc(fun() ->
         (State#state.compaction_checkpoint):put_checkpoint(
             State#state.compaction_checkpoint_state,
@@ -4236,6 +4281,137 @@ fused_reanchor_cursor(undefined, _NewRoot) ->
     undefined;
 fused_reanchor_cursor(#fused_drain{} = FD, NewRoot) ->
     FD#fused_drain{last_replayed_root = NewRoot}.
+
+%% @private
+%% Compaction flush barrier (§6.6.2). flush_sync every **durable** secondary-
+%% index writer of this instance's `bondy_db` table so dispatched index ops are
+%% durable before the MST tail is truncated. Returns State with the NS memoised
+%% (see `resolve_secondary_index_ns/1`). A no-op for an instance with no
+%% projection or no `bondy_db` registry entry (a bare-oplog instance). A table
+%% with only EPHEMERAL (ETS) indexes does the cheap per-compaction filter in
+%% `flush_secondary_index_writers/1` and issues NO flush round-trips: an
+%% ephemeral index needs no flush (a crash drops the in-RAM MST and index
+%% together; it reconverges from peers).
+drive_secondary_indexes(#state{has_projection = false} = State) ->
+    State;
+drive_secondary_indexes(State0) ->
+    case resolve_secondary_index_ns(State0) of
+        {none, State} ->
+            State;
+        {NS, State} ->
+            ok = flush_secondary_index_writers(NS),
+            State
+    end.
+
+%% @private
+%% Resolve (once, then cache) the `bondy_db` namespace whose primary shard
+%% carries THIS `instance_id`. The NS is STABLE from instance start — the
+%% primary registry entry is registered before the instance is started
+%% (`bondy_db:provision_shard/11`), so by the time any compaction runs it is
+%% present — hence safe to cache. `none` (also stable, also cached) means no
+%% primary entry matches: a bare-oplog instance, never a `bondy_db` table.
+%%
+%% We DELIBERATELY do NOT also cache "has durable index shards" here. Index
+%% shards register AFTER the primary (and this instance) come up, so a
+%% compaction racing that window would otherwise latch a permanent "nothing to
+%% flush" and silently stop protecting the index. Whether there is durable work
+%% is therefore re-evaluated cheaply on every compaction in
+%% `flush_secondary_index_writers/1` (one `shards_for/1` select + filter), which
+%% self-heals the instant the index shards appear. Deadlock-free (read-only ETS;
+%% never an applier call).
+resolve_secondary_index_ns(#state{secondary_index_ns = unresolved} = State) ->
+    NS = lookup_ns_for_instance(State#state.instance_id),
+    {NS, State#state{secondary_index_ns = NS}};
+resolve_secondary_index_ns(#state{secondary_index_ns = NS} = State) ->
+    {NS, State}.
+
+%% @private
+%% Scan the registry for the namespace whose primary shard carries
+%% `InstanceId`. Only primary-shard entries record an `instance_id`
+%% (secondaries leave it `undefined`), so a match uniquely identifies the
+%% owning table. `none` when no entry matches (a bare-oplog instance).
+lookup_ns_for_instance(InstanceId) ->
+    find_ns(bondy_oplog_core_registry:namespaces(), InstanceId).
+
+%% @private
+find_ns([], _InstanceId) ->
+    none;
+find_ns([NS | Rest], InstanceId) ->
+    Owns = lists:any(
+        fun(E) ->
+            bondy_oplog_core_registry:entry_instance_id(E) =:= InstanceId
+        end,
+        bondy_oplog_core_registry:shards_for(NS)
+    ),
+    case Owns of
+        true -> NS;
+        false -> find_ns(Rest, InstanceId)
+    end.
+
+%% @private
+%% A secondary-index shard whose projection is durable (anything other than
+%% the in-RAM ETS adapter — the only ephemeral projection, in this app).
+%% Primaries and ETS-backed indexes return `false`: a primary has nothing to
+%% flush here, and an ETS index has no durability to protect.
+is_durable_index_shard(E) ->
+    case bondy_oplog_core_registry:entry_key(E) of
+        {_NS, ?PRIMARY_INDEX, _Shard} ->
+            false;
+        {_NS, _IndexName, _Shard} ->
+            bondy_oplog_core_registry:entry_projection_adapter(E) =/=
+                bondy_oplog_projection_ets
+    end.
+
+%% @private
+%% flush_sync every DURABLE secondary-index writer registered under `NS`. A
+%% writer that cannot flush in `?IDX_FLUSH_TIMEOUT_MS` (dead/wedged) is skipped
+%% and its shard marked for rebuild (the §6.6.3 backstop) so truncation still
+%% proceeds and the shard is recovered in the background from the
+%% (un-truncated) projection.
+flush_secondary_index_writers(NS) ->
+    lists:foreach(
+        fun(E) ->
+            case is_durable_index_shard(E) of
+                true -> flush_or_backstop(E);
+                false -> ok
+            end
+        end,
+        bondy_oplog_core_registry:shards_for(NS)
+    ).
+
+%% @private
+flush_or_backstop(Entry) ->
+    case bondy_oplog_core_registry:entry_writer_pid(Entry) of
+        Pid when is_pid(Pid) ->
+            try
+                ok = bondy_oplog_secondary_writer:flush_sync(
+                    Pid, ?IDX_FLUSH_TIMEOUT_MS
+                )
+            catch
+                Class:Reason ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "bondy_oplog_instance compaction flush barrier "
+                            "could not flush a secondary-index writer; "
+                            "marking the shard for rebuild and proceeding "
+                            "with the truncate (§6.6.3 backstop).",
+                        entry_key => bondy_oplog_core_registry:entry_key(Entry),
+                        class => Class,
+                        reason => Reason
+                    }),
+                    backstop_index_rebuild(Entry)
+            end;
+        _ ->
+            %% No live writer (restarting): its buffered ops are gone with
+            %% it, so mark for rebuild rather than silently dropping them.
+            backstop_index_rebuild(Entry)
+    end.
+
+%% @private
+backstop_index_rebuild(Entry) ->
+    bondy_oplog_core_registry:index_mark_rebuild(Entry),
+    {NS, IndexName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
+    bondy_oplog_index_rebuild:request(NS, IndexName).
 
 %% @private
 %% The raw `{Key, Value}` MST pairs whose key falls in the

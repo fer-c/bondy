@@ -28,10 +28,11 @@ interleaving another rebuild's flush would lose data).
 For one index `(NS, IndexName)`:
 
 1. **Discard + wipe** every target secondary shard: reset the writer's
-   buffered ops (stale, possibly for terms since removed), `clear/1` the
-   shard's ETS projection (so orphaned terms do not survive), reset the
-   in-flight counter, and reset freshness to stale so reads refuse mid
-   rebuild.
+   buffered ops (stale, possibly for terms since removed), `clear/2` the
+   shard's projection scoped to the index's bucket suffix (so orphaned
+   terms do not survive, without touching co-located tables on a shared
+   backend), reset the in-flight counter, and reset freshness to stale so
+   reads refuse mid rebuild.
 2. **Re-derive** every primary shard's index via
    `bondy_oplog_applier:rebuild_indexes_sync/1`. That reads each live
    cell's CURRENT projection value and re-dispatches a `put` for every live
@@ -236,6 +237,12 @@ do_rebuild(NS, IndexName, Primaries, Targets, AllSec) ->
 
 %% @private
 reset_target_shard(Entry) ->
+    %% Mark the shard untrusted FIRST (in-memory flag set + durable trust
+    %% marker removed) so that, even for an operator-triggered rebuild of an
+    %% already-trusted shard, a crash between the wipe below and the
+    %% `index_clear_rebuild` in step 4 leaves the shard untrusted on disk —
+    %% the next cold-start rebuilds rather than trusting half-wiped cells.
+    bondy_oplog_core_registry:index_mark_rebuild(Entry),
     case bondy_oplog_core_registry:entry_writer_pid(Entry) of
         Pid when is_pid(Pid) ->
             _ = catch bondy_oplog_secondary_writer:reset(Pid);
@@ -244,18 +251,25 @@ reset_target_shard(Entry) ->
     end,
     Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-    case erlang:function_exported(Adapter, clear, 1) of
+    %% Bucket-scoped wipe: pass the index's bucket suffix so a backend that
+    %% co-locates several tables in one keyspace (`shared_shards`,
+    %% `single_bookie`) only drops THIS index's cells. The suffix is derived
+    %% from the entry's IndexName — the only table-identifying datum the
+    %% registry entry carries at this layer.
+    {_NS, IndexName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
+    Suffix = bondy_oplog_index_key:bucket_suffix(IndexName),
+    case erlang:function_exported(Adapter, clear, 2) of
         true ->
-            _ = catch Adapter:clear(Handle);
+            _ = catch Adapter:clear(Handle, Suffix);
         false ->
             %% Without a clear, the re-fold still re-puts every live term;
             %% only orphaned terms (no longer yielded) would survive. Both
-            %% shipped projection adapters (ets, leveled) export clear/1, so
+            %% shipped projection adapters (ets, leveled) export clear/2, so
             %% this is a defensive branch for a future adapter lacking it.
             ?LOG_WARNING(#{
                 description =>
                     "bondy_oplog_index_rebuild: projection adapter has no "
-                    "clear/1; orphaned index terms may survive the rebuild.",
+                    "clear/2; orphaned index terms may survive the rebuild.",
                 adapter => Adapter
             })
     end,
@@ -293,7 +307,7 @@ flush_writer(Entry) ->
 %% @private
 clean_namespace_tmp(_NS, _IndexName) ->
     %% No transient filesystem artefacts to clean: a durable (leveled) index
-    %% is wiped in place by `clear/1` and re-derived, leaving no temp files.
+    %% is wiped in place by `clear/2` and re-derived, leaving no temp files.
     %% Hook kept so the rebuild has a single completion point.
     ok.
 

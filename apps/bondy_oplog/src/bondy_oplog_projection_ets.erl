@@ -72,7 +72,7 @@ to exercise the fast-path; production reads use the fallback.)
     put_batch/2,
     range/5,
     delete/3,
-    clear/1,
+    clear/2,
     info/1
 ]).
 
@@ -165,14 +165,20 @@ delete(Tab, Bucket, Key) ->
     ok.
 
 -doc """
-Delete every row in the backing table. The optional `clear/1` callback
+Delete every row in the backing table (the optional `clear/2` callback),
 used by the secondary-index rebuild (IDX-4) to wipe a stale index shard
 before re-folding it from the primary, so orphaned terms (entries the
-primary value no longer yields) do not survive the rebuild. Safe to call
-from any process — `ets:delete_all_objects/1` only needs object-write
-access, which the `public` table grants.
+primary value no longer yields) do not survive the rebuild.
+
+`BucketSuffix` is accepted for behaviour conformance but **ignored**: this
+adapter creates one anonymous table per `(NS, Index, Shard)` (see `open/4`),
+so every row already belongs to the one index being rebuilt — clearing the
+whole table *is* the bucket-scoped wipe, and is O(index size). (The suffix
+matters only on backends that co-locate several tables in one keyspace; ETS
+never does.) Safe to call from any process — `ets:delete_all_objects/1` only
+needs object-write access, which the `public` table grants.
 """.
-clear(Tab) ->
+clear(Tab, BucketSuffix) when is_binary(BucketSuffix) ->
     true = ets:delete_all_objects(Tab),
     ok.
 

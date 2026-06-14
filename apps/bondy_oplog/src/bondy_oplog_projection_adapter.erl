@@ -55,6 +55,12 @@ passes a new Bucket value to `get/3`, `put_batch/2`, `range/5`, or
   mechanism (e.g. leveled's tag extractor + `book_head/4`) implement
   it; adapters that don't can omit the export and the substrate falls
   back to `get/3 + bondy_oplog_cell_frame:extract_head/1`.
+- `clear/2` — bucket-scoped wipe of one index's cells, used by the
+  secondary-index rebuild before a re-fold. Takes the
+  `bondy_oplog_index_key:bucket_suffix/1` of the index so the wipe stays
+  scoped to that index even on a backend that co-locates tables in one
+  keyspace. Adapters that cannot wipe degrade gracefully (the rebuild
+  re-puts every live term regardless; only orphaned terms would survive).
 
 Adapters MUST be safe under concurrent readers; `put_batch/2` may be
 single-writer (the substrate guarantees one applier per shard).
@@ -128,10 +134,15 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -callback head(handle(), bucket(), Key :: term()) ->
     {ok, HeadBytes :: binary()} | not_found.
 
-%% Wipe every object in the handle's keyspace (used by the secondary-index
-%% rebuild before a re-fold). Optional: only the ETS projection implements
-%% it; the rebuild guards the call with `function_exported/3` and degrades
-%% to live-term re-puts when absent.
--callback clear(handle()) -> ok.
+%% Wipe every cell whose Bucket ends with `BucketSuffix` from the handle's
+%% keyspace (used by the secondary-index rebuild before a re-fold, to drop
+%% orphaned terms). `BucketSuffix` is `bondy_oplog_index_key:bucket_suffix/1`
+%% (`<<"/$idx/", IndexName>>`), so the wipe is **bucket-scoped to one index**
+%% — correct even when the handle's backend co-locates several logical
+%% tables (`shared_shards`, `single_bookie`), which a whole-keyspace wipe
+%% would corrupt. Optional: the rebuild guards the call with
+%% `function_exported(Adapter, clear, 2)` and degrades to live-term re-puts
+%% when absent.
+-callback clear(handle(), BucketSuffix :: binary()) -> ok.
 
--optional_callbacks([head/3, clear/1]).
+-optional_callbacks([head/3, clear/2]).

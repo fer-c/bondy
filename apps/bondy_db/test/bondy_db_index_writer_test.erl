@@ -314,20 +314,22 @@ flush_index(Table, IndexName) ->
         lists:seq(0, N - 1)
     ).
 
-%% Wipe every secondary shard's ETS projection table directly (test-only).
+%% Wipe every secondary shard's projection directly (test-only).
 clear_index(Table, IndexName) ->
     Info = bondy_db:info(Table),
     NS = maps:get(namespace, Info),
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
+    Suffix = bondy_oplog_index_key:bucket_suffix(IndexName),
     lists:foreach(
         fun(Shard) ->
             {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
             %% Backend-agnostic: the durable table backs its indices with
-            %% leveled, so use the projection adapter's clear/1 (exported by
+            %% leveled, so use the projection adapter's clear/2 (exported by
             %% both the ets and leveled adapters) rather than assuming ETS.
+            %% The bucket suffix scopes the wipe to this index.
             Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
             Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-            ok = Adapter:clear(Handle)
+            ok = Adapter:clear(Handle, Suffix)
         end,
         lists:seq(0, N - 1)
     ).

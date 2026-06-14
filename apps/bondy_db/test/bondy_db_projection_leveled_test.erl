@@ -19,6 +19,10 @@
 %%   - distinct buckets do not collide
 %%   - range: empty, asc, desc, limit, half-open exclusion of High,
 %%     limit smaller than range, limit larger than range
+%%   - clear/2 is bucket-scoped: wipes only the buckets ending with the
+%%     given index suffix, sparing co-located primary + sibling-index
+%%     buckets in the same Bookie (the shared-backend correctness claim,
+%%     PLUM_DB_TO_BONDY_DB_DESIGN.md §6.6.4)
 %%   - info returns the expected map shape
 %% =============================================================================
 
@@ -50,6 +54,7 @@ adapter_test_() ->
         fun range_limit_larger_than_data_returns_all/1,
         fun range_asc_returns_ascending/1,
         fun range_desc_returns_reversed/1,
+        fun clear_is_bucket_scoped/1,
         fun info_reports_backend_and_bookie/1
     ]}.
 
@@ -274,6 +279,41 @@ range_desc_returns_reversed({Pid, _Dir}) ->
         ?assertEqual([<<"k03">>, <<"k02">>, <<"k01">>], [K || {K, _} <- Rows])
     end.
 
+clear_is_bucket_scoped({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        %% Three buckets co-located in ONE Bookie, mirroring a shared
+        %% backend (shared_shards / single_bookie):
+        %%  - Target  index  "users/$idx/by_name"  (to be wiped)
+        %%  - Sibling index  "users/$idx/by_email" (different suffix)
+        %%  - Primary table   "users"              (no /$idx/ infix)
+        Target = <<"users/$idx/by_name">>,
+        Sibling = <<"users/$idx/by_email">>,
+        Primary = <<"users">>,
+        F = mk_frame(<<"v">>),
+        ok = ?MOD:put_batch(H, [
+            {Target, <<"t1">>, F},
+            {Target, <<"t2">>, F},
+            %% A value_equals_state cell (only the ?SK_STATE subkey is
+            %% written) — what real index entries look like. The clear
+            %% folds off ?SK_STATE, so it must catch these too.
+            {Target, <<"t3">>, mk_state_frame(<<"sv">>)},
+            {Sibling, <<"s1">>, F},
+            {Primary, <<"p1">>, F}
+        ]),
+        %% Suffix from the index name via the production codec.
+        Suffix = bondy_oplog_index_key:bucket_suffix(by_name),
+        ?assertEqual(<<"/$idx/by_name">>, Suffix),
+        ok = ?MOD:clear(H, Suffix),
+        %% Target index fully wiped (including the state-only cell)...
+        ?assertEqual(not_found, ?MOD:get(H, Target, <<"t1">>)),
+        ?assertEqual(not_found, ?MOD:get(H, Target, <<"t2">>)),
+        ?assertEqual(not_found, ?MOD:get(H, Target, <<"t3">>)),
+        %% ...sibling index and primary table spared.
+        ?assertEqual({ok, F}, ?MOD:get(H, Sibling, <<"s1">>)),
+        ?assertEqual({ok, F}, ?MOD:get(H, Primary, <<"p1">>))
+    end.
+
 info_reports_backend_and_bookie({Pid, _Dir}) ->
     fun() ->
         H = handle(Pid),
@@ -302,6 +342,12 @@ value_n(I) ->
 %% and returns the bytes round-trip.
 mk_frame(Bytes) when is_binary(Bytes) ->
     bondy_oplog_cell_frame:encode(0, Bytes, Bytes, false).
+
+%% A value_equals_state frame: HasValueColumn=true means the value subkey
+%% is omitted on write (only ?SK_STATE is stored) — the shape every real
+%% secondary-index cell has. See bondy_db_projection_leveled:build_object_specs/2.
+mk_state_frame(Bytes) when is_binary(Bytes) ->
+    bondy_oplog_cell_frame:encode(0, Bytes, undefined, true).
 
 make_tempdir() ->
     Base = filename:join([

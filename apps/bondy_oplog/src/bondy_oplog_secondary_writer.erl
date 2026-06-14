@@ -76,6 +76,7 @@ projection-handle owner keeps it.
 -export([start_link/1]).
 -export([enqueue/3]).
 -export([flush_sync/1]).
+-export([flush_sync/2]).
 -export([reset/1]).
 
 -export([init/1]).
@@ -141,6 +142,21 @@ of `enqueue/3`s observes all of them.
 
 flush_sync(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, flush_sync, infinity).
+
+-doc """
+`flush_sync/1` with a bounded wait. The compaction flush barrier
+(`bondy_oplog_instance:drive_secondary_indexes/1`, §6.6.2) uses this so a
+wedged or dead writer cannot stall a truncate indefinitely: on timeout the
+caller catches the exit and falls back to the rebuild backstop (§6.6.3)
+rather than blocking the instance. `Timeout` is in milliseconds (or the
+atom `infinity`).
+""".
+-spec flush_sync(pid(), timeout()) -> ok.
+
+flush_sync(Pid, Timeout) when
+    is_pid(Pid) andalso (Timeout =:= infinity orelse is_integer(Timeout))
+->
+    gen_server:call(Pid, flush_sync, Timeout).
 
 -doc """
 Discard the buffered ops without writing them and cancel the flush timer.

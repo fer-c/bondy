@@ -82,6 +82,8 @@ off-by-one.
 -export([equality_bounds/1]).
 -export([range_bounds/2]).
 -export([bucket/2]).
+-export([bucket_suffix/1]).
+-export([trust_marker_loc/3]).
 -export([shard/3]).
 
 -type term_value() :: binary() | integer().
@@ -176,6 +178,76 @@ bucket(PrimaryBucket, IndexName) when
 ->
     <<PrimaryBucket/binary, ?IDX_INFIX,
         (atom_to_binary(IndexName, utf8))/binary>>.
+
+-doc """
+The trailing fragment every index bucket ends with, in every topology:
+`<<"/$idx/", IndexName>>`. Since `bucket/2` always appends `?IDX_INFIX ++
+IndexName` after the topology's primary bucket, this suffix uniquely
+identifies index `IndexName`'s cells *within a Bookie/handle that holds a
+single logical table* (`per_entity`'s dedicated Bookie, the ETS adapter's
+per-`(NS, Index, Shard)` table).
+
+**Constraint on shared backends.** On a backend that co-locates several
+logical tables in one keyspace (`shared_shards`, `single_bookie`) this
+suffix does NOT include the `EntityType`, so two co-located tables that
+declare the **same** `IndexName` would share it. Such tables MUST NOT
+declare a colliding index name, or a suffix-scoped `clear` (the rebuild's
+orphan-wipe, `bondy_oplog_index_rebuild:reset_target_shard/1`) would also
+wipe the sibling table's index. Drives the `clear(Handle, Suffix)`
+projection callback.
+""".
+-spec bucket_suffix(atom()) -> binary().
+
+bucket_suffix(IndexName) when is_atom(IndexName) ->
+    <<?IDX_INFIX, (atom_to_binary(IndexName, utf8))/binary>>.
+
+-doc """
+Storage location `{Bucket, Key}` of an index shard's **durable trust
+marker** — a reserved cell whose **presence means the shard is built and
+clean** (trustworthy on cold-start) and whose **absence means it must be
+rebuilt** (`PLUM_DB_TO_BONDY_DB_DESIGN.md` §6.6.2, the durable-marker option).
+
+Inverted ("trusted") rather than "dirty" semantics so that *absence* — the
+default with no on-disk state — uniformly covers BOTH cases that require a
+rebuild on open:
+
+- a **newly-declared index over an already-populated table** (never built, so
+  no marker → rebuild from the primary), and
+- a shard **left incomplete by a pre-restart drop / wedged flush** (the drop
+  removed the marker → rebuild).
+
+A clean build/rebuild writes the marker (`index_clear_rebuild/1`); a drop
+removes it (`index_mark_rebuild/1`). The §6.6.2 compaction flush barrier keeps
+a trusted shard's durable cells complete `≤ snapshot_wm`, so a restart trusts
++ freshens + tail-replays — never an O(table) re-derive.
+
+The marker lives in the reserved bucket `<<"$idx_trusted">>`, deliberately
+**outside** the index keyspace:
+
+- it contains no `?IDX_INFIX` (`"/$idx/"`), so the suffix-scoped `clear/2`
+  (the rebuild's orphan-wipe) never touches it;
+- index range scans target the per-index bucket
+  (`bucket/2 = <<…, "/$idx/", IndexName>>`), never `<<"$idx_trusted">>`, so a
+  marker can never surface as a phantom index entry.
+
+The key encodes `(NS, IndexName, Shard)` so a single shared backend
+(`shared_shards`, `single_bookie`) — whose one Bookie holds many shards in
+this reserved bucket — keeps every shard's marker distinct.
+""".
+-spec trust_marker_loc(atom(), atom(), non_neg_integer()) ->
+    {binary(), binary()}.
+
+trust_marker_loc(NS, IndexName, Shard) when
+    is_atom(NS), is_atom(IndexName), is_integer(Shard), Shard >= 0
+->
+    Key = <<
+        (atom_to_binary(NS, utf8))/binary,
+        ?SEP,
+        (atom_to_binary(IndexName, utf8))/binary,
+        ?SEP,
+        (integer_to_binary(Shard))/binary
+    >>,
+    {<<"$idx_trusted">>, Key}.
 
 -doc """
 The secondary shard a term lands in: `phash2({Bucket, Term}, ShardCount)`.

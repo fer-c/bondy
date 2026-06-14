@@ -91,6 +91,63 @@ index_test_() ->
         )
     ].
 
+%% The global `force_ets_indices` kill-switch (§6.6.5): on a durable table it
+%% routes the INDEX projection to ETS while the primary stays leveled. Has its
+%% own fixture because the env must be set before `open_table` provisions the
+%% indexes, and restored afterwards.
+force_ets_indices_test_() ->
+    {setup, fun force_ets_setup/0, fun force_ets_cleanup/1, fun(
+        {_Db, Table, _Sup, _Dir, _Prev}
+    ) ->
+        {"force_ets_indices routes a durable table's indices to ETS", fun() ->
+            NS = maps:get(namespace, bondy_db:info(Table)),
+            %% Primary stays on the durable (leveled) backend...
+            {ok, PEntry} = bondy_oplog_core_registry:lookup(NS, primary, 0),
+            ?assertEqual(
+                bondy_db_projection_leveled,
+                bondy_oplog_core_registry:entry_projection_adapter(PEntry)
+            ),
+            %% ...while the index is forced onto the ephemeral ETS backend.
+            {ok, IEntry} = bondy_oplog_core_registry:lookup(NS, by_x, 0),
+            ?assertEqual(
+                bondy_oplog_projection_ets,
+                bondy_oplog_core_registry:entry_projection_adapter(IEntry)
+            )
+        end}
+    end}.
+
+force_ets_setup() ->
+    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_oplog),
+    Prev = application:get_env(bondy_db, force_ets_indices),
+    ok = application:set_env(bondy_db, force_ets_indices, true),
+    Dir = make_tempdir(),
+    {ok, Sup} = bondy_db_leveled_sup:start_link(),
+    {ok, Db} = bondy_db:open(force_ets_db, #{
+        topology => ?TOPOLOGY,
+        topology_opts => #{sup => Sup, dir => Dir},
+        shard_count => 2,
+        fold_module => lww_register
+    }),
+    {ok, Table} = bondy_db:open_table(Db, widgets, #{
+        indexes => [#{name => by_x, extract => [x]}]
+    }),
+    {Db, Table, Sup, Dir, Prev}.
+
+force_ets_cleanup({Db, Table, Sup, Dir, Prev}) ->
+    _ = catch bondy_db:close_table(Table),
+    _ = catch bondy_db:close(Db),
+    case is_process_alive(Sup) of
+        true -> _ = catch bondy_db_leveled_sup:stop(Sup);
+        false -> ok
+    end,
+    rmrf(Dir),
+    case Prev of
+        undefined -> application:unset_env(bondy_db, force_ets_indices);
+        {ok, V} -> application:set_env(bondy_db, force_ets_indices, V)
+    end,
+    ok.
+
 %% =============================================================================
 %% Provisioning
 %% =============================================================================

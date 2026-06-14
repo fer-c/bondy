@@ -280,6 +280,7 @@ keeps reads parallel.
 -export([index_mark_rebuild/1]).
 -export([index_clear_rebuild/1]).
 -export([index_needs_rebuild/1]).
+-export([index_load_rebuild_marker/1]).
 -export([reset_stale_ae/1]).
 
 %% Namespace-level consistency_class lookup (`MST_DB_DESIGN.md` §15).
@@ -699,16 +700,35 @@ back to the primary) until a rebuild clears the flag. No-op for a primary.
 
 index_mark_rebuild(#entry{inflight_ref = undefined}) ->
     ok;
-index_mark_rebuild(#entry{inflight_ref = Ref}) ->
-    atomics:put(Ref, ?NEEDS_REBUILD_SLOT, 1).
+index_mark_rebuild(#entry{inflight_ref = Ref} = E) ->
+    %% Durable twin (§6.6.2): on the 0→1 transition, REMOVE the trust marker so
+    %% the "not trusted" state survives restart — a dropped/wedged durable shard
+    %% is then rebuilt on the next open instead of trusted incomplete. The
+    %% removal MUST be synchronous (an async removal could be lost in a crash,
+    %% leaving the marker present → a silently-incomplete index trusted on
+    %% restart), so we keep it inline but gate it on the transition: a sustained
+    %% saturation calling this per dropped batch then pays the projection
+    %% `delete` only ONCE (until a rebuild clears the flag), not per drop.
+    %% `atomics:exchange` makes the test-and-set race-free across concurrent
+    %% markers. On an ephemeral (ETS) projection the marker set is wiped with
+    %% the table on restart anyway, which is also correct (the index rebuilds).
+    case atomics:exchange(Ref, ?NEEDS_REBUILD_SLOT, 1) of
+        1 -> ok;
+        _ -> remove_trust_marker(E)
+    end.
 
--doc "Clear the `needs_rebuild` flag. Called by a completed rebuild.".
+-doc """
+Clear the `needs_rebuild` flag (in-memory) and WRITE the durable trust marker.
+Called by a completed (re)build, so the shard is marked trustworthy for the
+next cold-start.
+""".
 -spec index_clear_rebuild(shard_entry()) -> ok.
 
 index_clear_rebuild(#entry{inflight_ref = undefined}) ->
     ok;
-index_clear_rebuild(#entry{inflight_ref = Ref}) ->
-    atomics:put(Ref, ?NEEDS_REBUILD_SLOT, 0).
+index_clear_rebuild(#entry{inflight_ref = Ref} = E) ->
+    atomics:put(Ref, ?NEEDS_REBUILD_SLOT, 0),
+    persist_trust_marker(E).
 
 -doc "Whether the index shard's `needs_rebuild` flag is set (`false` for a primary).".
 -spec index_needs_rebuild(shard_entry()) -> boolean().
@@ -717,6 +737,36 @@ index_needs_rebuild(#entry{inflight_ref = undefined}) ->
     false;
 index_needs_rebuild(#entry{inflight_ref = Ref}) ->
     atomics:get(Ref, ?NEEDS_REBUILD_SLOT) =/= 0.
+
+-doc """
+Cold-start: read the index shard's durable **trust marker** and set the
+in-memory `needs_rebuild` flag from it — `needs_rebuild = NOT trusted`.
+Returns whether the shard needs a rebuild. Called by `bondy_db` at index-shard
+provisioning so that:
+
+- a shard with the trust marker (built + clean, kept complete `≤ snapshot_wm`
+  by the §6.6.2 flush barrier) is trusted and only freshened — no O(table)
+  re-derive;
+- a shard WITHOUT it (a newly-declared index, or one left incomplete by a
+  pre-restart drop) refuses reads and is rebuilt.
+
+Returns `false` (no rebuild) for a primary or an entry without `inflight_ref`.
+For an index entry an absent/unreadable marker returns `true` (rebuild) — the
+safe default.
+""".
+-spec index_load_rebuild_marker(shard_entry()) -> boolean().
+
+index_load_rebuild_marker(#entry{inflight_ref = undefined}) ->
+    false;
+index_load_rebuild_marker(#entry{inflight_ref = Ref} = E) ->
+    case has_trust_marker(E) of
+        true ->
+            atomics:put(Ref, ?NEEDS_REBUILD_SLOT, 0),
+            false;
+        false ->
+            atomics:put(Ref, ?NEEDS_REBUILD_SLOT, 1),
+            true
+    end.
 
 -doc """
 Reset the shard's AE freshness counter to the "infinitely stale"
@@ -755,6 +805,62 @@ consistency_class(NS) when is_atom(NS) ->
         {[Class], _} -> Class;
         '$end_of_table' -> ap
     end.
+
+%% =============================================================================
+%% PRIVATE: durable index trust marker
+%% =============================================================================
+%% The durable twin of the in-memory `needs_rebuild` atomic (§6.6.2), with
+%% INVERTED ("trusted") semantics — presence = built + clean, absence =
+%% rebuild. Stored as a reserved cell in the index shard's own projection at
+%% `bondy_oplog_index_key:trust_marker_loc/3` (bucket `<<"$idx_trusted">>`,
+%% outside the index keyspace, so `clear/2` and range scans never see it).
+%% All three are best-effort (`catch`) — a persistence failure degrades to the
+%% prior in-memory-only behaviour and never raises into the caller (a
+%% saturation drop, a wedged-flush backstop, a completed rebuild).
+
+%% @private
+persist_trust_marker(#entry{
+    key = {NS, IndexName, Shard},
+    projection_adapter = A,
+    projection_handle = H
+}) when A =/= undefined ->
+    {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
+    _ = catch A:put_batch(H, [{B, K, trust_marker_frame()}]),
+    ok;
+persist_trust_marker(_) ->
+    ok.
+
+%% @private
+remove_trust_marker(#entry{
+    key = {NS, IndexName, Shard},
+    projection_adapter = A,
+    projection_handle = H
+}) when A =/= undefined ->
+    {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
+    _ = catch A:delete(H, B, K),
+    ok;
+remove_trust_marker(_) ->
+    ok.
+
+%% @private
+has_trust_marker(#entry{
+    key = {NS, IndexName, Shard},
+    projection_adapter = A,
+    projection_handle = H
+}) when A =/= undefined ->
+    {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
+    case catch A:get(H, B, K) of
+        {ok, _} -> true;
+        _ -> false
+    end;
+has_trust_marker(_) ->
+    false.
+
+%% @private
+%% A minimal `value_equals_state` V2 frame (HLC 0, empty state, value
+%% omitted). The marker carries no payload — only presence/absence matters.
+trust_marker_frame() ->
+    bondy_oplog_cell_frame:encode(0, <<>>, undefined, true).
 
 %% =============================================================================
 %% gen_server callbacks

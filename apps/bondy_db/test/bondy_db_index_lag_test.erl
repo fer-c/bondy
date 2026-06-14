@@ -327,13 +327,15 @@ flush_index(Table, IndexName) ->
     end).
 
 clear_index(Table, IndexName) ->
+    Suffix = bondy_oplog_index_key:bucket_suffix(IndexName),
     foreach_shard(Table, IndexName, fun(_NS, _Sh, _Pid, Entry) ->
-        %% Backend-agnostic: use the projection adapter's clear/1 (both the
+        %% Backend-agnostic: use the projection adapter's clear/2 (both the
         %% ets and leveled adapters export it) rather than assuming an ETS
-        %% handle — durable tables back their indices with leveled.
+        %% handle — durable tables back their indices with leveled. The
+        %% bucket suffix scopes the wipe to this index.
         Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
         Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-        ok = Adapter:clear(Handle)
+        ok = Adapter:clear(Handle, Suffix)
     end).
 
 mark_all_rebuild(Table, IndexName) ->
