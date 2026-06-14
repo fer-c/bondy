@@ -201,14 +201,17 @@ it).
     instance_ids := #{non_neg_integer() := binary()},
     cache_handles := #{non_neg_integer() := term()},
     %% Secondary indexes declared via `open_table` `indexes => [Spec]`,
-    %% keyed by index name. Each is an independent ETS shard-set under
-    %% `(Namespace, IndexName, SecShard)` — see `index_provision/0`.
+    %% keyed by index name. Each is an independent term-sharded shard-set
+    %% under `(Namespace, IndexName, SecShard)`, on the same projection
+    %% backend as this table (ets if ephemeral, leveled if durable) — see
+    %% `index_provision/0`.
     indexes := #{atom() := index_provision()}
 }.
 
 %% A provisioned secondary index: its declarative spec, secondary shard
-%% count, the effective (always memory) topology + table state that own
-%% its ETS projection tables, and the per-secondary-shard cache handles.
+%% count, the effective topology + table state that own its projection
+%% tables (the table's own backend — ets or leveled), and the
+%% per-secondary-shard cache handles.
 -type index_provision() :: #{
     spec := bondy_oplog_index_spec:spec(),
     sec_shard_count := pos_integer(),
@@ -468,15 +471,19 @@ open_table_provision(
                 )
             of
                 {ok, InstanceIds, CacheHandles} ->
-                    case provision_indexes(Db, NS, Merged, ShardCount) of
+                    case provision_indexes(Db, NS, Merged, ShardCount, Backend) of
                         {ok, IndexMap} ->
-                            %% Mandatory startup backfill (IDX-4): the
-                            %% index is always ETS and starts empty, so
-                            %% re-fold the (possibly durable, possibly
-                            %% peer-bootstrapped) primary into it before
-                            %% returning. Also freshens every secondary
-                            %% shard so a finite `max_lag` read passes even
-                            %% on a shard whose working set is empty.
+                            %% Mandatory startup backfill (IDX-4): re-fold the
+                            %% (possibly durable, possibly peer-bootstrapped)
+                            %% primary into every index before returning. For an
+                            %% ets-backed index the shards start empty, so this
+                            %% is the only way they get populated; for a
+                            %% leveled-backed index the cells persist across
+                            %% restart, so this is a (currently unconditional)
+                            %% re-fold that converges idempotently — see D-8,
+                            %% cold-start trust-vs-rebuild is a separate change.
+                            %% Also freshens every secondary shard so a finite
+                            %% `max_lag` read passes even on an empty shard.
                             ok = backfill_indexes(NS, IndexMap),
                             {ok, #{
                                 db_name => DbName,
@@ -1725,18 +1732,20 @@ teardown_shard(NS, Shard, InstanceIds, CacheHandles, Topology, TableState) ->
 
 %% @private
 %% Provision every secondary index declared in `indexes => [Spec]`. Each
-%% index is an independent ETS shard-set under `(NS, IndexName, SecShard)`,
-%% always memory-backed regardless of the table's projection backend (the
-%% index is rebuilt from the primary on cold start, so it is never
-%% persisted). No `bondy_oplog_instance` is started — the secondary writer
-%% (a lightweight gen_server) drives these cells, not the primary applier
-%% subtree. Specs are validated up front (fail before any table is
-%% created); a mid-loop failure rolls back the indexes already built.
-provision_indexes(Db, NS, Merged, DefaultShardCount) ->
+%% index is an independent term-sharded shard-set under
+%% `(NS, IndexName, SecShard)`, provisioned on the **same projection backend
+%% as the originating table** (`Backend` — `ets` for an ephemeral table,
+%% `leveled` for a durable one), so a durable table's indices persist in
+%% leveled alongside its data and an ephemeral table's stay in ets. No
+%% `bondy_oplog_instance` is started — the secondary writer (a lightweight
+%% gen_server) drives these cells, not the primary applier subtree. Specs are
+%% validated up front (fail before any table is created); a mid-loop failure
+%% rolls back the indexes already built.
+provision_indexes(Db, NS, Merged, DefaultShardCount, Backend) ->
     %% Specs were already validated in `open_table/7` before any shard was
     %% provisioned.
     Specs = maps:get(indexes, Merged, []),
-    provision_indexes_loop(Db, NS, Specs, DefaultShardCount, #{}).
+    provision_indexes_loop(Db, NS, Specs, DefaultShardCount, Backend, #{}).
 
 %% @private
 validate_index_specs(Specs) when is_list(Specs) ->
@@ -1786,13 +1795,13 @@ check_sec_shard_count(Spec) ->
     end.
 
 %% @private
-provision_indexes_loop(_Db, _NS, [], _DefaultShardCount, Acc) ->
+provision_indexes_loop(_Db, _NS, [], _DefaultShardCount, _Backend, Acc) ->
     {ok, Acc};
-provision_indexes_loop(Db, NS, [Spec | Rest], DefaultShardCount, Acc) ->
-    case provision_index(Db, NS, Spec, DefaultShardCount) of
+provision_indexes_loop(Db, NS, [Spec | Rest], DefaultShardCount, Backend, Acc) ->
+    case provision_index(Db, NS, Spec, DefaultShardCount, Backend) of
         {ok, Name, Provision} ->
             provision_indexes_loop(
-                Db, NS, Rest, DefaultShardCount, Acc#{Name => Provision}
+                Db, NS, Rest, DefaultShardCount, Backend, Acc#{Name => Provision}
             );
         {error, _} = Err ->
             teardown_indexes(NS, Acc),
@@ -1800,16 +1809,19 @@ provision_indexes_loop(Db, NS, [Spec | Rest], DefaultShardCount, Acc) ->
     end.
 
 %% @private
-%% Provision one index: create its ETS shard-set in the DB's memory
-%% provider (the effective ets topology), then register a secondary shard
-%% per `SecShard` with the `index_entry` fold. The shard count defaults to
-%% the primary's but can be overridden per index via `sec_shard_count`.
-provision_index(Db, NS, Spec, DefaultShardCount) ->
+%% Provision one index on the **same projection backend as the originating
+%% table** (`Backend`): `ets` routes to the DB's memory provider (ephemeral
+%% table), `leveled` routes to the DB's own durable topology (durable table),
+%% so index cells live next to the data they index. Creates the index's
+%% shard-set in that topology, then registers a secondary shard per
+%% `SecShard` with the `index_entry` CRDT. The shard count defaults to the
+%% primary's but can be overridden per index via `sec_shard_count`.
+provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
     Name = bondy_oplog_index_spec:name(Spec),
     SecShardCount = maps:get(sec_shard_count, Spec, DefaultShardCount),
     CoalesceMs = bondy_oplog_index_spec:coalesce_ms(Spec),
-    {Topology, EtsState} = effective_topology(ets, Db),
-    case Topology:open_table(Name, SecShardCount, #{}, EtsState) of
+    {Topology, EffState} = effective_topology(Backend, Db),
+    case Topology:open_table(Name, SecShardCount, #{}, EffState) of
         {ok, TableState, _NewState} ->
             case
                 provision_index_shards(
@@ -1826,7 +1838,7 @@ provision_index(Db, NS, Spec, DefaultShardCount) ->
                         writer_pids => Writers
                     }};
                 {error, _} = Err ->
-                    _ = Topology:close_table(TableState, EtsState),
+                    _ = Topology:close_table(TableState, EffState),
                     Err
             end;
         {error, _} = Err ->
@@ -1967,7 +1979,7 @@ teardown_index_shard(
 %% @private
 %% Build the static secondary-index descriptors handed to each primary
 %% applier (term-diff + dispatch). `sec_shard_count` defaults to the
-%% primary's shard count, matching `provision_index/4`.
+%% primary's shard count, matching `provision_index/5`.
 index_descriptors(Specs, DefaultShardCount) ->
     [
         #{

@@ -328,8 +328,12 @@ flush_index(Table, IndexName) ->
 
 clear_index(Table, IndexName) ->
     foreach_shard(Table, IndexName, fun(_NS, _Sh, _Pid, Entry) ->
+        %% Backend-agnostic: use the projection adapter's clear/1 (both the
+        %% ets and leveled adapters export it) rather than assuming an ETS
+        %% handle — durable tables back their indices with leveled.
+        Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
         Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-        true = ets:delete_all_objects(Handle)
+        ok = Adapter:clear(Handle)
     end).
 
 mark_all_rebuild(Table, IndexName) ->

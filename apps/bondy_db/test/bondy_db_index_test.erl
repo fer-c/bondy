@@ -110,9 +110,10 @@ provision_reports_indexes({_Db, Table, _Sup, _Dir}) ->
 
 secondary_shards_registered({_Db, Table, _Sup, _Dir}) ->
     NS = maps:get(namespace, bondy_db:info(Table)),
-    %% by_status has 4 shards (inherits primary shard_count); each is an
-    %% ets projection backed by the native index-entry CRDT (PR-Z; the
-    %% retired `index_entry` fold's op-based twin).
+    %% by_status has 4 shards (inherits primary shard_count); each is backed
+    %% by the native index-entry CRDT (PR-Z; the retired `index_entry` fold's
+    %% op-based twin), on the **same projection backend as the primary table**
+    %% — here `per_entity` is durable, so the index projection is leveled too.
     lists:foreach(
         fun(Shard) ->
             {ok, Entry} = bondy_oplog_core_registry:lookup(NS, by_status, Shard),
@@ -121,7 +122,7 @@ secondary_shards_registered({_Db, Table, _Sup, _Dir}) ->
                 bondy_oplog_core_registry:entry_crdt_module(Entry)
             ),
             ?assertEqual(
-                bondy_oplog_projection_ets,
+                bondy_db_projection_leveled,
                 bondy_oplog_core_registry:entry_projection_adapter(Entry)
             ),
             ?assertEqual(

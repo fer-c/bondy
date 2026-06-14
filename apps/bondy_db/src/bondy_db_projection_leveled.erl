@@ -37,10 +37,13 @@ entries under the `?HEAD_TAG`, distinguished by SubKey:
 | `?SK_VALUE` (`<<"v">>`) | `<<HlcLen:16, Hlc/binary, ValueBytes/binary>>` (HEAD wire format) |
 
 Both subkeys carry the HLC so each can be decoded independently.
-For folds that declare `value_equals_state/0 -> true` (currently
-only G-Set) the value subkey stores a copy of `StateBytes`; the
-duplication is a minor space cost in exchange for uniform read
-semantics.
+For cells whose CRDT/fold declares `value_equals_state/0 -> true`
+(secondary index entries, G-Set) **only the `?SK_STATE` subkey is
+written** — the value subkey is omitted and its absence on read is the
+signal to reconstruct the frame with `ValueBytes = StateBytes` (see
+`build_object_specs/2`, `get/3`). Because the state subkey is the only
+one guaranteed present, **range scans enumerate `?SK_STATE`**, not
+`?SK_VALUE`, so they see these cells too.
 
 ## Why head_only mode
 
@@ -87,8 +90,10 @@ Leveled's `book_keylist/5` range is **inclusive** on both ends; the
 substrate contract is `[Low, High)` (half-open on the high side).
 The fold function below excludes any composite key whose underlying
 Key matches the High sentinel. Within each Key, only the
-`?SK_VALUE` SubKey is enumerated for the range — the state subkey
-is fetched on demand to reconstruct the full V2 frame.
+`?SK_STATE` SubKey is enumerated for the range (it is the one subkey
+every cell is guaranteed to have — `value_equals_state` cells omit
+`?SK_VALUE`); the full V2 frame is then reconstructed on demand via
+`get/3`.
 
 ## What this adapter does NOT do
 
@@ -110,6 +115,7 @@ is fetched on demand to reconstruct the full V2 frame.
     put_batch/2,
     range/5,
     delete/3,
+    clear/1,
     info/1
 ]).
 
@@ -273,15 +279,21 @@ range(#{bookie := Pid}, Bucket, Low, High, Opts) when
         case High of
             infinity ->
                 %% Whole-bucket fold from Low with no upper bound.
-                FoldFun0 = make_value_keylist_fold_open(Limit, Low),
+                FoldFun0 = make_state_keylist_fold_open(Limit, Low),
                 leveled_bookie:book_keylist(
                     Pid, ?HEAD_TAG, Bucket, {FoldFun0, {0, []}}
                 );
             _ ->
                 %% Range over the {Key, SubKey} composite that brackets
-                %% every value subkey between Low and High.
-                KeyRange = {{Low, ?SK_VALUE}, {High, ?SK_VALUE}},
-                FoldFun1 = make_value_keylist_fold(Limit, High),
+                %% every **state** subkey between Low and High. We key off
+                %% `?SK_STATE` (not `?SK_VALUE`) because the state subkey is
+                %% the only one guaranteed present: a `value_equals_state`
+                %% cell (e.g. a secondary index entry or a G-Set) omits the
+                %% value subkey entirely (see `build_object_specs/2`), so a
+                %% fold over `?SK_VALUE` would skip those cells. `get/3`
+                %% reconstructs the full frame from whichever subkeys exist.
+                KeyRange = {{Low, ?SK_STATE}, {High, ?SK_STATE}},
+                FoldFun1 = make_state_keylist_fold(Limit, High),
                 leveled_bookie:book_keylist(
                     Pid, ?HEAD_TAG, Bucket, KeyRange, {FoldFun1, {0, []}}
                 )
@@ -321,6 +333,48 @@ delete(#{bookie := Pid}, Bucket, Key) when
     case leveled_bookie:book_mput(Pid, ObjectSpecs) of
         ok -> ok;
         pause -> ok
+    end.
+
+-doc """
+Delete every cell in this Bookie's `?HEAD_TAG` keyspace (the optional
+`clear/1` callback). Folds all keys across all buckets — keyed off the
+always-present `?SK_STATE` subkey so each cell is counted once — and
+removes both subkeys of every cell in one atomic `book_mput/2`.
+
+**Scope.** This wipes the WHOLE Bookie, so it is correct only on a
+topology that dedicates a Bookie to this logical shard (`per_entity`,
+`single_bookie`). A topology that co-locates several logical tables in
+one Bookie (`shared_shards`) must NOT route a clearable projection — a
+rebuildable secondary index — onto a shared Bookie, or this would also
+delete the co-located tables' cells.
+
+Used by `bondy_oplog_index_rebuild` to drop orphaned index terms before
+re-folding a secondary index from the primary.
+""".
+-spec clear(handle()) -> ok.
+
+clear(#{bookie := Pid}) ->
+    FoldFun =
+        fun
+            (Bucket, {Key, ?SK_STATE}, Acc) ->
+                [
+                    {remove, Bucket, Key, ?SK_STATE, null},
+                    {remove, Bucket, Key, ?SK_VALUE, null}
+                    | Acc
+                ];
+            (_Bucket, {_Key, _SubKey}, Acc) ->
+                Acc
+        end,
+    {async, Folder} =
+        leveled_bookie:book_keylist(Pid, ?HEAD_TAG, {FoldFun, []}),
+    case Folder() of
+        [] ->
+            ok;
+        ObjectSpecs ->
+            case leveled_bookie:book_mput(Pid, ObjectSpecs) of
+                ok -> ok;
+                pause -> ok
+            end
     end.
 
 -spec info(handle()) -> #{atom() => term()}.
@@ -388,13 +442,15 @@ build_object_specs([{Bucket, Key, Frame} | Rest], Acc) ->
         end,
     build_object_specs(Rest, Acc2).
 
-%% Fold fun for keylist over `{Key, ?SK_VALUE}` composite keys.
-%% Accumulates Keys (deduped by the SubKey == ?SK_VALUE filter) up to
+%% Fold fun for keylist over `{Key, ?SK_STATE}` composite keys.
+%% Accumulates Keys (deduped by the SubKey == ?SK_STATE filter) up to
 %% Limit; excludes any Key matching the High sentinel (half-open range).
-make_value_keylist_fold(Limit, High) ->
+%% Keys off the state subkey because it is the only one every cell is
+%% guaranteed to have (`value_equals_state` cells omit `?SK_VALUE`).
+make_state_keylist_fold(Limit, High) ->
     fun(_B, {K, SubKey}, {N, Items}) ->
         case SubKey of
-            ?SK_VALUE when K =/= High ->
+            ?SK_STATE when K =/= High ->
                 N1 = N + 1,
                 State = {N1, [K | Items]},
                 case N1 >= Limit of
@@ -407,11 +463,11 @@ make_value_keylist_fold(Limit, High) ->
     end.
 
 %% Open-ended (`High =:= infinity`) variant: a whole-bucket fold keeps
-%% only value subkeys whose key is `>= Low`, capped at `Limit`.
-make_value_keylist_fold_open(Limit, Low) ->
+%% only state subkeys whose key is `>= Low`, capped at `Limit`.
+make_state_keylist_fold_open(Limit, Low) ->
     fun(_B, {K, SubKey}, {N, Items}) ->
         case SubKey of
-            ?SK_VALUE when K >= Low ->
+            ?SK_STATE when K >= Low ->
                 N1 = N + 1,
                 State = {N1, [K | Items]},
                 case N1 >= Limit of

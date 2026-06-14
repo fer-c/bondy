@@ -15,12 +15,13 @@
 Serialised rebuild orchestrator for the secondary indexes
 (`MST_DB_DESIGN.md` §13, IDX-4).
 
-A secondary index is a deterministic function of the primary and is never
-persisted (always ETS, wiped on node death). It is therefore *rebuildable*
-at any time from the primary's converged projection — the authoritative
-source. This singleton gen_server is the one place rebuilds run, so they
-never race each other (a clear interleaving another rebuild's flush would
-lose data).
+A secondary index is a deterministic function of the primary. It is
+therefore *rebuildable* at any time from the primary's converged
+projection — the authoritative source — whether it is backed by ETS (an
+ephemeral table; wiped on node death) or by leveled (a durable table;
+persists, but a rebuild still re-derives it). This singleton gen_server is
+the one place rebuilds run, so they never race each other (a clear
+interleaving another rebuild's flush would lose data).
 
 ## What a rebuild does
 
@@ -248,9 +249,9 @@ reset_target_shard(Entry) ->
             _ = catch Adapter:clear(Handle);
         false ->
             %% Without a clear, the re-fold still re-puts every live term;
-            %% only orphaned terms (no longer yielded) would survive. The
-            %% index is always ETS, which does export clear/1, so this is
-            %% a defensive branch.
+            %% only orphaned terms (no longer yielded) would survive. Both
+            %% shipped projection adapters (ets, leveled) export clear/1, so
+            %% this is a defensive branch for a future adapter lacking it.
             ?LOG_WARNING(#{
                 description =>
                     "bondy_oplog_index_rebuild: projection adapter has no "
@@ -291,8 +292,9 @@ flush_writer(Entry) ->
 
 %% @private
 clean_namespace_tmp(_NS, _IndexName) ->
-    %% No filesystem artefacts: the index is always ETS. Hook kept so the
-    %% rebuild has a single completion point if a future backend persists.
+    %% No transient filesystem artefacts to clean: a durable (leveled) index
+    %% is wiped in place by `clear/1` and re-derived, leaving no temp files.
+    %% Hook kept so the rebuild has a single completion point.
     ok.
 
 %% @private

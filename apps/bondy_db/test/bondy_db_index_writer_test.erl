@@ -322,8 +322,12 @@ clear_index(Table, IndexName) ->
     lists:foreach(
         fun(Shard) ->
             {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            %% Backend-agnostic: the durable table backs its indices with
+            %% leveled, so use the projection adapter's clear/1 (exported by
+            %% both the ets and leveled adapters) rather than assuming ETS.
+            Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
             Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-            true = ets:delete_all_objects(Handle)
+            ok = Adapter:clear(Handle)
         end,
         lists:seq(0, N - 1)
     ).
