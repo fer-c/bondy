@@ -17,17 +17,13 @@ anyway, an empty signature is returned.
 -export([authextra/1]).
 -export([authenticate/2]).
 
-
-
 -spec init(Config :: map()) -> {ok, undefined}.
 init(_Config) ->
     {ok, undefined}.
 
-
 -spec authextra(term()) -> map().
 authextra(_State) ->
     #{}.
-
 
 -spec authenticate(Extra :: map(), State :: term()) ->
     {ok, binary(), map(), term()}.

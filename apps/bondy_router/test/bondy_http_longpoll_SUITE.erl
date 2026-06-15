@@ -19,8 +19,6 @@ subprotocol validation, and encoding round-trips.
 
 -compile([nowarn_export_all, export_all]).
 
-
-
 all() ->
     [
         subprotocol_validation,
@@ -35,15 +33,12 @@ all() ->
         send_unknown_transport
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 init_per_testcase(_TestCase, Config) ->
     bondy_config:set([transport_queue, max_messages], 1000),
@@ -52,17 +47,12 @@ init_per_testcase(_TestCase, Config) ->
     bondy_config:set([transport_queue, transport_ttl], 3600000),
     Config.
 
-
 end_per_testcase(_TestCase, _Config) ->
     ok.
-
-
 
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 subprotocol_validation(_Config) ->
     %% {http_longpoll, text, json} should be valid
@@ -76,7 +66,6 @@ subprotocol_validation(_Config) ->
         {error, invalid_subprotocol},
         bondy_wamp_protocol:validate_subprotocol({http_longpoll, text, msgpack})
     ).
-
 
 encoding_roundtrip(_Config) ->
     %% Verify that the http_longpoll subprotocol can encode and decode
@@ -98,7 +87,6 @@ encoding_roundtrip(_Config) ->
         {http_longpoll, text, json}, Bin, [{partial_decode, false}]
     ),
     ?assertEqual(Msg, DecodedMsg).
-
 
 open_and_init_protocol(_Config) ->
     TransportId = make_transport_id(),
@@ -125,7 +113,6 @@ open_and_init_protocol(_Config) ->
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
-
 poll_receive_empty_timeout(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<>>,
@@ -150,7 +137,6 @@ poll_receive_empty_timeout(_Config) ->
 
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
-
 
 poll_receive_queue_messages(_Config) ->
     TransportId = make_transport_id(),
@@ -181,7 +167,6 @@ poll_receive_queue_messages(_Config) ->
 
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
-
 
 poll_receive_buffered_replies(_Config) ->
     TransportId = make_transport_id(),
@@ -229,7 +214,6 @@ poll_receive_buffered_replies(_Config) ->
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
-
 poll_receive_wakeup_on_enqueue(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<>>,
@@ -270,7 +254,6 @@ poll_receive_wakeup_on_enqueue(_Config) ->
 
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
-
 
 poll_receive_sync_reply_wakeup(_Config) ->
     TransportId = make_transport_id(),
@@ -331,7 +314,6 @@ poll_receive_sync_reply_wakeup(_Config) ->
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
-
 close_transport(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<>>,
@@ -350,7 +332,6 @@ close_transport(_Config) ->
         bondy_http_transport_session:whereis(TransportId)
     ).
 
-
 send_unknown_transport(_Config) ->
     FakeTransportId = <<"nonexistent-longpoll-transport">>,
 
@@ -364,19 +345,14 @@ send_unknown_transport(_Config) ->
         bondy_http_transport_session:notify_enqueue(FakeTransportId)
     ).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 make_transport_id() ->
     Bin = integer_to_binary(erlang:unique_integer([positive])),
     <<"test-longpoll-transport-", Bin/binary>>.
-
 
 %% @private
 make_event(N) ->

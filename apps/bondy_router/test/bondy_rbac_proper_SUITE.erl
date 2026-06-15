@@ -22,7 +22,6 @@ and grant/revoke symmetry.
 
 -define(NUMTESTS, 100).
 
-
 all() ->
     [
         %% Pure property tests (no Bondy needed)
@@ -38,34 +37,31 @@ all() ->
         prop_grant_accumulates_permissions
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
-
 
 %% =============================================================================
 %% GENERATORS
 %% =============================================================================
 
-
-
 %% @private
 groupname() ->
     ?LET(
         Parts,
-        non_empty(list(oneof([
-            binary(4),
-            elements([<<"svc">>, <<"admin">>, <<"ops">>, <<"dev">>])
-        ]))),
+        non_empty(
+            list(
+                oneof([
+                    binary(4),
+                    elements([<<"svc">>, <<"admin">>, <<"ops">>, <<"dev">>])
+                ])
+            )
+        ),
         iolist_to_binary(lists:join(<<".">>, Parts))
     ).
-
 
 %% @private
 permission() ->
@@ -79,16 +75,13 @@ permission() ->
         <<"wamp.publish">>
     ]).
 
-
 %% @private
 permissions() ->
     non_empty(list(permission())).
 
-
 %% @private
 match_strategy() ->
     elements([<<"exact">>, <<"prefix">>]).
-
 
 %% @private
 valid_uri_for_strategy(<<"exact">>) ->
@@ -97,14 +90,12 @@ valid_uri_for_strategy(<<"exact">>) ->
         vector(3, binary(4)),
         iolist_to_binary(lists:join(<<".">>, Parts))
     );
-
 valid_uri_for_strategy(<<"prefix">>) ->
     ?LET(
         Parts,
         non_empty(list(binary(4))),
         <<(iolist_to_binary(lists:join(<<".">>, Parts)))/binary, ".">>
     ).
-
 
 %% @private
 dag_groups() ->
@@ -116,34 +107,32 @@ dag_groups() ->
         begin
             Names = [
                 iolist_to_binary(["g_", integer_to_binary(I)])
-                || I <- lists:seq(1, N)
+             || I <- lists:seq(1, N)
             ],
             [
                 begin
-                    Parents = case I of
-                        1 -> [];
-                        _ ->
-                            %% Each group can be a member of any earlier group
-                            [lists:nth(I - 1, Names)]
-                    end,
+                    Parents =
+                        case I of
+                            1 ->
+                                [];
+                            _ ->
+                                %% Each group can be a member of any earlier group
+                                [lists:nth(I - 1, Names)]
+                        end,
                     bondy_rbac_group:new(#{
                         name => lists:nth(I, Names),
                         groups => Parents,
                         meta => #{}
                     })
                 end
-                || I <- lists:seq(1, N)
+             || I <- lists:seq(1, N)
             ]
         end
     ).
 
-
-
 %% =============================================================================
 %% PURE PROPERTY TESTS
 %% =============================================================================
-
-
 
 prop_reserved_names_complete(_) ->
     Reserved = [all, anonymous, any, on, to, from],
@@ -177,7 +166,6 @@ prop_reserved_names_complete(_) ->
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, ?NUMTESTS}])).
 
-
 prop_normalise_name_idempotent(_) ->
     Prop = ?FORALL(
         Bin,
@@ -193,7 +181,6 @@ prop_normalise_name_idempotent(_) ->
         end
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, ?NUMTESTS}])).
-
 
 prop_normalise_name_lowercase(_) ->
     Prop = ?FORALL(
@@ -211,7 +198,6 @@ prop_normalise_name_lowercase(_) ->
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, ?NUMTESTS}])).
 
-
 prop_topsort_preserves_elements(_) ->
     Prop = ?FORALL(
         Groups,
@@ -228,7 +214,6 @@ prop_topsort_preserves_elements(_) ->
         end
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, ?NUMTESTS}])).
-
 
 prop_topsort_respects_order(_) ->
     %% For a linear chain g_1 <- g_2 <- g_3 ... the topsort must place
@@ -266,7 +251,6 @@ prop_topsort_respects_order(_) ->
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, ?NUMTESTS}])).
 
-
 prop_externalize_grant_has_required_keys(_) ->
     Prop = ?FORALL(
         {Strategy, Perms},
@@ -275,21 +259,17 @@ prop_externalize_grant_has_required_keys(_) ->
             Uri = <<"com.test.prop">>,
             Grant = {{Uri, Strategy}, lists:usort(Perms)},
             Ext = bondy_rbac:externalize_grant(Grant),
-            maps:is_key(<<"resource">>, Ext)
-                andalso maps:is_key(<<"permissions">>, Ext)
-                andalso is_map(maps:get(<<"resource">>, Ext))
-                andalso is_list(maps:get(<<"permissions">>, Ext))
+            maps:is_key(<<"resource">>, Ext) andalso
+                maps:is_key(<<"permissions">>, Ext) andalso
+                is_map(maps:get(<<"resource">>, Ext)) andalso
+                is_list(maps:get(<<"permissions">>, Ext))
         end
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, ?NUMTESTS}])).
 
-
-
 %% =============================================================================
 %% INTEGRATION PROPERTY TESTS
 %% =============================================================================
-
-
 
 prop_grant_revoke_symmetry(_) ->
     Prop = ?FORALL(
@@ -309,14 +289,16 @@ prop_grant_revoke_symmetry(_) ->
                 users => [#{username => Username, groups => [GroupName]}]
             }),
 
-            ResourceUri = case Strategy of
-                <<"exact">> -> <<"com.sym.exact.test">>;
-                <<"prefix">> -> <<"com.sym.prefix.">>
-            end,
-            TestUri = case Strategy of
-                <<"exact">> -> <<"com.sym.exact.test">>;
-                <<"prefix">> -> <<"com.sym.prefix.foo">>
-            end,
+            ResourceUri =
+                case Strategy of
+                    <<"exact">> -> <<"com.sym.exact.test">>;
+                    <<"prefix">> -> <<"com.sym.prefix.">>
+                end,
+            TestUri =
+                case Strategy of
+                    <<"exact">> -> <<"com.sym.exact.test">>;
+                    <<"prefix">> -> <<"com.sym.prefix.foo">>
+                end,
 
             GrantData = #{
                 <<"permissions">> => UniquePerms,
@@ -361,7 +343,6 @@ prop_grant_revoke_symmetry(_) ->
         end
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, 20}])).
-
 
 prop_grant_accumulates_permissions(_) ->
     Prop = ?FORALL(
@@ -411,16 +392,11 @@ prop_grant_accumulates_permissions(_) ->
     ),
     ?assert(proper:quickcheck(Prop, [quiet, {numtests, 20}])).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 make_realm_uri(Prefix) ->
     N = erlang:unique_integer([positive]),
-    <<"com.test.proper.", Prefix/binary, ".",
-      (integer_to_binary(N))/binary>>.
+    <<"com.test.proper.", Prefix/binary, ".", (integer_to_binary(N))/binary>>.

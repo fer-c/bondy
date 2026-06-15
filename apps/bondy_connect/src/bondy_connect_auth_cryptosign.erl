@@ -28,8 +28,6 @@ For the `exec`/`privkey_env_var` sources the public key cannot be derived, so a
 -export([authextra/1]).
 -export([authenticate/2]).
 
-
-
 -spec init(Config :: map()) ->
     {ok, map()} | {error, {invalid_cryptosign_config, term()}}.
 
@@ -45,11 +43,9 @@ init(Config) ->
             {error, {invalid_cryptosign_config, Reason}}
     end.
 
-
 -spec authextra(map()) -> map().
 authextra(#{pubkey_hex := PubKeyHex}) ->
     #{<<"pubkey">> => PubKeyHex}.
-
 
 -spec authenticate(Extra :: map(), State :: map()) ->
     {ok, binary(), map(), map()} | {error, invalid_challenge}.
@@ -65,22 +61,16 @@ authenticate(Extra, #{signer := Signer} = State) ->
             {error, invalid_challenge}
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private An explicit pubkey wins; otherwise derive it from an inline privkey.
 resolve_pubkey(#{pubkey := PubKeyHex}) when is_binary(PubKeyHex) ->
     {PubKeyHex, bondy_wamp_cryptosign:decode_hex(PubKeyHex)};
-
 resolve_pubkey(#{privkey := PrivKeyHex}) when is_binary(PrivKeyHex) ->
     Secret = bondy_wamp_cryptosign:decode_hex(PrivKeyHex),
     #{public := PubKey} = bondy_wamp_cryptosign:key_pair(Secret),
     {bondy_wamp_cryptosign:encode_hex(PubKey), PubKey};
-
 resolve_pubkey(_) ->
     error(missing_pubkey).

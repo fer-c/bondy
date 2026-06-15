@@ -171,7 +171,9 @@ later_hlc_wins() ->
         Id, {cell_apply, ?B, <<"k">>, {set, 2, <<"second">>}}
     ),
     _ = barrier(Id),
-    ?assertEqual({<<"second">>, 2}, bondy_oplog_core:read(NS, primary, <<"k">>)),
+    ?assertEqual(
+        {<<"second">>, 2}, bondy_oplog_core:read(NS, primary, <<"k">>)
+    ),
     teardown_instance(Id, NS, Cache, Proj).
 
 earlier_hlc_is_absorbed() ->

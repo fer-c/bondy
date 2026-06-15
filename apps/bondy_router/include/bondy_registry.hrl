@@ -8,9 +8,9 @@
 -define(CONCURRENT_MATCH(Type),
     %% Adding an entry requires matching against art tries, even for
     %% exact matching policy when pattern_based_registration is enabled.
-    ?TRIE_CONCURRENT_MATCH
-    orelse (
-        Type == registration andalso
-        not bondy_config:get([wamp, dealer, features, pattern_based_registration])
-    )
+    ?TRIE_CONCURRENT_MATCH orelse
+        (Type == registration andalso
+            not bondy_config:get([
+                wamp, dealer, features, pattern_based_registration
+            ]))
 ).

@@ -41,8 +41,9 @@ input to lowercase use `string:casefold/1`.
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
-
--define(GRANT_REQ_VALIDATOR_V1, begin ?GRANT_RESOURCE_VALIDATOR end #{
+-define(GRANT_REQ_VALIDATOR_V1, begin
+    ?GRANT_RESOURCE_VALIDATOR
+end#{
     <<"roles">> => #{
         alias => roles,
         key => roles,
@@ -99,8 +100,8 @@ input to lowercase use `string:casefold/1`.
     }
 }).
 
--define(USER_GRANTS_PREFIX(RealmUri),   {?PLUM_DB_USER_GRANT_TAB, RealmUri}).
--define(GROUP_GRANTS_PREFIX(RealmUri),  {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}).
+-define(USER_GRANTS_PREFIX(RealmUri), {?PLUM_DB_USER_GRANT_TAB, RealmUri}).
+-define(GROUP_GRANTS_PREFIX(RealmUri), {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}).
 -define(PLUMDB_PREFIX(RealmUri, Type),
     case Type of
         user -> ?USER_GRANTS_PREFIX(RealmUri);
@@ -119,40 +120,43 @@ input to lowercase use `string:casefold/1`.
 -endif.
 
 -record(bondy_rbac_context, {
-    realm_uri               ::  binary(),
-    username                ::  binary(),
-    explicit_groups = []    ::  [binary()],
-    exact_grants = #{}      ::  #{permission() => Resources :: [binary()]},
-    pattern_grants          ::  [grant()],
-    epoch                   ::  integer(),
-    is_anonymous = false    ::  boolean()
+    realm_uri :: binary(),
+    username :: binary(),
+    explicit_groups = [] :: [binary()],
+    exact_grants = #{} :: #{permission() => Resources :: [binary()]},
+    pattern_grants :: [grant()],
+    epoch :: integer(),
+    is_anonymous = false :: boolean()
 }).
 
--type context()             ::  #bondy_rbac_context{}.
--type permission()          ::  binary().
--type resource()            ::  any
-                                | binary()  % <<"any">>
-                                | #{uri := binary(), strategy := binary()}
-                                | normalised_resource().
--type normalised_resource() ::  any | {Uri :: uri(), MatchStrategy :: binary()}.
--type rolename()            ::  all
-                                | bondy_rbac_user:username()
-                                | bondy_rbac_group:name().
--type request_data()        ::  map().
--type request()             ::  #{
-                                    type :=  request,
-                                    roles :=  [rolename()],
-                                    permissions :=  [binary()],
-                                    resources :=  [normalised_resource()]
-                                }.
--type grant()               ::  {
-                                    normalised_resource(),
-                                    [Permission :: permission()]
-                                }.
--type grant_opts()          ::  #{
-                                    rebase => boolean(),
-                                    actor_id => term()
-                                }.
+-type context() :: #bondy_rbac_context{}.
+-type permission() :: binary().
+-type resource() ::
+    any
+    % <<"any">>
+    | binary()
+    | #{uri := binary(), strategy := binary()}
+    | normalised_resource().
+-type normalised_resource() :: any | {Uri :: uri(), MatchStrategy :: binary()}.
+-type rolename() ::
+    all
+    | bondy_rbac_user:username()
+    | bondy_rbac_group:name().
+-type request_data() :: map().
+-type request() :: #{
+    type := request,
+    roles := [rolename()],
+    permissions := [binary()],
+    resources := [normalised_resource()]
+}.
+-type grant() :: {
+    normalised_resource(),
+    [Permission :: permission()]
+}.
+-type grant_opts() :: #{
+    rebase => boolean(),
+    actor_id => term()
+}.
 
 -export_type([context/0]).
 -export_type([grant/0]).
@@ -192,15 +196,12 @@ input to lowercase use `string:casefold/1`.
 %% API
 %% =============================================================================
 
-
-
 -doc "Returns 'ok' or an exception.".
 -spec authorize(binary(), bondy_context:t() | context()) ->
     ok | no_return().
 
 authorize(Permission, Ctxt) ->
     authorize(Permission, any, Ctxt).
-
 
 -doc """
 Returns 'ok' or an exception.
@@ -214,10 +215,8 @@ Failures:
 
 authorize(Permission, Resource, #bondy_rbac_context{} = Ctxt) ->
     do_authorize(Permission, Resource, Ctxt);
-
 authorize(_, _, #{authid := '$internal'}) ->
     ok;
-
 authorize(Permission, Resource, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
 
@@ -234,8 +233,6 @@ authorize(Permission, Resource, Ctxt) ->
             error({no_such_realm, RealmUri})
     end.
 
-
-
 -spec get_context(Ctxt :: bondy_context:t()) -> context().
 
 get_context(Ctxt) ->
@@ -247,8 +244,6 @@ get_context(Ctxt) ->
             RealmUri = bondy_context:realm_uri(Ctxt),
             get_context(RealmUri, AuthId)
     end.
-
-
 
 -spec refresh_context(Ctxt :: bondy_context:t()) -> {boolean(), context()}.
 
@@ -270,17 +265,17 @@ refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
         false ->
             %% context has expired
             Username = Context#bondy_rbac_context.username,
-            Ctxt = case Context#bondy_rbac_context.explicit_groups of
-                [_ | _] = Groups ->
-                    get_context(Uri, Username, Groups);
-                _ ->
-                    get_context(Uri, Username)
-            end,
+            Ctxt =
+                case Context#bondy_rbac_context.explicit_groups of
+                    [_ | _] = Groups ->
+                        get_context(Uri, Username, Groups);
+                    _ ->
+                        get_context(Uri, Username)
+                end,
             {true, Ctxt};
         _ ->
             {false, Context}
     end.
-
 
 -spec get_anonymous_context(Ctxt :: bondy_context:t()) -> context().
 
@@ -294,21 +289,21 @@ get_anonymous_context(Ctxt) ->
             error({not_authorized, <<"Anonymous user not allowed.">>})
     end.
 
-
 get_anonymous_context(RealmUri, Username) ->
-    Ctxt = build_context(RealmUri, Username, grants(RealmUri, anonymous, group)),
+    Ctxt = build_context(
+        RealmUri, Username, grants(RealmUri, anonymous, group)
+    ),
     Ctxt#bondy_rbac_context{is_anonymous = true}.
-
 
 -doc """
 Contexts are only valid until the GRANT epoch changes, and it will
 change whenever a GRANT or a REVOKE is performed. This is a little coarse
 grained right now, but it'll do for the moment.
 """.
-get_context(RealmUri, Username)
-when is_binary(Username) orelse Username == anonymous ->
+get_context(RealmUri, Username) when
+    is_binary(Username) orelse Username == anonymous
+->
     build_context(RealmUri, Username, grants(RealmUri, Username, user)).
-
 
 -doc """
 Returns an RBAC context for `Username` with explicit group memberships.
@@ -324,9 +319,10 @@ addition to the `all` group and any direct user grants.
     ExplicitGroups :: [binary()]
 ) -> context().
 
-get_context(RealmUri, Username, ExplicitGroups0)
-when (is_binary(Username) orelse Username == anonymous)
-andalso is_list(ExplicitGroups0) ->
+get_context(RealmUri, Username, ExplicitGroups0) when
+    (is_binary(Username) orelse Username == anonymous) andalso
+        is_list(ExplicitGroups0)
+->
     %% Normalise group names early so the context stores casefolded names
     ExplicitGroups = [normalise_name(G) || G <- ExplicitGroups0],
 
@@ -351,12 +347,11 @@ andalso is_list(ExplicitGroups0) ->
     {Acc2, _} = acc_grants([Username], user, RealmProto, Seen1, Acc1),
 
     build_context(
-        RealmUri, Username, group_grants(lists:flatten(Acc2)), ExplicitGroups).
-
+        RealmUri, Username, group_grants(lists:flatten(Acc2)), ExplicitGroups
+    ).
 
 get_metadata(_, anonymous) ->
     #{};
-
 get_metadata(RealmUri, Username) ->
     case bondy_rbac_user:lookup(RealmUri, Username) of
         {ok, User} ->
@@ -364,11 +359,9 @@ get_metadata(RealmUri, Username) ->
             RealmProto = {RealmUri, ProtoUri},
             Acc = maps:to_list(bondy_rbac_user:meta(User)),
             do_get_metadata(bondy_rbac_user:groups(User), RealmProto, Acc);
-
         {error, not_found} ->
             #{}
     end.
-
 
 get_metadata(RealmUri, Username, Groups) ->
     ProtoUri = bondy_realm:prototype_uri(RealmUri),
@@ -378,12 +371,10 @@ get_metadata(RealmUri, Username, Groups) ->
         {ok, User} ->
             Acc = maps:to_list(bondy_rbac_user:meta(User)),
             do_get_metadata(Groups, RealmProto, Acc);
-
         {error, not_found} ->
             %% When IDP is not Bondy
             do_get_metadata(Groups, RealmProto, [])
     end.
-
 
 -doc """
 Returns true if term is a reserved name in binary or atom form.
@@ -406,31 +397,22 @@ is_reserved_name(Term) when is_binary(Term) ->
         _:_ ->
             false
     end;
-
 is_reserved_name(anonymous) ->
     true;
-
 is_reserved_name(all) ->
     true;
-
 is_reserved_name(on) ->
     true;
-
 is_reserved_name(to) ->
     true;
-
 is_reserved_name(from) ->
     true;
-
 is_reserved_name(any) ->
     true;
-
 is_reserved_name(Term) when is_atom(Term) ->
     false;
-
 is_reserved_name(_) ->
     error(invalid_name).
-
 
 -doc """
 Normalises the utf8 binary `Bin` into a Normalised Form of compatibly
@@ -442,13 +424,11 @@ converts it to a case-agnostic comparable string.
 normalise_name(Bin) when is_binary(Bin) ->
     string:casefold(unicode:characters_to_nfkd_binary(Bin)).
 
-
 -doc "Validates the data for a grant or revoke request.".
 -spec request(Data :: request_data()) -> Request :: request() | no_return().
 
 request(Data) ->
     validate(Data).
-
 
 -doc """
 **Use cases**
@@ -464,7 +444,6 @@ grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<gro
 grant(RealmUri, Arg) ->
     grant(RealmUri, Arg, #{}).
 
-
 -doc """
 **Use cases**
 
@@ -474,7 +453,8 @@ grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<gro
 ```
 """.
 -spec grant(
-    RealmUri :: uri(), Request :: request() | map(), Opts :: grant_opts()) ->
+    RealmUri :: uri(), Request :: request() | map(), Opts :: grant_opts()
+) ->
     ok | {error, Reason :: any()} | no_return().
 
 grant(RealmUri, #{type := request} = Request, Opts) ->
@@ -486,10 +466,8 @@ grant(RealmUri, #{type := request} = Request, Opts) ->
     } = Request,
 
     grant(RealmUri, Roles, Resources, Permissions, Opts);
-
 grant(RealmUri, Data, Opts) when is_map(Data) ->
     grant(RealmUri, request(Data), Opts).
-
 
 -spec revoke(RealmUri :: uri(), Request :: request() | map()) ->
     ok | {error, Reason :: any()} | no_return().
@@ -502,10 +480,8 @@ revoke(RealmUri, #{type := request} = Request) ->
         resources := Resources
     } = Request,
     revoke(RealmUri, Roles, Resources, Permissions);
-
 revoke(RealmUri, Data) when is_map(Data) ->
     revoke(RealmUri, validate(Data)).
-
 
 revoke_user(RealmUri, Username) ->
     Prefix = ?USER_GRANTS_PREFIX(RealmUri),
@@ -517,7 +493,6 @@ revoke_user(RealmUri, Username) ->
         Prefix,
         [{match, {Username, '_'}}, {resolver, lww}]
     ).
-
 
 revoke_group(RealmUri, Name) ->
     Prefix = ?GROUP_GRANTS_PREFIX(RealmUri),
@@ -531,47 +506,47 @@ revoke_group(RealmUri, Name) ->
         [{match, {Name, '_'}}, {resolver, lww}]
     ).
 
-
 -doc """
 Returns the local grants assigned in realm `RealmUri`. This function does not
 use protypical inheritance.
 """.
--spec grants(RealmUri :: uri(), Opts :: map())
--> [{{binary(), normalised_resource()}, [permission()]}].
+-spec grants(RealmUri :: uri(), Opts :: map()) ->
+    [{{binary(), normalised_resource()}, [permission()]}].
 
 grants(RealmUri, Opts0) ->
     Opts = maps:to_list(Opts0),
     GroupGrants = [
-        {{concat_role(group, Name), Resource}, Permissions} ||
-        {{Name, Resource}, Permissions} <- find_grants(RealmUri, '_', group, Opts)
+        {{concat_role(group, Name), Resource}, Permissions}
+     || {{Name, Resource}, Permissions} <- find_grants(
+            RealmUri, '_', group, Opts
+        )
     ],
     UserGrants = [
-        {{concat_role(user, Name), Resource}, Permissions} ||
-        {{Name, Resource}, Permissions} <- find_grants(RealmUri, '_', user, Opts)
+        {{concat_role(user, Name), Resource}, Permissions}
+     || {{Name, Resource}, Permissions} <- find_grants(
+            RealmUri, '_', user, Opts
+        )
     ],
 
     lists:append(GroupGrants, UserGrants).
 
-
 -spec grants(
-    RealmUri :: uri(), Name :: binary(), RoleType :: user | group) ->
+    RealmUri :: uri(), Name :: binary(), RoleType :: user | group
+) ->
     [grant()].
 
 grants(RealmUri, Name, Type) ->
     group_grants(acc_grants(RealmUri, Name, Type)).
-
 
 -spec user_grants(RealmUri :: uri(), Username :: binary()) -> [grant()].
 
 user_grants(RealmUri, Username) ->
     grants(RealmUri, Username, user).
 
-
 -spec group_grants(RealmUri :: uri(), Name :: binary()) -> [grant()].
 
 group_grants(RealmUri, Name) ->
     grants(RealmUri, Name, group).
-
 
 -doc """
 Resource must be a binary or the atom `any`.
@@ -582,8 +557,11 @@ permissions that don't tie to a particular resource.
 -spec check_permission(Permission :: permission(), Context :: context()) ->
     {true, context()} | {false, binary(), context()}.
 
-check_permission({Action, Resource} = Permission, #bondy_rbac_context{} = Ctxt0)
-when is_binary(Resource) orelse Resource =:= any ->
+check_permission(
+    {Action, Resource} = Permission, #bondy_rbac_context{} = Ctxt0
+) when
+    is_binary(Resource) orelse Resource =:= any
+->
     {_, Ctxt} = refresh_context(Ctxt0),
     case check_permission_exact(Permission, Ctxt) of
         true ->
@@ -597,7 +575,6 @@ when is_binary(Resource) orelse Resource =:= any ->
                     {false, Mssg, Ctxt}
             end
     end.
-
 
 -spec remove_all(RealmUri :: uri(), Opts :: map()) -> ok.
 
@@ -626,11 +603,9 @@ externalize_grant({{Role, {_, _} = Resource}, Permissions}) ->
     ResourceMap#{
         <<"roles">> => [Role]
     };
-
 %% To list the grants for a role (group or user)
 externalize_grant({{<<>>, Strategy}, Permissions}) ->
     externalize_grant({{any, Strategy}, Permissions});
-
 externalize_grant({{Uri, Strategy}, Permissions}) ->
     #{
         <<"resource">> => #{
@@ -650,13 +625,9 @@ externalize_grant({any, Permissions}) ->
         <<"permissions">> => Permissions
     }.
 
-
-
 %% =============================================================================
 %% PRIVATE: AUTHORIZATION
 %% =============================================================================
-
-
 
 check_permission_exact({Action, Resource}, Ctxt) ->
     case maps:find(Resource, Ctxt#bondy_rbac_context.exact_grants) of
@@ -666,16 +637,13 @@ check_permission_exact({Action, Resource}, Ctxt) ->
             false
     end.
 
-
 check_permission_pattern({Action, Resource}, Ctxt) ->
     Actions = match_grants(Resource, Ctxt#bondy_rbac_context.pattern_grants),
     lists:member(Action, Actions).
 
-
 %% @private
 build_context(RealmUri, Username, Grants) ->
     build_context(RealmUri, Username, Grants, []).
-
 
 %% @private
 build_context(RealmUri, Username, Grants, ExplicitGroups) ->
@@ -686,7 +654,7 @@ build_context(RealmUri, Username, Grants, ExplicitGroups) ->
             ({{Uri, ?EXACT_MATCH}, Permissions}, {Map, L}) ->
                 {maps:put(Uri, Permissions, Map), L};
             (Term, {Map, L}) ->
-                {Map, [Term|L]}
+                {Map, [Term | L]}
         end,
         {#{}, []},
         Grants
@@ -701,7 +669,6 @@ build_context(RealmUri, Username, Grants, ExplicitGroups) ->
         is_anonymous = Username == anonymous
     }.
 
-
 %% @private
 do_authorize(Permission, Resource, Ctxt) ->
     %% We could be cashing the security ctxt,
@@ -713,12 +680,9 @@ do_authorize(Permission, Resource, Ctxt) ->
             error({not_authorized, Mssg})
     end.
 
-
-
 %% @private
 match_grants(Resource, Grants) ->
     match_grants(Resource, Grants, []).
-
 
 %% @private
 match_grants(any, Grants, Acc) ->
@@ -728,7 +692,6 @@ match_grants(any, Grants, Acc) ->
         false ->
             Acc
     end;
-
 match_grants(Resource, Grants, Acc) ->
     %% find the first grant that matches the resource name
     %% and then merge in the 'any' grants, if any
@@ -748,12 +711,9 @@ match_grants(Resource, Grants, Acc) ->
         lists:sort(match_grants(any, Grants))
     ).
 
-
 %% @private
 to_bin(anonymous) -> <<"anonymous">>;
 to_bin(Bin) when is_binary(Bin) -> Bin.
-
-
 
 %% @private
 resource_to_iolist({Type, Bucket}) ->
@@ -763,22 +723,24 @@ resource_to_iolist(any) ->
 resource_to_iolist(Bucket) ->
     Bucket.
 
-
 %% @private
 permission_denied_message(
-    Permission, Resource, #bondy_rbac_context{is_anonymous = false} = Ctxt) ->
+    Permission, Resource, #bondy_rbac_context{is_anonymous = false} = Ctxt
+) ->
     Username = to_bin(Ctxt#bondy_rbac_context.username),
-    Tail = case Resource == any of
-        true ->
-            ["'"];
-        false ->
-            ["' on '", resource_to_iolist(Resource), "'"]
-    end,
+    Tail =
+        case Resource == any of
+            true ->
+                ["'"];
+            false ->
+                ["' on '", resource_to_iolist(Resource), "'"]
+        end,
 
     unicode:characters_to_binary(
         [
             "Permission denied. ",
-            "User '", Username,
+            "User '",
+            Username,
             "' does not have permission '",
             Permission
             | Tail
@@ -786,20 +748,22 @@ permission_denied_message(
         utf8,
         utf8
     );
-
 permission_denied_message(
-    Permission, Resource, #bondy_rbac_context{is_anonymous = true} = Ctxt) ->
+    Permission, Resource, #bondy_rbac_context{is_anonymous = true} = Ctxt
+) ->
     Username = to_bin(Ctxt#bondy_rbac_context.username),
-    Tail = case Resource == any of
-        true ->
-            ["'"];
-        false ->
-            ["' on '", resource_to_iolist(Resource), "'"]
-    end,
+    Tail =
+        case Resource == any of
+            true ->
+                ["'"];
+            false ->
+                ["' on '", resource_to_iolist(Resource), "'"]
+        end,
     unicode:characters_to_binary(
         [
             "Permission denied. ",
-            "Anonymous user '", Username,
+            "Anonymous user '",
+            Username,
             "' does not have permission '",
             Permission
             | Tail
@@ -808,14 +772,12 @@ permission_denied_message(
         utf8
     ).
 
-
 %% @private
-do_get_metadata([H|T], {RealmUri, ProtoUri} = RealmProto, Acc0) ->
+do_get_metadata([H | T], {RealmUri, ProtoUri} = RealmProto, Acc0) ->
     case bondy_rbac_group:lookup(RealmUri, H) of
         {error, not_found} when ProtoUri == undefined ->
             %% Group not found and no prototype realm — skip and continue
             do_get_metadata(T, RealmProto, Acc0);
-
         {error, not_found} ->
             %% Try the prototype realm
             case bondy_rbac_group:lookup(ProtoUri, H) of
@@ -827,16 +789,13 @@ do_get_metadata([H|T], {RealmUri, ProtoUri} = RealmProto, Acc0) ->
                     L = T ++ bondy_rbac_group:groups(Group),
                     do_get_metadata(L, RealmProto, Acc)
             end;
-
         Group ->
             Acc = [maps:to_list(bondy_rbac_group:meta(Group)) | Acc0],
             L = T ++ bondy_rbac_group:groups(Group),
             do_get_metadata(L, RealmProto, Acc)
     end;
-
 do_get_metadata([], _, []) ->
     #{};
-
 do_get_metadata([], _, Acc) ->
     Map =
         maps:groups_from_list(
@@ -846,7 +805,7 @@ do_get_metadata([], _, Acc) ->
         ),
     maps:map(
         fun
-            (_, [[_|_] = V]) ->
+            (_, [[_ | _] = V]) ->
                 %% If a singleton containing a list, we return the list
                 V;
             (_, L0) when is_list(L0) ->
@@ -863,29 +822,22 @@ do_get_metadata([], _, Acc) ->
         Map
     ).
 
-
 %% =============================================================================
 %% PRIVATE: REQUEST, GRANT, REVOKE
 %% =============================================================================
-
-
 
 %% @private
 permission_validator(Term) ->
     bondy_wamp_uri:is_valid(Term, loose).
 
-
 %% @private
 resource_validator(any) ->
     {ok, any};
-
 resource_validator(<<"any">>) ->
     {ok, any};
-
 resource_validator(Term) ->
     %% We need to know the match strategy to validate the URI
     is_binary(Term).
-
 
 %% @private
 validate(Data) ->
@@ -908,85 +860,70 @@ validate_v2(Data) ->
     Req1 = maps:update_with(resources, fun validate_resources/1, Req0),
     maps:put(type, request, Req1).
 
-
 %% @private
 validate_resources(Resources) ->
     [validate_uri_match(normalise_resource(R)) || R <- Resources].
 
-
 %% @private
 normalise_resource(any) ->
     any;
-
 normalise_resource(#{uri := any}) ->
     any;
-
 normalise_resource(#{uri := Uri, match := Strategy}) ->
     {Uri, Strategy}.
-
 
 %% @private
 validate_uri_match(any) ->
     any;
-
 validate_uri_match({<<"*">>, S}) ->
     validate_uri_match({<<>>, S});
-
 validate_uri_match({<<>>, undefined}) ->
     {<<>>, ?PREFIX_MATCH};
-
 validate_uri_match({<<>>, ?PREFIX_MATCH} = P) ->
     P;
-
 validate_uri_match({<<>>, _}) ->
     inconsistency_error([<<"uri">>, <<"match">>]);
-
 validate_uri_match({Uri, undefined}) ->
     %% We try to derive the missing strategy from the URI
     {Uri, derive_strategy(Uri)};
-
 validate_uri_match({Uri, S} = P) ->
     Uri = bondy_wamp_uri:validate(Uri, S),
     P.
-
 
 %% @private
 derive_strategy(Uri) ->
     derive_strategy(Uri, [?EXACT_MATCH, ?WILDCARD_MATCH, ?PREFIX_MATCH]).
 
-
 %% @private
-derive_strategy(Uri, [H|T]) ->
+derive_strategy(Uri, [H | T]) ->
     case bondy_wamp_uri:is_valid(Uri, H) of
         true ->
             H;
         false ->
             derive_strategy(Uri, T)
     end;
-
 derive_strategy(_, []) ->
     error(bondy_error_utils:map({missing_required_value, <<"match">>})).
-
 
 %% @private
 inconsistency_error(Keys) ->
     error(bondy_error_utils:map({inconsistency_error, Keys})).
 
-
 %% @private
 -doc "Grant permissions to one or more roles(".
 -spec grant(
-    RealmUri ::binary(),
+    RealmUri :: binary(),
     Arg :: all | [binary()],
     Resources :: [normalised_resource()],
     Permissions :: [binary()],
-    Opts :: grant_opts()) ->
+    Opts :: grant_opts()
+) ->
     ok | {error, term()}.
 
-grant(RealmUri, Keyword, Resources, Permissions, Opts)
-when Keyword == all orelse Keyword == anonymous->
+grant(RealmUri, Keyword, Resources, Permissions, Opts) when
+    Keyword == all orelse Keyword == anonymous
+->
     do_grant([{Keyword, group}], RealmUri, Resources, Permissions, Opts);
-
 grant(RealmUri, RoleList0, Resources, Permissions, Opts) ->
     {Anon, RoleList} = lists:splitwith(
         fun
@@ -998,8 +935,9 @@ grant(RealmUri, RoleList0, Resources, Permissions, Opts) ->
     ),
 
     %% If anonymous was found in the list, add the grant for it
-    _ = length(Anon) > 0
-            andalso grant(RealmUri, anonymous, Resources, Permissions, Opts),
+    _ =
+        length(Anon) > 0 andalso
+            grant(RealmUri, anonymous, Resources, Permissions, Opts),
 
     ProtoUri = bondy_realm:prototype_uri(RealmUri),
     RealmProto = {RealmUri, ProtoUri},
@@ -1036,11 +974,9 @@ grant(RealmUri, RoleList0, Resources, Permissions, Opts) ->
             Error
     end.
 
-
 %% @private
 do_grant([], _, _, _, _) ->
     ok;
-
 do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
 
@@ -1066,7 +1002,6 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
 
     do_grant(T, RealmUri, Resources, Permissions0, Opts).
 
-
 %% @private
 store(Prefix, Key, Permissions, #{rebase := true} = Opts) ->
     ActorId = maps:get(actor_id, Opts, undefined),
@@ -1078,7 +1013,6 @@ store(Prefix, Key, Permissions, #{rebase := true} = Opts) ->
         {error, Reason} ->
             throw(Reason)
     end;
-
 store(Prefix, Key, Permissions, _) ->
     case plum_db:put(Prefix, Key, Permissions) of
         ok ->
@@ -1087,18 +1021,17 @@ store(Prefix, Key, Permissions, _) ->
             throw(Reason)
     end.
 
-
 -doc "Revoke permissions to one or more roles".
 -spec revoke(
     RealmUri :: binary(),
     Roles :: all | [binary()],
     Resource :: [normalised_resource()],
-    Permissions :: [uri()]) -> ok | {error, term()}.
+    Permissions :: [uri()]
+) -> ok | {error, term()}.
 
-revoke(RealmUri, all, Resources, Permissions)  ->
+revoke(RealmUri, all, Resources, Permissions) ->
     %% all and anonymous are always valid
     do_revoke([{all, group}], RealmUri, Resources, Permissions);
-
 revoke(RealmUri, RoleList, Resources, Permissions) ->
     ProtoUri = bondy_realm:prototype_uri(RealmUri),
     RealmProto = {RealmUri, ProtoUri},
@@ -1139,11 +1072,9 @@ revoke(RealmUri, RoleList, Resources, Permissions) ->
             Error
     end.
 
-
 do_revoke([], _, _, _) ->
     ok;
-
-do_revoke([{Rolename, RoleType}|Roles], RealmUri, Resources, Permissions) ->
+do_revoke([{Rolename, RoleType} | Roles], RealmUri, Resources, Permissions) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
 
     ok = lists:foreach(
@@ -1156,7 +1087,7 @@ do_revoke([{Rolename, RoleType}|Roles], RealmUri, Resources, Permissions) ->
                 GrantedPerms ->
                     NewPerms = [
                         X
-                        || X <- GrantedPerms, not lists:member(X, Permissions)
+                     || X <- GrantedPerms, not lists:member(X, Permissions)
                     ],
 
                     %% TODO - do deletes here, once cluster metadata supports it for
@@ -1174,7 +1105,6 @@ do_revoke([{Rolename, RoleType}|Roles], RealmUri, Resources, Permissions) ->
     ),
     do_revoke(Roles, RealmUri, Resources, Permissions).
 
-
 %% @private
 chop_name(<<"user/", Name/binary>>) ->
     Name;
@@ -1182,7 +1112,6 @@ chop_name(<<"group/", Name/binary>>) ->
     Name;
 chop_name(Name) ->
     Name.
-
 
 %% When we need to know whether a role name is a group or user (or
 %% both), use this
@@ -1196,16 +1125,13 @@ role_type({_, _} = RealmProto, <<"group/", Name/binary>>) ->
         false,
         group_exists(RealmProto, Name)
     );
-
 role_type({RealmUri, _} = RealmProto, Name) ->
     do_role_type(
         bondy_rbac_user:exists(RealmUri, Name),
         group_exists(RealmProto, Name)
     );
-
 role_type(RealmUri, Name) ->
     role_type({RealmUri, undefined}, Name).
-
 
 %% @private
 group_exists({RealmUri, Prototype}, Name) ->
@@ -1218,38 +1144,28 @@ group_exists({RealmUri, Prototype}, Name) ->
             true
     end.
 
-
 %% @private
 do_role_type(false, false) ->
     unknown;
-
 do_role_type(true, false) ->
     user;
-
 do_role_type(false, true) ->
     group;
-
 do_role_type(true, true) ->
     both.
-
 
 %% @private
 check_grant_blockers([], []) ->
     none;
-
 check_grant_blockers(UnknownRoles, []) ->
     {error, {unknown_roles, UnknownRoles}};
-
-
 check_grant_blockers([], NameOverlaps) ->
     {error, {duplicate_roles, NameOverlaps}};
-
 check_grant_blockers(UnknownRoles, NameOverlaps) ->
     {error, [
         {unknown_roles, UnknownRoles},
         {duplicate_roles, NameOverlaps}
     ]}.
-
 
 %% @private
 acc_grants(RealmUri, Rolename, Type) ->
@@ -1272,12 +1188,10 @@ acc_grants(RealmUri, Rolename, Type) ->
     {Acc1, _Seen} = acc_grants([Rolename], Type, RealmProto, [], Acc0),
     Acc1.
 
-
 %% @private
 acc_grants([], _, _, Seen, Acc) ->
     {lists:flatten(Acc), Seen};
-
-acc_grants([Rolename|Rolenames], Type, RealmProto, Seen, Acc) ->
+acc_grants([Rolename | Rolenames], Type, RealmProto, Seen, Acc) ->
     %% A role can be a member of a group defined in the realm or in the realm's
     %% prototype.
     %% Grants can be assigned to a group defined in the realm or in the realm's
@@ -1304,14 +1218,13 @@ acc_grants([Rolename|Rolenames], Type, RealmProto, Seen, Acc) ->
     %% We gather the grants associated directly to this role
     Grants = [
         {{concat_role(Type, Name), Resource}, Permissions}
-        || {{Name, Resource}, Permissions} <-
+     || {{Name, Resource}, Permissions} <-
             acc_grants_find(Rolename, Type, RealmProto),
-            Name == Rolename
+        Name == Rolename
     ],
 
     %% We continue iterating over the roles
-    acc_grants(Rolenames, Type, RealmProto, NewSeen, [Grants|NewAcc]).
-
+    acc_grants(Rolenames, Type, RealmProto, NewSeen, [Grants | NewAcc]).
 
 %% @private
 acc_grants_append_seen({Rolename, _}, Acc) ->
@@ -1321,23 +1234,18 @@ acc_grants_append_seen({Rolename, _}, Acc) ->
     %% its super group from the prototype (if it existed), which simulates
     %% group override.
     acc_grants_append_seen(Rolename, Acc);
-
 acc_grants_append_seen(Rolename, Acc) ->
     [Rolename | Acc].
-
 
 %% @private
 acc_grants_find({Rolename, RealmUri}, user = Type, _) ->
     find_grants(RealmUri, {Rolename, '_'}, Type);
-
 acc_grants_find(Rolename, user = Type, {RealmUri, _}) ->
     %% No user inheritance, so we skip prototype
     find_grants(RealmUri, {Rolename, '_'}, Type);
-
 acc_grants_find({Rolename, RealmUri}, group = Type, _) ->
     %% We know the groups exists as we have a qualified name
     find_grants(RealmUri, {Rolename, '_'}, Type);
-
 acc_grants_find(Rolename, group = Type, {RealmUri, ProtoUri}) ->
     case bondy_rbac_group:exists(RealmUri, Rolename) of
         true ->
@@ -1345,7 +1253,6 @@ acc_grants_find(Rolename, group = Type, {RealmUri, ProtoUri}) ->
         false ->
             find_grants(ProtoUri, {Rolename, '_'}, Type)
     end.
-
 
 %% @private
 -doc """
@@ -1368,17 +1275,14 @@ role_groupnames(Rolename, Type, RealmProto, Seen) ->
             do_role_groupnames(Rolename, Type, RealmProto)
     end.
 
-
 %% @private
 do_role_groupnames(Rolename, user, {RealmUri, _}) ->
     case bondy_rbac_user:lookup(RealmUri, Rolename) of
         {ok, User} ->
             bondy_rbac_user:groups(User);
-
         {error, not_found} ->
             []
     end;
-
 do_role_groupnames(Rolename, group, {RealmUri, ProtoUri}) ->
     case bondy_rbac_group:lookup(RealmUri, Rolename) of
         {error, not_found} when ProtoUri == undefined ->
@@ -1389,16 +1293,13 @@ do_role_groupnames(Rolename, group, {RealmUri, ProtoUri}) ->
             bondy_rbac_group:groups(Group)
     end.
 
-
 %% @private
 find_grants(Realm, KeyPattern, Type) ->
     find_grants(Realm, KeyPattern, Type, []).
 
-
 %% @private
 find_grants(undefined, _, _, _) ->
     [];
-
 find_grants(Realm, KeyPattern, Type, Opts0) ->
     Opts = lists:merge(
         lists:sort([{resolver, lww}, {remove_tombstones, true}]),
@@ -1406,20 +1307,15 @@ find_grants(Realm, KeyPattern, Type, Opts0) ->
     ),
     plum_db:match(?PLUMDB_PREFIX(Realm, Type), KeyPattern, Opts).
 
-
 %% @private
 concat_role(user, Name) ->
     <<"user/", Name/binary>>;
-
 concat_role(group, all) ->
     <<"group/all">>;
-
 concat_role(group, anonymous) ->
     <<"group/anonymous">>;
-
 concat_role(group, Name) ->
     <<"group/", Name/binary>>.
-
 
 %% @private
 group_grants(Grants) ->
@@ -1432,10 +1328,8 @@ group_grants(Grants) ->
     ),
     [
         {Resource, lists:usort(lists:flatten(ListOfLists))}
-        || {Resource, ListOfLists} <- dict:to_list(D)
+     || {Resource, ListOfLists} <- dict:to_list(D)
     ].
-
-
 
 % on_grant(RealmUri, RoleType, Rolename) ->
 %     ok = bondy_event_manager:notify(

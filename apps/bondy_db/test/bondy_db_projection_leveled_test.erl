@@ -305,7 +305,9 @@ clear_is_bucket_scoped({Pid, _Dir}) ->
         ]),
         %% `{suffix, IndexName}` scope — the single-table-handle path
         %% (per_entity / memory). Documents the codec it resolves to.
-        ?assertEqual(<<"/$idx/by_name">>, bondy_oplog_index_key:bucket_suffix(by_name)),
+        ?assertEqual(
+            <<"/$idx/by_name">>, bondy_oplog_index_key:bucket_suffix(by_name)
+        ),
         ok = ?MOD:clear(H, {suffix, by_name}),
         %% Target index fully wiped (including the state-only cell)...
         ?assertEqual(not_found, ?MOD:get(H, Target, <<"t1">>)),
@@ -327,13 +329,21 @@ clear_is_entity_scoped({Pid, _Dir}) ->
         S = mk_state_frame(<<"sv">>),
         ok = ?MOD:put_batch(H, [
             %% TARGET — `users`/`by_name`, both shared-backend layouts:
-            {<<"users/$idx/by_name">>, <<"t1">>, F},        %% shared_shards
-            {<<"users/$idx/by_name">>, <<"t2">>, S},        %% state-only cell
-            {<<"r1/users/$idx/by_name">>, <<"t3">>, F},     %% single_bookie, r1
-            {<<"r2/users/$idx/by_name">>, <<"t4">>, F},     %% single_bookie, r2
+
+            %% shared_shards
+            {<<"users/$idx/by_name">>, <<"t1">>, F},
+            %% state-only cell
+            {<<"users/$idx/by_name">>, <<"t2">>, S},
+            %% single_bookie, r1
+            {<<"r1/users/$idx/by_name">>, <<"t3">>, F},
+            %% single_bookie, r2
+            {<<"r2/users/$idx/by_name">>, <<"t4">>, F},
             %% SIBLING table sharing the SAME index name — must survive:
-            {<<"items/$idx/by_name">>, <<"s1">>, F},        %% shared_shards
-            {<<"r1/items/$idx/by_name">>, <<"s2">>, F},     %% single_bookie
+
+            %% shared_shards
+            {<<"items/$idx/by_name">>, <<"s1">>, F},
+            %% single_bookie
+            {<<"r1/items/$idx/by_name">>, <<"s2">>, F},
             %% Same ET, DIFFERENT index name — must survive:
             {<<"users/$idx/by_email">>, <<"e1">>, F},
             %% substring traps: `power_users` is NOT `users` (ends `_users`,
@@ -382,9 +392,13 @@ cell_keys_is_entity_scoped({Pid, _Dir}) ->
         F = mk_frame(<<"v">>),
         ok = ?MOD:put_batch(H, [
             %% `users` PRIMARY cells we expect back:
-            {<<"users">>, <<"u_ss">>, F},        %% shared_shards (bucket = ET)
-            {<<"r1/users">>, <<"u_r1">>, F},      %% single_bookie (Realm/ET), r1
-            {<<"r2/users">>, <<"u_r2">>, F},      %% single_bookie, r2
+
+            %% shared_shards (bucket = ET)
+            {<<"users">>, <<"u_ss">>, F},
+            %% single_bookie (Realm/ET), r1
+            {<<"r1/users">>, <<"u_r1">>, F},
+            %% single_bookie, r2
+            {<<"r2/users">>, <<"u_r2">>, F},
             %% `users` INDEX cells — excluded (the `/$idx/` infix):
             {<<"users/$idx/by_name">>, <<"active">>, F},
             {<<"r1/users/$idx/by_name">>, <<"active">>, F},
@@ -392,8 +406,11 @@ cell_keys_is_entity_scoped({Pid, _Dir}) ->
             {<<"$idx_trusted">>, <<"m">>, F},
             {<<"$idx_clean">>, <<"m">>, F},
             %% OTHER tables co-located in the Bookie — excluded (not `users`):
-            {<<"items">>, <<"i1">>, F},           %% shared_shards other table
-            {<<"r1/items">>, <<"i2">>, F},        %% single_bookie other table
+
+            %% shared_shards other table
+            {<<"items">>, <<"i1">>, F},
+            %% single_bookie other table
+            {<<"r1/items">>, <<"i2">>, F},
             %% substring traps: `power_users` must NOT match ET `users`
             %% (equals it? no; ends with `/users`? no — ends with `_users`):
             {<<"power_users">>, <<"pu1">>, F},

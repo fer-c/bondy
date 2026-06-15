@@ -17,30 +17,24 @@ its core processes and sub-supervisors.
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
-        intensity => 2, % max restarts
-        period => 5, % seconds
+        % max restarts
+        intensity => 2,
+        % seconds
+        period => 5,
         auto_shutdown => never
     },
     Children = [

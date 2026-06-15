@@ -130,7 +130,6 @@ all() ->
         context_method_set_after_auth
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.auth_oauth2">>,
@@ -140,18 +139,13 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     {save_config, Config}.
 
-
 add_realm(RealmUri) ->
     _ = bondy_realm:create(maps:merge(?REALM, #{uri => RealmUri})),
     ok.
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 issue_jwt(RealmUri, Username, Roles) ->
@@ -163,13 +157,9 @@ issue_jwt(RealmUri, Username, Roles) ->
     {ok, {JWT, _}} = bondy_oauth_token:to_access_token(Token),
     JWT.
 
-
-
 %% =============================================================================
 %% ORIGINAL TESTS (PRESERVED)
 %% =============================================================================
-
-
 
 resource_owner_password(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -216,7 +206,6 @@ resource_owner_password(Config) ->
 
     ok.
 
-
 client_credentials(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -240,13 +229,9 @@ client_credentials(Config) ->
         bondy_auth:authenticate(?WAMP_OAUTH2_AUTH, JWT, #{}, Ctxt)
     ).
 
-
-
 %% =============================================================================
 %% OAUTH2 METHOD AVAILABILITY
 %% =============================================================================
-
-
 
 oauth2_method_available(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -259,13 +244,9 @@ oauth2_method_available(Config) ->
         lists:member(?WAMP_OAUTH2_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% CHALLENGE STEP
 %% =============================================================================
-
-
 
 challenge_returns_true_empty_extra(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -281,13 +262,9 @@ challenge_returns_true_empty_extra(Config) ->
     %% OAuth2 challenge returns true with empty extra
     ?assertEqual(#{}, Extra).
 
-
-
 %% =============================================================================
 %% TOKEN ISSUANCE
 %% =============================================================================
-
-
 
 password_grant_jwt_has_required_claims(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -317,7 +294,6 @@ password_grant_jwt_has_required_claims(Config) ->
     ?assert(maps:is_key(<<"client_id">>, Scope)),
     ?assert(maps:is_key(<<"device_id">>, Scope)).
 
-
 client_credentials_grant_issues_token(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -335,7 +311,6 @@ client_credentials_grant_issues_token(Config) ->
     {ok, Claims} = bondy_oauth_jwt:verify(RealmUri, JWT),
     ?assertEqual(?APP1, maps:get(<<"sub">>, Claims)),
     ?assertEqual(RealmUri, maps:get(<<"aud">>, Claims)).
-
 
 custom_expiry_in_token(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -355,13 +330,9 @@ custom_expiry_in_token(Config) ->
     ?assert(maps:is_key(<<"exp">>, Claims)),
     ?assert(is_integer(maps:get(<<"exp">>, Claims))).
 
-
-
 %% =============================================================================
 %% FULL AUTH FLOW
 %% =============================================================================
-
-
 
 full_oauth2_auth_flow(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -390,7 +361,6 @@ full_oauth2_auth_flow(Config) ->
     ?assertEqual(?U1, maps:get(<<"sub">>, AuthExtra)),
     ?assertEqual(?WAMP_OAUTH2_AUTH, bondy_auth:method(Ctxt2)).
 
-
 wrong_user_token_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -408,7 +378,6 @@ wrong_user_token_rejected(Config) ->
         bondy_auth:authenticate(?WAMP_OAUTH2_AUTH, JWT, #{}, Ctxt)
     ).
 
-
 invalid_jwt_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -424,13 +393,9 @@ invalid_jwt_rejected(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% SOURCE / CIDR
 %% =============================================================================
-
-
 
 user2_rejected_outside_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -444,7 +409,6 @@ user2_rejected_outside_cidr(Config) ->
         lists:member(?WAMP_OAUTH2_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
 user2_allowed_within_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -457,13 +421,9 @@ user2_allowed_within_cidr(Config) ->
         lists:member(?WAMP_OAUTH2_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% METHOD SELECTION
 %% =============================================================================
-
-
 
 method_mismatch_after_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -482,7 +442,6 @@ method_mismatch_after_challenge(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?PASS, undefined, Ctxt1)
     ).
 
-
 invalid_method_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -497,13 +456,9 @@ invalid_method_rejected(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% USER WITHOUT PASSWORD
 %% =============================================================================
-
-
 
 user_without_password_excluded(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -517,13 +472,9 @@ user_without_password_excluded(Config) ->
         lists:member(?WAMP_OAUTH2_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% ERROR CASES
 %% =============================================================================
-
-
 
 nonexistent_user_error(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -534,13 +485,9 @@ nonexistent_user_error(Config) ->
         bondy_auth:init(SessionId, RealmUri, <<"ghost">>, [], {127, 0, 0, 1})
     ).
 
-
-
 %% =============================================================================
 %% CONTEXT
 %% =============================================================================
-
-
 
 context_method_set_after_auth(Config) ->
     RealmUri = ?config(realm_uri, Config),

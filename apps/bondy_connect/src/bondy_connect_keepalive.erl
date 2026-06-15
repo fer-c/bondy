@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_connect_keepalive).
 
 -moduledoc """
@@ -26,13 +25,13 @@ actions as data so the connection only has to apply them.
 """.
 
 -record(keepalive, {
-    retry           ::  bondy_retry:t() | undefined,
-    idle_timeout    ::  pos_integer() | undefined,
-    payload         ::  binary() | undefined
+    retry :: bondy_retry:t() | undefined,
+    idle_timeout :: pos_integer() | undefined,
+    payload :: binary() | undefined
 }).
 
--opaque t()         ::  #keepalive{}.
--type decision()    ::  disabled | {ping, Deadline :: pos_integer()} | give_up.
+-opaque t() :: #keepalive{}.
+-type decision() :: disabled | {ping, Deadline :: pos_integer()} | give_up.
 
 -export_type([t/0]).
 
@@ -44,13 +43,9 @@ actions as data so the connection only has to apply them.
 -export([on_ping_timeout/1]).
 -export([on_activity/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Build keepalive state from the (validated) `ping` config. With `#{enabled :=
@@ -73,12 +68,12 @@ new(#{enabled := true} = Ping) ->
     #keepalive{
         retry = Retry,
         idle_timeout = maps:get(idle_timeout, Ping),
-        payload = <<(erlang:phash2(self())):32, (erlang:unique_integer([positive])):64>>
+        payload = <<
+            (erlang:phash2(self())):32, (erlang:unique_integer([positive])):64
+        >>
     };
-
 new(_) ->
     #keepalive{}.
-
 
 -doc "The ping payload to send (or `undefined` when keepalive is disabled).".
 -spec payload(t()) -> binary() | undefined.
@@ -86,16 +81,13 @@ new(_) ->
 payload(#keepalive{payload = P}) ->
     P.
 
-
 -doc "Actions to arm the idle timer (empty when keepalive is disabled).".
 -spec idle_actions(t()) -> [gen_statem:action()].
 
 idle_actions(#keepalive{idle_timeout = undefined}) ->
     [];
-
 idle_actions(#keepalive{idle_timeout = T}) ->
     [{{timeout, ping_idle}, T, ping_idle}].
-
 
 -doc """
 Actions to reset keepalive on inbound traffic: cancel any pending ping deadline
@@ -105,10 +97,8 @@ and re-arm the idle timer (empty when keepalive is disabled).
 
 reset_actions(#keepalive{idle_timeout = undefined}) ->
     [];
-
 reset_actions(#keepalive{idle_timeout = T}) ->
     [{{timeout, ping}, cancel}, {{timeout, ping_idle}, T, ping_idle}].
-
 
 -doc """
 The idle timer fired. Returns the keepalive decision: `{ping, Deadline}` to send
@@ -120,13 +110,11 @@ only counted as failed when its deadline elapses, via `on_ping_timeout/1`).
 
 on_idle(#keepalive{retry = undefined}) ->
     disabled;
-
 on_idle(#keepalive{retry = R}) ->
     case bondy_retry:get(R) of
         Deadline when is_integer(Deadline) -> {ping, Deadline};
         _Limit -> give_up
     end.
-
 
 -doc """
 A ping deadline elapsed with no pong. Count the failure via `bondy_retry:fail/1`
@@ -145,7 +133,6 @@ always returns the interval. The pre-A2 code read `get/1` after `fail/1` and so
 
 on_ping_timeout(#keepalive{retry = undefined}) ->
     disabled;
-
 on_ping_timeout(#keepalive{retry = R} = KA) ->
     case bondy_retry:fail(R) of
         {Deadline, R1} when is_integer(Deadline) ->
@@ -154,13 +141,11 @@ on_ping_timeout(#keepalive{retry = R} = KA) ->
             {give_up, KA#keepalive{retry = R1}}
     end.
 
-
 -doc "Inbound traffic proves the link alive: reset the failure budget.".
 -spec on_activity(t()) -> t().
 
 on_activity(#keepalive{retry = undefined} = KA) ->
     KA;
-
 on_activity(#keepalive{retry = R} = KA) ->
     {_, R1} = bondy_retry:succeed(R),
     KA#keepalive{retry = R1}.

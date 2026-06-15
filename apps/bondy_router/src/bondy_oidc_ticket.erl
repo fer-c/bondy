@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_oidc_ticket).
 -moduledoc """
 Helper module for minting OIDC-specific tickets.
@@ -23,17 +22,12 @@ Uses the same signing and storage internals as `bondy_ticket`.
 
 -define(NOW, erlang:system_time(second)).
 
-
 %% API
 -export([issue/5]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Issues a ticket for a user authenticated via OIDC.
@@ -49,17 +43,19 @@ signs with the realm's private key, and stores in PlumDB.
     Opts :: map()
 ) -> {ok, JWT :: binary(), Claims :: bondy_ticket:t()} | {error, term()}.
 
-issue(RealmUri, Authid, OidcProvider, OidcTokens, Opts)
-when is_binary(RealmUri) andalso is_binary(Authid)
-andalso is_binary(OidcProvider) andalso is_map(OidcTokens)
-andalso is_map(Opts) ->
+issue(RealmUri, Authid, OidcProvider, OidcTokens, Opts) when
+    is_binary(RealmUri) andalso is_binary(Authid) andalso
+        is_binary(OidcProvider) andalso is_map(OidcTokens) andalso
+        is_map(Opts)
+->
     try
         Realm = bondy_realm:fetch(RealmUri),
         Kid = bondy_realm:get_random_kid(Realm),
 
         IssuedAt = ?NOW,
         ExpirySecs = maps:get(
-            expiry_time_secs, Opts,
+            expiry_time_secs,
+            Opts,
             bondy_config:get([security, ticket, expiry_time_secs])
         ),
         ExpiresAt = IssuedAt + ExpirySecs,
@@ -95,20 +91,27 @@ andalso is_map(Opts) ->
         },
 
         %% Add optional OIDC fields
-        Claims1 = case IdToken of
-            undefined -> Claims0;
-            _ -> Claims0#{oidc_id_token => IdToken}
-        end,
+        Claims1 =
+            case IdToken of
+                undefined -> Claims0;
+                _ -> Claims0#{oidc_id_token => IdToken}
+            end,
 
-        Claims2 = case RefreshToken of
-            undefined -> Claims1;
-            _ -> Claims1#{oidc_refresh_token => RefreshToken}
-        end,
+        Claims2 =
+            case RefreshToken of
+                undefined -> Claims1;
+                _ -> Claims1#{oidc_refresh_token => RefreshToken}
+            end,
 
-        Claims = case AccessTokenExpiresAt of
-            undefined -> Claims2;
-            _ -> Claims2#{oidc_access_token_expires_in => AccessTokenExpiresAt}
-        end,
+        Claims =
+            case AccessTokenExpiresAt of
+                undefined ->
+                    Claims2;
+                _ ->
+                    Claims2#{
+                        oidc_access_token_expires_in => AccessTokenExpiresAt
+                    }
+            end,
 
         JWT = jose_jwt:from(Claims),
 
@@ -118,7 +121,6 @@ andalso is_map(Opts) ->
         ok = bondy_ticket:store_ticket(RealmUri, Authid, Claims),
 
         {ok, Ticket, Claims}
-
     catch
         throw:Reason ->
             {error, Reason};

@@ -37,14 +37,15 @@ octet 4..: payload
 %% `serializer'/`frame_kind' rather than the bondy_wamp.hrl `encoding'/
 %% `frame_type' (which mean the broad serializer set and text|binary) — these
 %% are the raw-socket-specific narrow types.
--type serializer()  ::  json | msgpack | cbor.
--type frame_kind()  ::  message | ping | pong.
--type handshake_error() ::  serializer_unsupported
-                            | maximum_message_length_unacceptable
-                            | use_of_reserved_bits
-                            | maximum_connection_count_reached
-                            | {unknown_error, 0..15}
-                            | invalid_handshake.
+-type serializer() :: json | msgpack | cbor.
+-type frame_kind() :: message | ping | pong.
+-type handshake_error() ::
+    serializer_unsupported
+    | maximum_message_length_unacceptable
+    | use_of_reserved_bits
+    | maximum_connection_count_reached
+    | {unknown_error, 0..15}
+    | invalid_handshake.
 
 -export_type([serializer/0]).
 -export_type([frame_kind/0]).
@@ -65,28 +66,22 @@ octet 4..: payload
 -export([pong_frame/1]).
 -export([parse_frame/2]).
 
-
-
 %% =============================================================================
 %% SERIALIZER / LENGTH CODES
 %% =============================================================================
 
-
-
 -doc "The raw-socket serializer code for an encoding (`1`/`2`/`3`).".
 -spec serializer_code(serializer()) -> 1..3.
-serializer_code(json)       -> 1;
-serializer_code(msgpack)    -> 2;
-serializer_code(cbor)       -> 3.
-
+serializer_code(json) -> 1;
+serializer_code(msgpack) -> 2;
+serializer_code(cbor) -> 3.
 
 -doc "The encoding for a raw-socket serializer code (`undefined` if unknown).".
 -spec code_to_encoding(0..15) -> serializer() | undefined.
-code_to_encoding(1)         -> json;
-code_to_encoding(2)         -> msgpack;
-code_to_encoding(3)         -> cbor;
-code_to_encoding(_)         -> undefined.
-
+code_to_encoding(1) -> json;
+code_to_encoding(2) -> msgpack;
+code_to_encoding(3) -> cbor;
+code_to_encoding(_) -> undefined.
 
 -doc """
 The largest length-exponent code (0..15) whose `2^(9+code)` does not exceed
@@ -98,27 +93,26 @@ length_exponent(Bytes) when is_integer(Bytes), Bytes >= 512 ->
 length_exponent(_) ->
     0.
 
-
 -doc "The max message length in octets for a length-exponent code.".
 -spec exponent_to_bytes(0..15) -> pos_integer().
 exponent_to_bytes(N) when is_integer(N), N >= 0, N =< 15 ->
     1 bsl (9 + N).
 
-
-
 %% =============================================================================
 %% HANDSHAKE
 %% =============================================================================
 
-
-
 -doc "Build the 4-octet client handshake request.".
 -spec handshake_request(Exp :: 0..15, SerializerCode :: 1..15) -> binary().
-handshake_request(Exp, Code)
-when is_integer(Exp), Exp >= 0, Exp =< 15,
-     is_integer(Code), Code >= 1, Code =< 15 ->
+handshake_request(Exp, Code) when
+    is_integer(Exp),
+    Exp >= 0,
+    Exp =< 15,
+    is_integer(Code),
+    Code >= 1,
+    Code =< 15
+->
     <<?RAW_MAGIC:8, Exp:4, Code:4, 0:16>>.
-
 
 -doc """
 Parse the router's 4-octet handshake reply: `{ok, Exp, SerializerCode}` on
@@ -131,13 +125,10 @@ success, or `{error, Reason}` on an error reply / malformed bytes.
 %% nibble; check it first so a zero serializer is never read as success.
 parse_handshake(<<?RAW_MAGIC:8, Code:4, 0:4, 0:16>>) ->
     {error, error_reason(Code)};
-
 parse_handshake(<<?RAW_MAGIC:8, Exp:4, Code:4, 0:16>>) ->
     {ok, Exp, Code};
-
 parse_handshake(_) ->
     {error, invalid_handshake}.
-
 
 -doc "Map a raw-socket handshake error code to a reason.".
 -spec error_reason(0..15) -> handshake_error().
@@ -147,31 +138,24 @@ error_reason(3) -> use_of_reserved_bits;
 error_reason(4) -> maximum_connection_count_reached;
 error_reason(N) -> {unknown_error, N}.
 
-
-
 %% =============================================================================
 %% FRAMES
 %% =============================================================================
-
-
 
 -doc "Frame a (already-encoded) message payload.".
 -spec frame(binary()) -> binary().
 frame(Payload) when is_binary(Payload) ->
     ?RAW_FRAME(Payload).
 
-
 -doc "Build a ping frame.".
 -spec ping_frame(binary()) -> binary().
 ping_frame(Payload) when is_binary(Payload) ->
     <<(?RAW_PING_PREFIX)/binary, (byte_size(Payload)):24, Payload/binary>>.
 
-
 -doc "Build a pong frame.".
 -spec pong_frame(binary()) -> binary().
 pong_frame(Payload) when is_binary(Payload) ->
     <<(?RAW_PONG_PREFIX)/binary, (byte_size(Payload)):24, Payload/binary>>.
-
 
 -doc """
 Parse one frame off the front of `Buffer`, enforcing `MaxLen`:
@@ -202,24 +186,18 @@ parse_frame(<<Reserved:5, Type:3, Len:24, Body/binary>>, MaxLen) ->
                     more
             end
     end;
-
 parse_frame(_Partial, _MaxLen) ->
     more.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 classify(0, Payload, Rest) -> {ok, {message, Payload}, Rest};
 classify(1, Payload, Rest) -> {ok, {ping, Payload}, Rest};
 classify(2, Payload, Rest) -> {ok, {pong, Payload}, Rest};
-classify(Type, _, _)       -> {error, {unsupported_frame_type, Type}}.
-
+classify(Type, _, _) -> {error, {unsupported_frame_type, Type}}.
 
 %% @private
 exp_search(Bytes, N) when N < 15, (1 bsl (9 + N + 1)) =< Bytes ->

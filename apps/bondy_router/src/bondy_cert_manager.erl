@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_cert_manager).
 -moduledoc """
 Central TLS certificate manager for Bondy.
@@ -44,7 +43,6 @@ Must be initialised by calling `init/0` before first use (called from
 -include_lib("kernel/include/logger.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
-
 %% Known TLS listener refs
 -define(TLS_LISTENERS, [
     api_gateway_https,
@@ -52,7 +50,6 @@ Must be initialised by calling `init/0` before first use (called from
     wamp_tls,
     bridge_relay_tls
 ]).
-
 
 %% CA Cert API
 -export([init/0]).
@@ -75,10 +72,13 @@ Must be initialised by calling `init/0` before first use (called from
 -export([set_client_auth/2]).
 -export([get_client_auth/1]).
 
-
 %% Types
--type listener_ref() :: api_gateway_https | admin_api_https
-                      | wamp_tls | bridge_relay_tls | atom().
+-type listener_ref() ::
+    api_gateway_https
+    | admin_api_https
+    | wamp_tls
+    | bridge_relay_tls
+    | atom().
 
 -type cert_source() :: #{
     certfile => file:filename_all(),
@@ -96,13 +96,9 @@ Must be initialised by calling `init/0` before first use (called from
 
 -export_type([listener_ref/0, cert_source/0, mtls_opts/0]).
 
-
-
 %% =============================================================================
 %% CA CERT API
 %% =============================================================================
-
-
 
 -doc """
 Initialises the certificate manager. Loads CA certs and server certs for all
@@ -116,7 +112,6 @@ init() ->
     ok = load_all_client_auth(),
     ok.
 
-
 -doc """
 Re-reads CA certificates from all sources and updates the trust store.
 Safe to call at runtime — new outbound connections will use the updated certs.
@@ -124,7 +119,12 @@ Safe to call at runtime — new outbound connections will use the updated certs.
 -spec reload_cacerts() -> ok.
 
 reload_cacerts() ->
-    OldCount = try length(cacerts()) catch _:_ -> 0 end,
+    OldCount =
+        try
+            length(cacerts())
+        catch
+            _:_ -> 0
+        end,
     ok = do_load_cacerts(),
     NewCount = length(cacerts()),
     ?LOG_NOTICE(#{
@@ -134,7 +134,6 @@ reload_cacerts() ->
     }),
     ok.
 
-
 -doc """
 Returns the merged, deduplicated list of DER-encoded CA certificates.
 """.
@@ -142,7 +141,6 @@ Returns the merged, deduplicated list of DER-encoded CA certificates.
 
 cacerts() ->
     persistent_term:get({?MODULE, cacerts}, certifi:cacerts()).
-
 
 -doc """
 Returns SSL client options for outbound TLS connections with certificate
@@ -160,7 +158,6 @@ ssl_opts() ->
         ]}
     ].
 
-
 -doc """
 Returns SSL client options customised by the given options map.
 
@@ -171,17 +168,12 @@ Supported options:
 
 ssl_opts(#{verify := verify_none}) ->
     [{verify, verify_none}];
-
 ssl_opts(#{}) ->
     ssl_opts().
-
-
 
 %% =============================================================================
 %% SERVER CERT API
 %% =============================================================================
-
-
 
 -doc """
 Loads a server certificate and key for a listener from PEM files or DER
@@ -203,13 +195,11 @@ set_server_cert(ListenerRef, #{certfile := CertPath, keyfile := KeyPath}) ->
         {error, _} = Error ->
             Error
     end;
-
 set_server_cert(ListenerRef, #{cert := Cert, key := Key}) ->
     CertData = #{cert => Cert, key => Key, chain => []},
     ok = persistent_term:put({?MODULE, server_cert, ListenerRef}, CertData),
     log_cert_info(ListenerRef, CertData),
     ok.
-
 
 -doc """
 Returns metadata about the currently loaded server certificate for a listener.
@@ -226,7 +216,6 @@ get_server_cert_info(ListenerRef) ->
             {ok, extract_cert_metadata(DerCert)}
     end.
 
-
 -doc """
 Returns SSL server options containing an `sni_fun` that reads the current
 certificate from `persistent_term` on each TLS handshake.
@@ -235,7 +224,6 @@ certificate from `persistent_term` on each TLS handshake.
 
 server_ssl_opts(ListenerRef) ->
     [{sni_fun, make_sni_fun(ListenerRef)}].
-
 
 -doc """
 Conditionally injects `sni_fun` into socket options for TLS listeners.
@@ -254,13 +242,9 @@ maybe_inject_sni_fun(ListenerRef, SocketOpts) ->
             SocketOpts
     end.
 
-
-
 %% =============================================================================
 %% LIVE ROTATION API
 %% =============================================================================
-
-
 
 -doc """
 Re-reads the certificate files from disk for a listener and updates the cached
@@ -279,33 +263,31 @@ rotate_listener(ListenerRef) ->
             Error
     end.
 
-
 -doc """
 Rotates certificates for all known TLS listeners.
 """.
 -spec rotate_all_listeners() -> ok.
 
 rotate_all_listeners() ->
-    lists:foreach(fun(Ref) ->
-        case rotate_listener(Ref) of
-            ok ->
-                ok;
-            {error, Reason} ->
-                ?LOG_WARNING(#{
-                    description => "Failed to rotate listener certificate",
-                    listener => Ref,
-                    reason => Reason
-                })
-        end
-    end, ?TLS_LISTENERS).
-
-
+    lists:foreach(
+        fun(Ref) ->
+            case rotate_listener(Ref) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_WARNING(#{
+                        description => "Failed to rotate listener certificate",
+                        listener => Ref,
+                        reason => Reason
+                    })
+            end
+        end,
+        ?TLS_LISTENERS
+    ).
 
 %% =============================================================================
 %% mTLS API
 %% =============================================================================
-
-
 
 -doc """
 Sets the client certificate verification configuration for a listener.
@@ -326,7 +308,6 @@ set_client_auth(ListenerRef, Opts0) when is_map(Opts0) ->
     }),
     update_ranch_opts(ListenerRef).
 
-
 -doc """
 Returns the current mTLS configuration for a listener.
 """.
@@ -340,13 +321,9 @@ get_client_auth(ListenerRef) ->
             {ok, Opts}
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE — CA Certs
 %% =============================================================================
-
-
 
 %% @private
 do_load_cacerts() ->
@@ -368,25 +345,24 @@ do_load_cacerts() ->
     }),
     ok.
 
-
 %% @private
 load_user_cacerts() ->
-    Path = case bondy_config:get([cert_manager, cacertfile], undefined) of
-        undefined ->
-            try
-                Opts = bondy_config:get(
-                    [api_gateway_https, transport_opts]
-                ),
-                SocketOpts = key_value:get(socket_opts, Opts, []),
-                key_value:get(cacertfile, SocketOpts, undefined)
-            catch
-                _:_ -> undefined
-            end;
-        Configured ->
-            Configured
-    end,
+    Path =
+        case bondy_config:get([cert_manager, cacertfile], undefined) of
+            undefined ->
+                try
+                    Opts = bondy_config:get(
+                        [api_gateway_https, transport_opts]
+                    ),
+                    SocketOpts = key_value:get(socket_opts, Opts, []),
+                    key_value:get(cacertfile, SocketOpts, undefined)
+                catch
+                    _:_ -> undefined
+                end;
+            Configured ->
+                Configured
+        end,
     load_pem_certs(Path).
-
 
 %% @private
 load_os_cacerts() ->
@@ -406,7 +382,6 @@ load_os_cacerts() ->
             []
     end.
 
-
 %% @private
 deduplicate(Certs) ->
     Map = lists:foldl(
@@ -416,30 +391,30 @@ deduplicate(Certs) ->
     ),
     maps:keys(Map).
 
-
-
 %% =============================================================================
 %% PRIVATE — Server Certs
 %% =============================================================================
 
-
-
 %% @private
 load_all_server_certs() ->
-    lists:foreach(fun(Ref) ->
-        case load_server_cert_from_config(Ref) of
-            ok -> ok;
-            {error, not_configured} -> ok;
-            {error, Reason} ->
-                ?LOG_WARNING(#{
-                    description =>
-                        "Failed to load server certificate from config",
-                    listener => Ref,
-                    reason => Reason
-                })
-        end
-    end, ?TLS_LISTENERS).
-
+    lists:foreach(
+        fun(Ref) ->
+            case load_server_cert_from_config(Ref) of
+                ok ->
+                    ok;
+                {error, not_configured} ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Failed to load server certificate from config",
+                        listener => Ref,
+                        reason => Reason
+                    })
+            end
+        end,
+        ?TLS_LISTENERS
+    ).
 
 %% @private
 load_server_cert_from_config(ListenerRef) ->
@@ -464,7 +439,6 @@ load_server_cert_from_config(ListenerRef) ->
             {error, not_configured}
     end.
 
-
 %% @private
 parse_pem_cert_and_key(CertPath, KeyPath) ->
     case {file:read_file(CertPath), file:read_file(KeyPath)} of
@@ -475,7 +449,7 @@ parse_pem_cert_and_key(CertPath, KeyPath) ->
             %% First Certificate entry is the server cert; rest are chain
             DerCerts = [
                 DER
-                || {'Certificate', DER, not_encrypted} <- CertEntries
+             || {'Certificate', DER, not_encrypted} <- CertEntries
             ],
             DerKey = parse_key_entry(KeyEntries),
 
@@ -493,7 +467,6 @@ parse_pem_cert_and_key(CertPath, KeyPath) ->
             {error, {key_read_failed, KeyPath, Reason}}
     end.
 
-
 %% @private
 parse_key_entry(PemEntries) ->
     case find_key_entry(PemEntries) of
@@ -504,31 +477,31 @@ parse_key_entry(PemEntries) ->
             {error, no_key_found}
     end.
 
-
 %% @private
 find_key_entry([]) ->
     not_found;
-find_key_entry([{Type, _DER, not_encrypted} = Entry | _])
-when Type =:= 'RSAPrivateKey';
-     Type =:= 'ECPrivateKey';
-     Type =:= 'PrivateKeyInfo' ->
+find_key_entry([{Type, _DER, not_encrypted} = Entry | _]) when
+    Type =:= 'RSAPrivateKey';
+    Type =:= 'ECPrivateKey';
+    Type =:= 'PrivateKeyInfo'
+->
     Entry;
 find_key_entry([_ | Rest]) ->
     find_key_entry(Rest).
-
 
 %% @private
 pem_type_to_key_type('RSAPrivateKey') -> 'RSAPrivateKey';
 pem_type_to_key_type('ECPrivateKey') -> 'ECPrivateKey';
 pem_type_to_key_type('PrivateKeyInfo') -> 'PrivateKeyInfo'.
 
-
 %% @private
 make_sni_fun(ListenerRef) ->
     fun(_Hostname) ->
-        case persistent_term:get(
-            {?MODULE, server_cert, ListenerRef}, undefined
-        ) of
+        case
+            persistent_term:get(
+                {?MODULE, server_cert, ListenerRef}, undefined
+            )
+        of
             undefined ->
                 %% No cert managed by us; let SSL use static socket_opts
                 [];
@@ -541,7 +514,6 @@ make_sni_fun(ListenerRef) ->
                     end
         end
     end.
-
 
 %% @private
 log_cert_info(ListenerRef, #{cert := DerCert}) ->
@@ -560,7 +532,6 @@ log_cert_info(ListenerRef, #{cert := DerCert}) ->
                 listener => ListenerRef
             })
     end.
-
 
 %% @private
 extract_cert_metadata(DerCert) ->
@@ -587,19 +558,19 @@ extract_cert_metadata(DerCert) ->
         serial => integer_to_binary(Serial)
     }.
 
-
 %% @private
 format_rdn({rdnSequence, RdnSeq}) ->
     Parts = lists:filtermap(
-        fun([#'AttributeTypeAndValue'{type = Oid, value = Val}]) ->
-            case Oid of
-                ?'id-at-commonName' ->
-                    {true, iolist_to_binary(format_rdn_value(Val))};
-                _ ->
-                    false
-            end;
-        (_) ->
-            false
+        fun
+            ([#'AttributeTypeAndValue'{type = Oid, value = Val}]) ->
+                case Oid of
+                    ?'id-at-commonName' ->
+                        {true, iolist_to_binary(format_rdn_value(Val))};
+                    _ ->
+                        false
+                end;
+            (_) ->
+                false
         end,
         RdnSeq
     ),
@@ -607,7 +578,6 @@ format_rdn({rdnSequence, RdnSeq}) ->
         [CN | _] -> CN;
         [] -> <<"unknown">>
     end.
-
 
 %% @private
 format_rdn_value({utf8String, V}) when is_binary(V) -> V;
@@ -617,37 +587,36 @@ format_rdn_value(V) when is_list(V) -> list_to_binary(V);
 format_rdn_value(V) when is_binary(V) -> V;
 format_rdn_value(_) -> <<"?">>.
 
-
 %% @private
 format_asn1_time({utcTime, Time}) ->
     list_to_binary(Time);
 format_asn1_time({generalTime, Time}) ->
     list_to_binary(Time).
 
-
-
 %% =============================================================================
 %% PRIVATE — mTLS
 %% =============================================================================
 
-
-
 %% @private
 load_all_client_auth() ->
-    lists:foreach(fun(Ref) ->
-        case load_client_auth_from_config(Ref) of
-            ok -> ok;
-            {error, not_configured} -> ok;
-            {error, Reason} ->
-                ?LOG_WARNING(#{
-                    description =>
-                        "Failed to load client auth config",
-                    listener => Ref,
-                    reason => Reason
-                })
-        end
-    end, ?TLS_LISTENERS).
-
+    lists:foreach(
+        fun(Ref) ->
+            case load_client_auth_from_config(Ref) of
+                ok ->
+                    ok;
+                {error, not_configured} ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Failed to load client auth config",
+                        listener => Ref,
+                        reason => Reason
+                    })
+            end
+        end,
+        ?TLS_LISTENERS
+    ).
 
 %% @private
 load_client_auth_from_config(ListenerRef) ->
@@ -665,10 +634,11 @@ load_client_auth_from_config(ListenerRef) ->
                 FailIfNoPeerCert = key_value:get(
                     fail_if_no_peer_cert, SocketOpts, false
                 ),
-                CACerts = case CACertFile of
-                    undefined -> [];
-                    _ -> load_pem_certs(CACertFile)
-                end,
+                CACerts =
+                    case CACertFile of
+                        undefined -> [];
+                        _ -> load_pem_certs(CACertFile)
+                    end,
                 MtlsOpts = #{
                     verify => Verify,
                     fail_if_no_peer_cert => FailIfNoPeerCert,
@@ -684,23 +654,17 @@ load_client_auth_from_config(ListenerRef) ->
             {error, not_configured}
     end.
 
-
 %% @private
 normalise_mtls_opts(#{cacertfile := Path} = Opts) ->
     CACerts = load_pem_certs(Path),
     Opts1 = maps:remove(cacertfile, Opts),
     Opts1#{cacerts => CACerts};
-
 normalise_mtls_opts(Opts) ->
     Opts.
-
-
 
 %% =============================================================================
 %% PRIVATE — Ranch Integration
 %% =============================================================================
-
-
 
 %% @private
 update_ranch_opts(ListenerRef) ->
@@ -725,30 +689,34 @@ update_ranch_opts(ListenerRef) ->
             ok
     end.
 
-
 %% @private
 %% Merges cert manager state into socket opts for ranch:set_transport_options.
 merge_managed_socket_opts(ListenerRef, SocketOpts0) ->
     %% Merge server cert (for non-SNI fallback)
-    SocketOpts1 = case persistent_term:get(
-        {?MODULE, server_cert, ListenerRef}, undefined
-    ) of
-        undefined ->
-            SocketOpts0;
-        #{cert := Cert, key := Key} = CertData ->
-            Chain = maps:get(chain, CertData, []),
-            Opts1 = lists:keystore(cert, 1, SocketOpts0, {cert, Cert}),
-            Opts2 = lists:keystore(key, 1, Opts1, {key, Key}),
-            case Chain of
-                [] -> Opts2;
-                _ -> lists:keystore(cacerts, 1, Opts2, {cacerts, Chain})
-            end
-    end,
+    SocketOpts1 =
+        case
+            persistent_term:get(
+                {?MODULE, server_cert, ListenerRef}, undefined
+            )
+        of
+            undefined ->
+                SocketOpts0;
+            #{cert := Cert, key := Key} = CertData ->
+                Chain = maps:get(chain, CertData, []),
+                Opts1 = lists:keystore(cert, 1, SocketOpts0, {cert, Cert}),
+                Opts2 = lists:keystore(key, 1, Opts1, {key, Key}),
+                case Chain of
+                    [] -> Opts2;
+                    _ -> lists:keystore(cacerts, 1, Opts2, {cacerts, Chain})
+                end
+        end,
 
     %% Merge mTLS opts
-    case persistent_term:get(
-        {?MODULE, client_auth, ListenerRef}, undefined
-    ) of
+    case
+        persistent_term:get(
+            {?MODULE, client_auth, ListenerRef}, undefined
+        )
+    of
         undefined ->
             SocketOpts1;
         MtlsOpts ->
@@ -761,7 +729,9 @@ merge_managed_socket_opts(ListenerRef, SocketOpts0) ->
                 verify, 1, SocketOpts1, {verify, Verify}
             ),
             Opts4 = lists:keystore(
-                fail_if_no_peer_cert, 1, Opts3,
+                fail_if_no_peer_cert,
+                1,
+                Opts3,
                 {fail_if_no_peer_cert, FailIfNoPeer}
             ),
             case ClientCAs of
@@ -770,13 +740,9 @@ merge_managed_socket_opts(ListenerRef, SocketOpts0) ->
             end
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE — PEM Helpers
 %% =============================================================================
-
-
 
 %% @private
 -spec load_pem_certs(file:filename_all() | undefined) ->
@@ -784,14 +750,13 @@ merge_managed_socket_opts(ListenerRef, SocketOpts0) ->
 
 load_pem_certs(undefined) ->
     [];
-
 load_pem_certs(Path) ->
     case file:read_file(Path) of
         {ok, PemBin} ->
             Entries = public_key:pem_decode(PemBin),
             DerCerts = [
                 DER
-                || {'Certificate', DER, not_encrypted} <- Entries
+             || {'Certificate', DER, not_encrypted} <- Entries
             ],
             ?LOG_INFO(#{
                 description => "Loaded CA certificates from PEM file",

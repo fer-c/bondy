@@ -40,13 +40,9 @@ pluggable module.
 -export([instance_dir/3]).
 -export([discover/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 ?DOC("""
 Resolves the layout from an options map. Reads the `path_layout` key,
@@ -61,7 +57,6 @@ layout(Opts) when is_map(Opts) ->
         Other -> error({invalid_path_layout, Other})
     end.
 
-
 ?DOC("""
 Returns the per-instance directory for `InstanceId` under `BaseDir`
 using the given `Layout`. The result terminates in `<InstanceId>`.
@@ -74,7 +69,6 @@ storage_path(InstanceId, BaseDir, flat) when
     is_binary(InstanceId), is_binary(BaseDir)
 ->
     filename:join([BaseDir, InstanceId]);
-
 storage_path(InstanceId, BaseDir, sharded) when
     is_binary(InstanceId), is_binary(BaseDir)
 ->
@@ -82,7 +76,6 @@ storage_path(InstanceId, BaseDir, sharded) when
     Shard1 = binary:part(Hash, 0, 2),
     Shard2 = binary:part(Hash, 0, 4),
     filename:join([BaseDir, Shard1, Shard2, InstanceId]).
-
 
 ?DOC("""
 Convenience over `storage_path/3`: resolves the layout from `Opts`
@@ -96,7 +89,6 @@ Convenience over `storage_path/3`: resolves the layout from `Opts`
 instance_dir(InstanceId, BaseDir, Opts) ->
     storage_path(InstanceId, BaseDir, layout(Opts)).
 
-
 ?DOC("""
 Enumerates the instance ids discoverable on disk under `BaseDir` for
 the given `Layout`. Suitable for boot-time enumeration.
@@ -107,20 +99,15 @@ the given `Layout`. Suitable for boot-time enumeration.
 discover(BaseDir, flat) when is_binary(BaseDir) ->
     Pattern = unicode:characters_to_list(filename:join(BaseDir, "*")),
     dirs(Pattern);
-
 discover(BaseDir, sharded) when is_binary(BaseDir) ->
     Pattern = unicode:characters_to_list(
         filename:join([BaseDir, "*", "*", "*"])
     ),
     dirs(Pattern).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 dirs(Pattern) ->
@@ -130,11 +117,9 @@ dirs(Pattern) ->
         filelib:is_dir(P)
     ].
 
-
 %% @private
 hex(Bin) ->
     <<<<(nibble(N))>> || <<N:4>> <= Bin>>.
-
 
 %% @private
 nibble(N) when N < 10 -> $0 + N;

@@ -20,31 +20,23 @@ verifying a JWT bearer token presented by the client against the realm.
 -export([challenge/3]).
 -export([authenticate/4]).
 
-
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
-
 
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
 init(Ctxt) ->
     try
-
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
 
         {ok, maps:new()}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec requirements() -> map().
 
@@ -55,25 +47,23 @@ requirements() ->
         authorized_keys => false
     }.
 
-
-
 -spec challenge(
-    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()
+) ->
     {false, NewState :: state()}
     | {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
-
 
 challenge(_, _, State) ->
     %% The client will respond to the challenge by sending the Token
     {true, #{}, State}.
 
-
 -spec authenticate(
     JWT :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    CBState :: state()) ->
+    CBState :: state()
+) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
@@ -84,11 +74,8 @@ authenticate(JWT, _, Ctxt, State) ->
     case bondy_oauth_jwt:verify(RealmUri, JWT) of
         {ok, #{<<"sub">> := UserId} = Claims} ->
             {ok, Claims, State};
-
         {ok, _} ->
             {error, oauth2_invalid_grant, State};
-
         {error, Reason} ->
             {error, Reason, State}
     end.
-

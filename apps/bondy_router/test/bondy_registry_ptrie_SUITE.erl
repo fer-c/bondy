@@ -23,7 +23,6 @@ the module.
 
 -define(NUMTESTS, 200).
 
-
 all() ->
     [
         %% Unit tests — small, hand-picked cases
@@ -78,20 +77,18 @@ all() ->
         prop_match_agrees_with_reference
     ].
 
-
 init_per_suite(Config) ->
     Config.
-
 
 end_per_suite(Config) ->
     Config.
 
-
 init_per_testcase(_TC, Config) ->
-    Name = list_to_atom("ptrie_test_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Name = list_to_atom(
+        "ptrie_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
     Handle = bondy_registry_ptrie:new(Name),
     [{handle, Handle} | Config].
-
 
 end_per_testcase(_TC, Config) ->
     case ?config(handle, Config) of
@@ -100,37 +97,40 @@ end_per_testcase(_TC, Config) ->
     end,
     ok.
 
-
 %% =============================================================================
 %% UNIT TESTS
 %% =============================================================================
-
 
 unit_empty_trie(Config) ->
     H = ?config(handle, Config),
     ?assertEqual(error, bondy_registry_ptrie:lookup(H, <<"any">>)),
     ?assertEqual(0, bondy_registry_ptrie:size(H)).
 
-
 unit_single_insert_lookup(Config) ->
     H = ?config(handle, Config),
     ok = bondy_registry_ptrie:insert(H, <<"com.example.foo">>, 42),
-    ?assertEqual({ok, 42}, bondy_registry_ptrie:lookup(H, <<"com.example.foo">>)),
+    ?assertEqual(
+        {ok, 42}, bondy_registry_ptrie:lookup(H, <<"com.example.foo">>)
+    ),
     ?assertEqual(1, bondy_registry_ptrie:size(H)).
-
 
 unit_shared_prefix(Config) ->
     H = ?config(handle, Config),
     ok = bondy_registry_ptrie:insert(H, <<"com.example.foo">>, 1),
     ok = bondy_registry_ptrie:insert(H, <<"com.example.bar">>, 2),
     ok = bondy_registry_ptrie:insert(H, <<"com.example.baz">>, 3),
-    ?assertEqual({ok, 1}, bondy_registry_ptrie:lookup(H, <<"com.example.foo">>)),
-    ?assertEqual({ok, 2}, bondy_registry_ptrie:lookup(H, <<"com.example.bar">>)),
-    ?assertEqual({ok, 3}, bondy_registry_ptrie:lookup(H, <<"com.example.baz">>)),
+    ?assertEqual(
+        {ok, 1}, bondy_registry_ptrie:lookup(H, <<"com.example.foo">>)
+    ),
+    ?assertEqual(
+        {ok, 2}, bondy_registry_ptrie:lookup(H, <<"com.example.bar">>)
+    ),
+    ?assertEqual(
+        {ok, 3}, bondy_registry_ptrie:lookup(H, <<"com.example.baz">>)
+    ),
     ?assertEqual(error, bondy_registry_ptrie:lookup(H, <<"com.example.qux">>)),
     ?assertEqual(error, bondy_registry_ptrie:lookup(H, <<"com.example">>)),
     ?assertEqual(3, bondy_registry_ptrie:size(H)).
-
 
 unit_one_key_prefix_of_another(Config) ->
     H = ?config(handle, Config),
@@ -139,10 +139,11 @@ unit_one_key_prefix_of_another(Config) ->
     ok = bondy_registry_ptrie:insert(H, <<"com.example.foo">>, 3),
     ?assertEqual({ok, 1}, bondy_registry_ptrie:lookup(H, <<"com">>)),
     ?assertEqual({ok, 2}, bondy_registry_ptrie:lookup(H, <<"com.example">>)),
-    ?assertEqual({ok, 3}, bondy_registry_ptrie:lookup(H, <<"com.example.foo">>)),
+    ?assertEqual(
+        {ok, 3}, bondy_registry_ptrie:lookup(H, <<"com.example.foo">>)
+    ),
     ?assertEqual(error, bondy_registry_ptrie:lookup(H, <<>>)),
     ?assertEqual(error, bondy_registry_ptrie:lookup(H, <<"co">>)).
-
 
 unit_update_same_key(Config) ->
     H = ?config(handle, Config),
@@ -151,7 +152,6 @@ unit_update_same_key(Config) ->
     ok = bondy_registry_ptrie:insert(H, <<"k">>, v3),
     ?assertEqual({ok, v3}, bondy_registry_ptrie:lookup(H, <<"k">>)),
     ?assertEqual(1, bondy_registry_ptrie:size(H)).
-
 
 unit_remove_existing(Config) ->
     H = ?config(handle, Config),
@@ -164,7 +164,6 @@ unit_remove_existing(Config) ->
     ?assertEqual({ok, 3}, bondy_registry_ptrie:lookup(H, <<"abc">>)),
     ?assertEqual(2, bondy_registry_ptrie:size(H)).
 
-
 unit_remove_nonexistent(Config) ->
     H = ?config(handle, Config),
     ok = bondy_registry_ptrie:insert(H, <<"a">>, 1),
@@ -172,55 +171,71 @@ unit_remove_nonexistent(Config) ->
     ?assertEqual({ok, 1}, bondy_registry_ptrie:lookup(H, <<"a">>)),
     ?assertEqual(1, bondy_registry_ptrie:size(H)).
 
-
 unit_update_insert_new(Config) ->
     H = ?config(handle, Config),
-    ?assertEqual(ok, bondy_registry_ptrie:update(
-        H, <<"k">>, exact,
-        fun(undefined) -> {ok, first}; (_) -> erlang:error(unexpected) end
-    )),
+    ?assertEqual(
+        ok,
+        bondy_registry_ptrie:update(
+            H,
+            <<"k">>,
+            exact,
+            fun
+                (undefined) -> {ok, first};
+                (_) -> erlang:error(unexpected)
+            end
+        )
+    ),
     ?assertEqual({ok, first}, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
     ok.
-
 
 unit_update_modify_existing(Config) ->
     H = ?config(handle, Config),
     ok = bondy_registry_ptrie:insert(H, <<"k">>, exact, 1),
-    ?assertEqual(ok, bondy_registry_ptrie:update(
-        H, <<"k">>, exact,
-        fun(V) -> {ok, V + 10} end
-    )),
+    ?assertEqual(
+        ok,
+        bondy_registry_ptrie:update(
+            H,
+            <<"k">>,
+            exact,
+            fun(V) -> {ok, V + 10} end
+        )
+    ),
     ?assertEqual({ok, 11}, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
     ok.
-
 
 unit_update_delete_existing(Config) ->
     H = ?config(handle, Config),
     ok = bondy_registry_ptrie:insert(H, <<"k">>, exact, 1),
-    ?assertEqual(deleted, bondy_registry_ptrie:update(
-        H, <<"k">>, exact, fun(_) -> delete end
-    )),
+    ?assertEqual(
+        deleted,
+        bondy_registry_ptrie:update(
+            H, <<"k">>, exact, fun(_) -> delete end
+        )
+    ),
     ?assertEqual(error, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
     ok.
 
-
 unit_update_delete_missing_is_noop(Config) ->
     H = ?config(handle, Config),
-    ?assertEqual(noop, bondy_registry_ptrie:update(
-        H, <<"k">>, exact, fun(undefined) -> delete end
-    )),
+    ?assertEqual(
+        noop,
+        bondy_registry_ptrie:update(
+            H, <<"k">>, exact, fun(undefined) -> delete end
+        )
+    ),
     ok.
-
 
 unit_update_noop_branch(Config) ->
     H = ?config(handle, Config),
     ok = bondy_registry_ptrie:insert(H, <<"k">>, exact, 1),
-    ?assertEqual(noop, bondy_registry_ptrie:update(
-        H, <<"k">>, exact, fun(_) -> noop end
-    )),
+    ?assertEqual(
+        noop,
+        bondy_registry_ptrie:update(
+            H, <<"k">>, exact, fun(_) -> noop end
+        )
+    ),
     ?assertEqual({ok, 1}, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
     ok.
-
 
 unit_update_concurrent_rmw(Config) ->
     %% N processes concurrently add their ID to a set stored as the value.
@@ -228,22 +243,33 @@ unit_update_concurrent_rmw(Config) ->
     H = ?config(handle, Config),
     N = 32,
     Parent = self(),
-    Pids = [spawn_link(fun() ->
-        ok = bondy_registry_ptrie:update(
-            H, <<"bag">>, exact,
-            fun
-                (undefined) -> {ok, sets:from_list([I])};
-                (Set) -> {ok, sets:add_element(I, Set)}
-            end
-        ),
-        Parent ! {done, self()}
-    end) || I <- lists:seq(1, N)],
-    [receive {done, P} -> ok end || P <- Pids],
+    Pids = [
+        spawn_link(fun() ->
+            ok = bondy_registry_ptrie:update(
+                H,
+                <<"bag">>,
+                exact,
+                fun
+                    (undefined) -> {ok, sets:from_list([I])};
+                    (Set) -> {ok, sets:add_element(I, Set)}
+                end
+            ),
+            Parent ! {done, self()}
+        end)
+     || I <- lists:seq(1, N)
+    ],
+    [
+        receive
+            {done, P} -> ok
+        end
+     || P <- Pids
+    ],
     {ok, Final} = bondy_registry_ptrie:lookup(H, <<"bag">>, exact),
-    ?assertEqual(lists:sort(lists:seq(1, N)),
-                 lists:sort(sets:to_list(Final))),
+    ?assertEqual(
+        lists:sort(lists:seq(1, N)),
+        lists:sort(sets:to_list(Final))
+    ),
     ok.
-
 
 unit_fold_order(Config) ->
     H = ?config(handle, Config),
@@ -258,11 +284,9 @@ unit_fold_order(Config) ->
     %% ascending order.
     ?assertEqual(lists:sort(Keys), lists:reverse(Folded)).
 
-
 %% =============================================================================
 %% PROPERTY TESTS
 %% =============================================================================
-
 
 prop_insert_then_lookup(Config) ->
     H = ?config(handle, Config),
@@ -278,7 +302,6 @@ prop_insert_then_lookup(Config) ->
         )
     ).
 
-
 prop_insert_update_overwrites(Config) ->
     H = ?config(handle, Config),
     run_prop(
@@ -289,12 +312,11 @@ prop_insert_update_overwrites(Config) ->
                 clear(H),
                 ok = bondy_registry_ptrie:insert(H, K, V1),
                 ok = bondy_registry_ptrie:insert(H, K, V2),
-                {ok, V2} =:= bondy_registry_ptrie:lookup(H, K)
-                    andalso 1 =:= bondy_registry_ptrie:size(H)
+                {ok, V2} =:= bondy_registry_ptrie:lookup(H, K) andalso
+                    1 =:= bondy_registry_ptrie:size(H)
             end
         )
     ).
-
 
 prop_insert_absent_key_lookup(Config) ->
     H = ?config(handle, Config),
@@ -313,7 +335,6 @@ prop_insert_absent_key_lookup(Config) ->
         )
     ).
 
-
 prop_random_ops_equal_to_map(Config) ->
     H = ?config(handle, Config),
     run_prop(
@@ -327,7 +348,6 @@ prop_random_ops_equal_to_map(Config) ->
             end
         )
     ).
-
 
 prop_fold_contains_all_entries(Config) ->
     H = ?config(handle, Config),
@@ -349,7 +369,6 @@ prop_fold_contains_all_entries(Config) ->
         )
     ).
 
-
 prop_size_equals_fold_count(Config) ->
     H = ?config(handle, Config),
     run_prop(
@@ -365,11 +384,9 @@ prop_size_equals_fold_count(Config) ->
         )
     ).
 
-
 %% =============================================================================
 %% CONCURRENCY TESTS
 %% =============================================================================
-
 
 concurrent_writers_distinct_keys(Config) ->
     %% N workers each insert their own exclusive set of keys. After they
@@ -380,12 +397,20 @@ concurrent_writers_distinct_keys(Config) ->
     Workers = 8,
     KeysPerWorker = 200,
     Parent = self(),
-    Pids = [spawn_link(fun() ->
-        Keys = [worker_key(W, I) || I <- lists:seq(1, KeysPerWorker)],
-        [ok = bondy_registry_ptrie:insert(H, K, K) || K <- Keys],
-        Parent ! {done, self(), Keys}
-    end) || W <- lists:seq(1, Workers)],
-    AllKeys = lists:flatten([receive {done, P, Ks} -> Ks end || P <- Pids]),
+    Pids = [
+        spawn_link(fun() ->
+            Keys = [worker_key(W, I) || I <- lists:seq(1, KeysPerWorker)],
+            [ok = bondy_registry_ptrie:insert(H, K, K) || K <- Keys],
+            Parent ! {done, self(), Keys}
+        end)
+     || W <- lists:seq(1, Workers)
+    ],
+    AllKeys = lists:flatten([
+        receive
+            {done, P, Ks} -> Ks
+        end
+     || P <- Pids
+    ]),
     %% Every key retrievable.
     lists:foreach(
         fun(K) -> ?assertEqual({ok, K}, bondy_registry_ptrie:lookup(H, K)) end,
@@ -393,7 +418,6 @@ concurrent_writers_distinct_keys(Config) ->
     ),
     ?assertEqual(length(AllKeys), bondy_registry_ptrie:size(H)),
     ok.
-
 
 concurrent_writers_shared_keys(Config) ->
     %% N workers all write to the SAME key (conflict-max). The final value
@@ -408,26 +432,37 @@ concurrent_writers_shared_keys(Config) ->
     WritesPerWorker = 50,
     Key = <<"shared.hot.key">>,
     Parent = self(),
-    Pids = [spawn_link(fun() ->
-        Results = [bondy_registry_ptrie:insert(H, Key, {W, I})
-                   || I <- lists:seq(1, WritesPerWorker)],
-        Parent ! {done, self(), Results}
-    end) || W <- lists:seq(1, Workers)],
-    All = lists:flatten([receive {done, P, Rs} -> Rs end || P <- Pids]),
+    Pids = [
+        spawn_link(fun() ->
+            Results = [
+                bondy_registry_ptrie:insert(H, Key, {W, I})
+             || I <- lists:seq(1, WritesPerWorker)
+            ],
+            Parent ! {done, self(), Results}
+        end)
+     || W <- lists:seq(1, Workers)
+    ],
+    All = lists:flatten([
+        receive
+            {done, P, Rs} -> Rs
+        end
+     || P <- Pids
+    ]),
     %% Every insert either returned ok or cas_exhausted. We want ok to be
     %% the overwhelming majority; any cas_exhausted is a budget-retry.
     OkCount = length([ok || ok <- All]),
     ExhaustedCount = length([E || E = {error, cas_exhausted} <- All]),
     TotalWrites = Workers * WritesPerWorker,
     ?assertEqual(TotalWrites, OkCount + ExhaustedCount),
-    ct:pal("shared-keys: ok=~p exhausted=~p/~p",
-           [OkCount, ExhaustedCount, TotalWrites]),
+    ct:pal(
+        "shared-keys: ok=~p exhausted=~p/~p",
+        [OkCount, ExhaustedCount, TotalWrites]
+    ),
     %% Final state must have exactly the one key (regardless of which
     %% writer's value won).
     {ok, _FinalValue} = bondy_registry_ptrie:lookup(H, Key),
     ?assertEqual(1, bondy_registry_ptrie:size(H)),
     ok.
-
 
 concurrent_readers_no_crash(Config) ->
     %% While a single writer is inserting, many readers traverse the trie.
@@ -457,36 +492,45 @@ concurrent_readers_no_crash(Config) ->
     end),
 
     %% Reader tasks.
-    ReaderPids = [spawn_link(fun() ->
-        try
-            lists:foreach(
-                fun(I) ->
-                    K = iolist_to_binary(
-                        io_lib:format("key.~p", [I rem Writes])
-                    ),
-                    _ = bondy_registry_ptrie:lookup(H, K)
-                end,
-                lists:seq(1, ReadOpsPerReader)
-            ),
-            Parent ! {reader_done, self(), ok}
-        catch
-            C:E:S ->
-                Parent ! {reader_done, self(), {crash, C, E, S}}
-        end
-    end) || _ <- lists:seq(1, Readers)],
+    ReaderPids = [
+        spawn_link(fun() ->
+            try
+                lists:foreach(
+                    fun(I) ->
+                        K = iolist_to_binary(
+                            io_lib:format("key.~p", [I rem Writes])
+                        ),
+                        _ = bondy_registry_ptrie:lookup(H, K)
+                    end,
+                    lists:seq(1, ReadOpsPerReader)
+                ),
+                Parent ! {reader_done, self(), ok}
+            catch
+                C:E:S ->
+                    Parent ! {reader_done, self(), {crash, C, E, S}}
+            end
+        end)
+     || _ <- lists:seq(1, Readers)
+    ],
 
-    receive {writer_done, Writer} -> ok after 30_000 -> exit(writer_timeout) end,
-    lists:foreach(fun(Pid) ->
-        receive
-            {reader_done, Pid, ok} -> ok;
-            {reader_done, Pid, {crash, C, E, S}} ->
-                ct:fail("Reader crashed: ~p:~p~n~p", [C, E, S])
-        after 30_000 ->
-            exit({reader_timeout, Pid})
-        end
-    end, ReaderPids),
+    receive
+        {writer_done, Writer} -> ok
+    after 30_000 -> exit(writer_timeout)
+    end,
+    lists:foreach(
+        fun(Pid) ->
+            receive
+                {reader_done, Pid, ok} ->
+                    ok;
+                {reader_done, Pid, {crash, C, E, S}} ->
+                    ct:fail("Reader crashed: ~p:~p~n~p", [C, E, S])
+            after 30_000 ->
+                exit({reader_timeout, Pid})
+            end
+        end,
+        ReaderPids
+    ),
     ok.
-
 
 concurrent_readers_and_writers(Config) ->
     %% Heavy mixed workload: many writers + many readers. Every committed
@@ -498,39 +542,50 @@ concurrent_readers_and_writers(Config) ->
     OpsPerWorker = 500,
     Parent = self(),
 
-    WriterPids = [spawn_link(fun() ->
-        Results = [begin
-            K = worker_key(W, I),
-            R = bondy_registry_ptrie:insert(H, K, I),
-            {K, R}
-        end || I <- lists:seq(1, OpsPerWorker)],
-        Parent ! {writer_done, self(), Results}
-    end) || W <- lists:seq(1, Writers)],
-
-    ReaderPids = [spawn_link(fun() ->
-        try
-            %% Readers pick random keys from the writer key space and
-            %% validate consistency (value either missing or correctly
-            %% associated with the key).
-            lists:foreach(
-                fun(_) ->
-                    W = rand:uniform(Writers),
-                    I = rand:uniform(OpsPerWorker),
+    WriterPids = [
+        spawn_link(fun() ->
+            Results = [
+                begin
                     K = worker_key(W, I),
-                    case bondy_registry_ptrie:lookup(H, K) of
-                        error -> ok;        %% not yet written — fine
-                        {ok, V} when V =:= I -> ok;
-                        {ok, Other} ->
-                            exit({bad_value, K, Other, expected, I})
-                    end
-                end,
-                lists:seq(1, OpsPerWorker)
-            ),
-            Parent ! {reader_done, self(), ok}
-        catch
-            C:E:S -> Parent ! {reader_done, self(), {crash, C, E, S}}
-        end
-    end) || _ <- lists:seq(1, Readers)],
+                    R = bondy_registry_ptrie:insert(H, K, I),
+                    {K, R}
+                end
+             || I <- lists:seq(1, OpsPerWorker)
+            ],
+            Parent ! {writer_done, self(), Results}
+        end)
+     || W <- lists:seq(1, Writers)
+    ],
+
+    ReaderPids = [
+        spawn_link(fun() ->
+            try
+                %% Readers pick random keys from the writer key space and
+                %% validate consistency (value either missing or correctly
+                %% associated with the key).
+                lists:foreach(
+                    fun(_) ->
+                        W = rand:uniform(Writers),
+                        I = rand:uniform(OpsPerWorker),
+                        K = worker_key(W, I),
+                        case bondy_registry_ptrie:lookup(H, K) of
+                            %% not yet written — fine
+                            error ->
+                                ok;
+                            {ok, V} when V =:= I -> ok;
+                            {ok, Other} ->
+                                exit({bad_value, K, Other, expected, I})
+                        end
+                    end,
+                    lists:seq(1, OpsPerWorker)
+                ),
+                Parent ! {reader_done, self(), ok}
+            catch
+                C:E:S -> Parent ! {reader_done, self(), {crash, C, E, S}}
+            end
+        end)
+     || _ <- lists:seq(1, Readers)
+    ],
 
     AllWriterResults = lists:flatten([
         receive
@@ -538,24 +593,31 @@ concurrent_readers_and_writers(Config) ->
         after 60_000 ->
             exit({writer_timeout, Pid})
         end
-    || Pid <- WriterPids]),
+     || Pid <- WriterPids
+    ]),
 
-    lists:foreach(fun(Pid) ->
-        receive
-            {reader_done, Pid, ok} -> ok;
-            {reader_done, Pid, {crash, C, E, S}} ->
-                ct:fail("Reader crashed: ~p:~p~n~p", [C, E, S])
-        after 60_000 -> exit({reader_timeout, Pid})
-        end
-    end, ReaderPids),
+    lists:foreach(
+        fun(Pid) ->
+            receive
+                {reader_done, Pid, ok} ->
+                    ok;
+                {reader_done, Pid, {crash, C, E, S}} ->
+                    ct:fail("Reader crashed: ~p:~p~n~p", [C, E, S])
+            after 60_000 -> exit({reader_timeout, Pid})
+            end
+        end,
+        ReaderPids
+    ),
 
     %% Every committed write must be present with the right value.
     lists:foreach(
         fun
             ({K, ok}) ->
                 ExpectedValue = worker_key_to_i(K),
-                ?assertEqual({ok, ExpectedValue},
-                             bondy_registry_ptrie:lookup(H, K));
+                ?assertEqual(
+                    {ok, ExpectedValue},
+                    bondy_registry_ptrie:lookup(H, K)
+                );
             ({_, {error, cas_exhausted}}) ->
                 ok
         end,
@@ -565,18 +627,19 @@ concurrent_readers_and_writers(Config) ->
     ?assertEqual(OkCount, bondy_registry_ptrie:size(H)),
     ok.
 
-
 %% =============================================================================
 %% RECLAMATION TESTS
 %% =============================================================================
-
 
 reclaim_no_readers_drains_retire_queue(Config) ->
     %% With no active readers, every retired node should be reclaimable.
     H = ?config(handle, Config),
     clear(H),
     N = 500,
-    Keys = [iolist_to_binary(io_lib:format("k.~p", [I])) || I <- lists:seq(1, N)],
+    Keys = [
+        iolist_to_binary(io_lib:format("k.~p", [I]))
+     || I <- lists:seq(1, N)
+    ],
     [ok = bondy_registry_ptrie:insert(H, K, K) || K <- Keys],
     [ok = bondy_registry_ptrie:remove(H, K) || K <- Keys],
     %% Ensure no readers are pinning anything.
@@ -589,7 +652,6 @@ reclaim_no_readers_drains_retire_queue(Config) ->
     ?assertEqual(0, bondy_registry_ptrie:size(H)),
     ?assertEqual(1, bondy_registry_ptrie:node_count(H)),
     ok.
-
 
 reclaim_blocked_by_active_reader(Config) ->
     %% A reader that has pinned an old epoch must prevent reclamation of
@@ -616,10 +678,11 @@ reclaim_blocked_by_active_reader(Config) ->
     ?assertEqual(RetireBefore, bondy_registry_ptrie:retire_count(H)),
 
     Reader ! {release, ReleaseRef},
-    receive {reader_exited, ReaderRef} -> ok
-    after 5000 -> exit(reader_did_not_exit) end,
+    receive
+        {reader_exited, ReaderRef} -> ok
+    after 5000 -> exit(reader_did_not_exit)
+    end,
     ok.
-
 
 reclaim_progresses_after_reader_releases(Config) ->
     %% Same setup as the previous test, but we now reclaim AFTER the reader
@@ -630,17 +693,22 @@ reclaim_progresses_after_reader_releases(Config) ->
     ReaderRef = make_ref(),
     {Reader, ReleaseRef} = spawn_blocked_reader(H, ReaderRef),
 
-    [ok = bondy_registry_ptrie:insert(H, iolist_to_binary(io_lib:format("k~p", [I])), I)
-        || I <- lists:seq(1, 100)],
+    [
+        ok = bondy_registry_ptrie:insert(
+            H, iolist_to_binary(io_lib:format("k~p", [I])), I
+        )
+     || I <- lists:seq(1, 100)
+    ],
 
     Reader ! {release, ReleaseRef},
-    receive {reader_exited, ReaderRef} -> ok
-    after 5000 -> exit(reader_hang) end,
+    receive
+        {reader_exited, ReaderRef} -> ok
+    after 5000 -> exit(reader_hang)
+    end,
 
     _ = bondy_registry_ptrie:reclaim(H),
     ?assertEqual(0, bondy_registry_ptrie:retire_count(H)),
     ok.
-
 
 reclaim_safe_under_concurrent_readers(Config) ->
     %% The aggressive test: readers run continuously while a writer fires
@@ -669,38 +737,48 @@ reclaim_safe_under_concurrent_readers(Config) ->
         Parent ! {writer_done, self()}
     end),
 
-    ReaderPids = [spawn_link(fun() ->
-        try
-            lists:foreach(
-                fun(I) ->
-                    K = iolist_to_binary(
-                        io_lib:format("k.~p", [I rem 500])
-                    ),
-                    _ = bondy_registry_ptrie:lookup(H, K)
-                end,
-                lists:seq(1, OpsPerReader)
-            ),
-            Parent ! {reader_done, self(), ok}
-        catch
-            C:E:S ->
-                Parent ! {reader_done, self(), {crash, C, E, S}}
-        end
-    end) || _ <- lists:seq(1, Readers)],
+    ReaderPids = [
+        spawn_link(fun() ->
+            try
+                lists:foreach(
+                    fun(I) ->
+                        K = iolist_to_binary(
+                            io_lib:format("k.~p", [I rem 500])
+                        ),
+                        _ = bondy_registry_ptrie:lookup(H, K)
+                    end,
+                    lists:seq(1, OpsPerReader)
+                ),
+                Parent ! {reader_done, self(), ok}
+            catch
+                C:E:S ->
+                    Parent ! {reader_done, self(), {crash, C, E, S}}
+            end
+        end)
+     || _ <- lists:seq(1, Readers)
+    ],
 
     %% Run the janitor continuously in the background.
     {ok, Janitor} = bondy_registry_ptrie_janitor:start_link(
         H, #{period_ms => 10}
     ),
 
-    receive {writer_done, Writer} -> ok after 60_000 -> exit(w_timeout) end,
-    lists:foreach(fun(Pid) ->
-        receive
-            {reader_done, Pid, ok} -> ok;
-            {reader_done, Pid, {crash, C, E, S}} ->
-                ct:fail("reader crash ~p:~p~n~p", [C, E, S])
-        after 60_000 -> exit({r_timeout, Pid})
-        end
-    end, ReaderPids),
+    receive
+        {writer_done, Writer} -> ok
+    after 60_000 -> exit(w_timeout)
+    end,
+    lists:foreach(
+        fun(Pid) ->
+            receive
+                {reader_done, Pid, ok} ->
+                    ok;
+                {reader_done, Pid, {crash, C, E, S}} ->
+                    ct:fail("reader crash ~p:~p~n~p", [C, E, S])
+            after 60_000 -> exit({r_timeout, Pid})
+            end
+        end,
+        ReaderPids
+    ),
 
     %% Give the janitor one more sweep after everything settles.
     _ = bondy_registry_ptrie_janitor:sweep(Janitor),
@@ -713,7 +791,6 @@ reclaim_safe_under_concurrent_readers(Config) ->
     ct:pal("retire_count after full drain: ~p", [Final]),
     ?assert(Final =< 4),
     ok.
-
 
 janitor_converges_memory(Config) ->
     %% Without a janitor the retire table grows unboundedly. With a janitor
@@ -749,7 +826,6 @@ janitor_converges_memory(Config) ->
         ok = bondy_registry_ptrie_janitor:stop(Janitor)
     end.
 
-
 %% @private
 %% Spawn a reader that enters `bondy_registry_ptrie:fold/3`, pins its epoch
 %% via `with_epoch/2`, and blocks inside the fold fun until the parent
@@ -780,17 +856,19 @@ spawn_blocked_reader(H, ReaderRef) ->
     end,
     {Reader, ReleaseRef}.
 
-
 %% =============================================================================
 %% MATCH TESTS (WAMP wildcard + prefix)
 %% =============================================================================
 
-
 match_exact_policy(Config) ->
     H = ?config(handle, Config),
     clear(H),
-    ok = bondy_registry_ptrie:insert(H, <<"com.example.svc.add">>, exact, v_add),
-    ok = bondy_registry_ptrie:insert(H, <<"com.example.svc.sub">>, exact, v_sub),
+    ok = bondy_registry_ptrie:insert(
+        H, <<"com.example.svc.add">>, exact, v_add
+    ),
+    ok = bondy_registry_ptrie:insert(
+        H, <<"com.example.svc.sub">>, exact, v_sub
+    ),
     %% Exact match lands on the exact leaf, nothing else.
     ?assertEqual(
         [{<<"com.example.svc.add">>, exact, v_add}],
@@ -804,7 +882,6 @@ match_exact_policy(Config) ->
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"com.other">>)),
     ok.
 
-
 match_prefix_policy(Config) ->
     H = ?config(handle, Config),
     clear(H),
@@ -813,8 +890,10 @@ match_prefix_policy(Config) ->
     %% Target under both prefixes matches both.
     Results = bondy_registry_ptrie:match(H, <<"com.example.svc.add">>),
     ?assertEqual(
-        lists:sort([{<<"com.example.">>, prefix, p_short},
-                    {<<"com.example.svc.">>, prefix, p_long}]),
+        lists:sort([
+            {<<"com.example.">>, prefix, p_short},
+            {<<"com.example.svc.">>, prefix, p_long}
+        ]),
         lists:sort(Results)
     ),
     %% Target only under shorter prefix.
@@ -825,7 +904,6 @@ match_prefix_policy(Config) ->
     %% Target not under either prefix.
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"net.other.x">>)),
     ok.
-
 
 match_wildcard_single_segment(Config) ->
     H = ?config(handle, Config),
@@ -847,7 +925,6 @@ match_wildcard_single_segment(Config) ->
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"com.foo.bar.svc.add">>)),
     ok.
 
-
 match_wildcard_multiple_segments(Config) ->
     H = ?config(handle, Config),
     clear(H),
@@ -867,7 +944,6 @@ match_wildcard_multiple_segments(Config) ->
     %% Too many.
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"com.a.b.c.add">>)),
     ok.
-
 
 match_mixed_policies_at_same_key(Config) ->
     H = ?config(handle, Config),
@@ -892,31 +968,34 @@ match_mixed_policies_at_same_key(Config) ->
     ),
     ok.
 
-
 match_prefix_on_ancestor_node(Config) ->
     H = ?config(handle, Config),
     clear(H),
     %% A prefix leaf on an ancestor node must be collected during the walk,
     %% even if descendants with more specific keys also match.
     ok = bondy_registry_ptrie:insert(H, <<"com.">>, prefix, v_short),
-    ok = bondy_registry_ptrie:insert(H, <<"com.example.svc.add">>, exact, v_exact),
+    ok = bondy_registry_ptrie:insert(
+        H, <<"com.example.svc.add">>, exact, v_exact
+    ),
     Results = bondy_registry_ptrie:match(H, <<"com.example.svc.add">>),
     ?assertEqual(
-        lists:sort([{<<"com.">>, prefix, v_short},
-                    {<<"com.example.svc.add">>, exact, v_exact}]),
+        lists:sort([
+            {<<"com.">>, prefix, v_short},
+            {<<"com.example.svc.add">>, exact, v_exact}
+        ]),
         lists:sort(Results)
     ),
     ok.
-
 
 match_target_shorter_than_prefix(Config) ->
     H = ?config(handle, Config),
     clear(H),
     %% A prefix pattern longer than the target can't match. No collection.
-    ok = bondy_registry_ptrie:insert(H, <<"com.example.service.">>, prefix, v_p),
+    ok = bondy_registry_ptrie:insert(
+        H, <<"com.example.service.">>, prefix, v_p
+    ),
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"com.example">>)),
     ok.
-
 
 match_empty_target(Config) ->
     H = ?config(handle, Config),
@@ -927,12 +1006,13 @@ match_empty_target(Config) ->
     %% Empty target: matches the exact- and prefix-empty-key leaves only.
     Results = bondy_registry_ptrie:match(H, <<>>),
     ?assertEqual(
-        lists:sort([{<<>>, exact, v_empty},
-                    {<<>>, prefix, v_root_prefix}]),
+        lists:sort([
+            {<<>>, exact, v_empty},
+            {<<>>, prefix, v_root_prefix}
+        ]),
         lists:sort(Results)
     ),
     ok.
-
 
 match_no_match_returns_empty(Config) ->
     H = ?config(handle, Config),
@@ -941,7 +1021,6 @@ match_no_match_returns_empty(Config) ->
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"com.other.svc">>)),
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"no.common.prefix">>)),
     ok.
-
 
 match_encode_decode_round_trip(_Config) ->
     Cases = [
@@ -962,7 +1041,6 @@ match_encode_decode_round_trip(_Config) ->
     ),
     ok.
 
-
 match_wildcard_must_consume_non_empty_segment(Config) ->
     %% WAMP targets are "strict" (no empty components). A wildcard must
     %% consume at least one byte — it cannot match an empty segment.
@@ -981,7 +1059,6 @@ match_wildcard_must_consume_non_empty_segment(Config) ->
     ?assertEqual([], bondy_registry_ptrie:match(H, <<"a..b">>)),
     ok.
 
-
 prop_match_agrees_with_reference(Config) ->
     %% Generate a random set of registered patterns (exact, prefix,
     %% wildcard) and a random target. Verify `match/2` returns the same
@@ -993,32 +1070,38 @@ prop_match_agrees_with_reference(Config) ->
             {list(registered_pattern()), uri_target()},
             begin
                 clear(H),
-                [ok = bondy_registry_ptrie:insert(H, K, P, V)
-                    || {K, P, V} <- Registered],
+                [
+                    ok = bondy_registry_ptrie:insert(H, K, P, V)
+                 || {K, P, V} <- Registered
+                ],
                 Actual = lists:sort(bondy_registry_ptrie:match(H, Target)),
                 %% Dedup by {K, P} — insert-with-same-{K,P}-overwrites
                 %% means only the last V per {K, P} is live.
                 LatestRegistered = dedup_by_kp(Registered),
                 Expected = lists:sort(
-                    [{K, P, V} || {K, P, V} <- LatestRegistered,
-                                  reference_match(K, P, Target)]
+                    [
+                        {K, P, V}
+                     || {K, P, V} <- LatestRegistered,
+                        reference_match(K, P, Target)
+                    ]
                 ),
                 case Actual =:= Expected of
-                    true -> true;
+                    true ->
+                        true;
                     false ->
-                        ct:pal("target=~p~nregistered=~p~nactual=~p~nexpected=~p",
-                               [Target, LatestRegistered, Actual, Expected]),
+                        ct:pal(
+                            "target=~p~nregistered=~p~nactual=~p~nexpected=~p",
+                            [Target, LatestRegistered, Actual, Expected]
+                        ),
                         false
                 end
             end
         )
     ).
 
-
 %% =============================================================================
 %% GENERATORS
 %% =============================================================================
-
 
 safe_key() ->
     %% Keys drawn from a small byte alphabet to exercise path compression
@@ -1033,7 +1116,6 @@ safe_key() ->
         )
     ).
 
-
 any_value() ->
     oneof([
         integer(),
@@ -1042,7 +1124,6 @@ any_value() ->
         {tuple, integer()}
     ]).
 
-
 op() ->
     oneof([
         {insert, safe_key(), any_value()},
@@ -1050,11 +1131,9 @@ op() ->
         {lookup, safe_key()}
     ]).
 
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
 
 %% @private
 run_prop(Prop) ->
@@ -1063,7 +1142,6 @@ run_prop(Prop) ->
         {to_file, user},
         noshrink
     ]).
-
 
 %% @private
 clear(H) ->
@@ -1075,7 +1153,6 @@ clear(H) ->
     _ = bondy_registry_ptrie:reclaim(H),
     ok.
 
-
 %% @private
 apply_ops(Ops, H) ->
     lists:foldl(
@@ -1083,7 +1160,6 @@ apply_ops(Ops, H) ->
         #{},
         Ops
     ).
-
 
 %% @private
 apply_op({insert, K, V}, H, Ref) ->
@@ -1095,7 +1171,6 @@ apply_op({remove, K}, H, Ref) ->
 apply_op({lookup, K}, H, Ref) ->
     _ = bondy_registry_ptrie:lookup(H, K),
     Ref.
-
 
 %% @private
 %% Check the ptrie contents are exactly the map.
@@ -1116,12 +1191,10 @@ ptrie_matches_map(H, Map) ->
     ),
     AllLookupsAgree andalso Map =:= FoldedMap.
 
-
 %% @private
 dedup_pairs(Pairs) ->
     %% Last write wins for duplicated keys.
     maps:to_list(maps:from_list(Pairs)).
-
 
 %% @private
 %% Dedup a list of `{Key, Policy, Value}` by `{Key, Policy}`, last write
@@ -1134,7 +1207,6 @@ dedup_by_kp(Registered) ->
     ),
     [{K, P, V} || {{K, P}, V} <- maps:to_list(Map)].
 
-
 %% @private
 %% Reference implementation of `match/2` for a single stored leaf against a
 %% target URI. Used as the correctness oracle for the property test.
@@ -1142,8 +1214,8 @@ reference_match(Key, exact, Target) ->
     Key =:= Target;
 reference_match(Key, prefix, Target) ->
     KS = byte_size(Key),
-    byte_size(Target) >= KS
-        andalso binary_part(Target, 0, KS) =:= Key;
+    byte_size(Target) >= KS andalso
+        binary_part(Target, 0, KS) =:= Key;
 reference_match(Key, wildcard, Target) ->
     %% Decode stored key to its URI components. Each <<0>> component is a
     %% wildcard. Split target by `.` and match componentwise.
@@ -1152,20 +1224,22 @@ reference_match(Key, wildcard, Target) ->
     TargetParts = binary:split(Target, <<".">>, [global]),
     wildcard_parts_match(KeyParts, TargetParts).
 
-
 %% @private
-wildcard_parts_match([], []) -> true;
-wildcard_parts_match([], _) -> false;
-wildcard_parts_match(_, []) -> false;
+wildcard_parts_match([], []) ->
+    true;
+wildcard_parts_match([], _) ->
+    false;
+wildcard_parts_match(_, []) ->
+    false;
 wildcard_parts_match([<<>> | KT], [TP | TT]) when byte_size(TP) > 0 ->
     wildcard_parts_match(KT, TT);
 wildcard_parts_match([<<>> | _], [<<>> | _]) ->
-    false;  %% wildcard can't match empty target segment
+    %% wildcard can't match empty target segment
+    false;
 wildcard_parts_match([KP | KT], [KP | TT]) ->
     wildcard_parts_match(KT, TT);
 wildcard_parts_match(_, _) ->
     false.
-
 
 %% @private
 %% A random pattern suitable for registration. Policy is weighted toward
@@ -1176,16 +1250,17 @@ registered_pattern() ->
         {oneof([exact, prefix, wildcard]), uri_pattern()},
         case Policy of
             wildcard ->
-                {bondy_registry_ptrie:encode_pattern(
-                     uri_pattern_with_wildcards(URI)
-                 ),
-                 wildcard,
-                 v};
+                {
+                    bondy_registry_ptrie:encode_pattern(
+                        uri_pattern_with_wildcards(URI)
+                    ),
+                    wildcard,
+                    v
+                };
             _ ->
                 {URI, Policy, v}
         end
     ).
-
 
 %% @private
 uri_pattern() ->
@@ -1195,14 +1270,12 @@ uri_pattern() ->
         iolist_to_binary(lists:join(<<".">>, Parts))
     ).
 
-
 %% @private
 %% Turn some components into empty ones (wildcards) at random positions.
 uri_pattern_with_wildcards(URI) ->
     Parts = binary:split(URI, <<".">>, [global]),
     Rewritten = [maybe_wildcard(P) || P <- Parts],
     iolist_to_binary(lists:join(<<".">>, Rewritten)).
-
 
 %% @private
 maybe_wildcard(P) ->
@@ -1211,7 +1284,6 @@ maybe_wildcard(P) ->
         _ -> P
     end.
 
-
 %% @private
 uri_component() ->
     ?LET(
@@ -1219,7 +1291,6 @@ uri_component() ->
         non_empty(vector_between(1, 5, choose($a, $f))),
         list_to_binary(Bytes)
     ).
-
 
 %% @private
 uri_target() ->
@@ -1230,16 +1301,13 @@ uri_target() ->
         iolist_to_binary(lists:join(<<".">>, Parts))
     ).
 
-
 %% @private
 vector_between(Min, Max, Gen) ->
     ?LET(N, choose(Min, Max), vector(N, Gen)).
 
-
 %% @private
 worker_key(WorkerN, SeqI) ->
     iolist_to_binary(io_lib:format("w~4..0b.k~6..0b", [WorkerN, SeqI])).
-
 
 %% @private
 worker_key_to_i(K) ->

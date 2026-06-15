@@ -20,29 +20,21 @@ Handles the following META API wamp calls:
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
-
-
 -export([handle_call/2]).
 -export([handle_invocation/2]).
-
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec handle_call(M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
-
 
 handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
     [_, SessionId] = bondy_wamp_api_utils:validate_call_args(M0, Ctxt, 2),
@@ -67,7 +59,6 @@ handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
     end,
 
     {continue, M1, MakeError};
-
 handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     case summary(registration, RealmUri) of
@@ -78,8 +69,7 @@ handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
-handle_call(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt)  ->
+handle_call(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -94,7 +84,6 @@ handle_call(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt)  ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(#call{procedure_uri = ?WAMP_REG_MATCH} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
@@ -107,7 +96,6 @@ handle_call(#call{procedure_uri = ?WAMP_REG_MATCH} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(#call{procedure_uri = ?WAMP_REG_GET} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
@@ -120,8 +108,6 @@ handle_call(#call{procedure_uri = ?WAMP_REG_GET} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
-
 handle_call(#call{procedure_uri = ?WAMP_LIST_CALLEES} = M, Ctxt) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case list_registration_callees(RealmUri, RegId) of
@@ -132,8 +118,6 @@ handle_call(#call{procedure_uri = ?WAMP_LIST_CALLEES} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
-
 handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case count_callees(RealmUri, RegId) of
@@ -144,7 +128,6 @@ handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     case summary(subscription, RealmUri) of
@@ -155,7 +138,6 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LOOKUP} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L0 = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
@@ -171,8 +153,6 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LOOKUP} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
-
 handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_MATCH} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
@@ -185,8 +165,6 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_MATCH} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
-
 handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_GET} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
@@ -199,10 +177,9 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_GET} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
-
 handle_call(
-    #call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST_SUBSCRIBERS} = M, Ctxt) ->
+    #call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST_SUBSCRIBERS} = M, Ctxt
+) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case list_subscription_subscribers(RealmUri, RegId) of
         {ok, Result} ->
@@ -212,9 +189,9 @@ handle_call(
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(
-    #call{procedure_uri = ?WAMP_SUBSCRIPTION_COUNT_SUBSCRIBERS} = M, Ctxt) ->
+    #call{procedure_uri = ?WAMP_SUBSCRIPTION_COUNT_SUBSCRIBERS} = M, Ctxt
+) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case count_subscribers(RealmUri, RegId) of
         {ok, Result} ->
@@ -224,16 +201,13 @@ handle_call(
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(#call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
 
-
 handle_invocation(#invocation{} = M, Ctxt) ->
     Procedure = maps:get(procedure, M#invocation.details),
     do_handle_invocation(M, Ctxt, Procedure).
-
 
 %% To be replaced by RPC
 do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
@@ -250,7 +224,6 @@ do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
                         [bondy_session:to_external(Session)]
                     ),
                     {reply, R};
-
                 {error, not_found} ->
                     E = no_such_session_error(
                         ?INVOCATION, M#invocation.request_id
@@ -269,14 +242,9 @@ do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
             {reply, E}
     end.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
     bondy_wamp_message:error(
@@ -288,8 +256,6 @@ no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
             <<"No session exists for the supplied identifier">>
         ]
     ).
-
-
 
 %% @private
 -doc """
@@ -333,11 +299,9 @@ summary(Type, RealmUri) ->
             {error, Reason}
     end.
 
-
 %% @private
 get(Type, [_, _] = L) ->
     get(Type, L ++ [#{}]);
-
 get(Type, [RealmUri, RegId, _Details]) ->
     try
         case bondy_registry:lookup(Type, RealmUri, RegId) of
@@ -356,11 +320,9 @@ get(Type, [RealmUri, RegId, _Details]) ->
             {error, Reason}
     end.
 
-
 %% @private
 lookup(Type, [_, _] = L) ->
     lookup(Type, L ++ [#{}]);
-
 lookup(Type, [RealmUri, Uri, Opts]) ->
     try
         case bondy_registry:match(Type, RealmUri, Uri, Opts) of
@@ -379,11 +341,9 @@ lookup(Type, [RealmUri, Uri, Opts]) ->
             {error, Reason}
     end.
 
-
 %% @private
 match(Type, [_, _] = L) ->
     match(Type, L ++ [#{}]);
-
 match(Type, [RealmUri, Uri, Opts]) ->
     try
         case bondy_registry:match(Type, RealmUri, Uri, Opts) of
@@ -402,9 +362,6 @@ match(Type, [RealmUri, Uri, Opts]) ->
             {error, Reason}
     end.
 
-
-
-
 %% @private
 list_registration_callees(_RealmUri, _RegId) ->
     %% try
@@ -421,7 +378,6 @@ list_registration_callees(_RealmUri, _RegId) ->
     %% end.
     {error, not_implemented}.
 
-
 count_callees(_RealmUri, _Uri) ->
     %% try
     %%     case bondy_registry:match(registration, RealmUri, Uri) of
@@ -436,12 +392,8 @@ count_callees(_RealmUri, _Uri) ->
     %% end.
     {error, not_implemented}.
 
-
 list_subscription_subscribers(_RealmUri, _RegId) ->
     {error, not_implemented}.
 
-
 count_subscribers(_RealmUri, _RegId) ->
     {error, not_implemented}.
-
-

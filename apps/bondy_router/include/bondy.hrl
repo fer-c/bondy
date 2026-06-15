@@ -23,7 +23,6 @@
 %% GENERAL
 %% =============================================================================
 
-
 -define(BONDY_REQ, '$bondy_request').
 -define(BONDY_ACK, '$bondy_ack').
 -define(BONDY_META_KEY, '$bondy_metadata').
@@ -68,29 +67,23 @@
 
 -define(ERROR_OPTS(Cause), ?ERROR_OPTS(Cause, #{})).
 
--define(ERROR_OPTS(Cause, Meta),
-    [{error_info, #{module => ?MODULE, cause => Cause, meta => Meta}}]
-).
+-define(ERROR_OPTS(Cause, Meta), [
+    {error_info, #{module => ?MODULE, cause => Cause, meta => Meta}}
+]).
 
--type nodestring()      ::  binary().
-
+-type nodestring() :: binary().
 
 %% =============================================================================
 %% WAMP
 %% =============================================================================
 
-
-
 -define(MASTER_REALM_URI, <<"com.leapsight.bondy">>).
 -define(CONTROL_REALM_URI, <<"com.leapsight.bondy.internal">>).
-
-
 
 %% In msecs
 -define(SEND_TIMEOUT, 20000).
 
 -define(WAMP_PPT_ATTRS, [ppt_cipher, ppt_keyid, ppt_scheme, ppt_serializer]).
-
 
 %% =============================================================================
 %% FEATURES
@@ -117,7 +110,9 @@
     payload_passthru_mode => true
 }).
 
--define(DEALER_FEATURES, begin ?COMMON_RPC_FEATURES end#{
+-define(DEALER_FEATURES, begin
+    ?COMMON_RPC_FEATURES
+end#{
     call_reroute => false,
     call_trustlevels => false,
     pattern_based_registration => true,
@@ -131,7 +126,9 @@
     caller_auth_claims => true
 }).
 
--define(CALLEE_FEATURES, begin ?COMMON_RPC_FEATURES end#{
+-define(CALLEE_FEATURES, begin
+    ?COMMON_RPC_FEATURES
+end#{
     call_reroute => false,
     call_trustlevels => false,
     pattern_based_registration => true,
@@ -141,8 +138,9 @@
     caller_auth_claims => true
 }).
 
--define(CALLER_FEATURES, begin ?COMMON_RPC_FEATURES end#{
-}).
+-define(CALLER_FEATURES, begin
+    ?COMMON_RPC_FEATURES
+end#{}).
 
 -define(COMMON_PUBSUB_FEATURES, #{
     payload_passthru_mode => true,
@@ -150,7 +148,9 @@
     sharded_subscription => false
 }).
 
--define(BROKER_FEATURES, begin ?COMMON_PUBSUB_FEATURES end#{
+-define(BROKER_FEATURES, begin
+    ?COMMON_PUBSUB_FEATURES
+end#{
     subscriber_blackwhite_listing => true,
     publisher_exclusion => true,
     publication_trustlevels => false,
@@ -166,7 +166,9 @@
     acknowledge_subscriber_received => false
 }).
 
--define(SUBSCRIBER_FEATURES, begin ?COMMON_PUBSUB_FEATURES end#{
+-define(SUBSCRIBER_FEATURES, begin
+    ?COMMON_PUBSUB_FEATURES
+end#{
     publication_trustlevels => false,
     pattern_based_subscription => true,
     event_history => false,
@@ -175,18 +177,18 @@
     acknowledge_subscriber_received => false
 }).
 
--define(PUBLISHER_FEATURES, begin ?COMMON_PUBSUB_FEATURES end#{
+-define(PUBLISHER_FEATURES, begin
+    ?COMMON_PUBSUB_FEATURES
+end#{
     subscriber_blackwhite_listing => true,
     publisher_exclusion => true,
     %% Non-standard
     acknowledge_event_received => false
 }).
 
-
 %% =============================================================================
 %% LISTENERS
 %% =============================================================================
-
 
 -define(SOCKET_OPTS_SPEC, #{
     keepalive => #{

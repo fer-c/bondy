@@ -382,7 +382,9 @@ foreach_shard(Table, IndexName, Fun) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             Fun(NS, Shard, Pid, Entry)
         end,

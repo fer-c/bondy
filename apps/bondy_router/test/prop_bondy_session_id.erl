@@ -28,7 +28,6 @@
     prop_base62_chars_only/0
 ]).
 
-
 %% =============================================================================
 %% Generators
 %% =============================================================================
@@ -36,7 +35,6 @@
 %% Generate a valid WAMP external ID (1 to 2^53)
 external_id() ->
     range(1, ?MAX_EXT_ID).
-
 
 %% Generate invalid session IDs
 invalid_session_id() ->
@@ -52,55 +50,64 @@ invalid_session_id() ->
         <<>>
     ]).
 
-
 %% =============================================================================
 %% Properties: Generation
 %% =============================================================================
 
 %% Property: new/0 always produces a 27-character binary
 prop_new_fixed_length() ->
-    ?FORALL(_, term(),
-            begin
-                SessionId = bondy_session_id:new(),
-                byte_size(SessionId) =:= 27
-            end).
-
+    ?FORALL(
+        _,
+        term(),
+        begin
+            SessionId = bondy_session_id:new(),
+            byte_size(SessionId) =:= 27
+        end
+    ).
 
 %% Property: new/0 produces valid session IDs
 prop_new_is_type() ->
-    ?FORALL(_, term(),
-            bondy_session_id:is_type(bondy_session_id:new())).
-
+    ?FORALL(
+        _,
+        term(),
+        bondy_session_id:is_type(bondy_session_id:new())
+    ).
 
 %% Property: new/1 with external ID produces valid session ID with that external ID
 prop_new_with_external_id_roundtrip() ->
-    ?FORALL(ExtId, external_id(),
-            begin
-                SessionId = bondy_session_id:new(ExtId),
-                bondy_session_id:to_external(SessionId) =:= ExtId
-            end).
-
+    ?FORALL(
+        ExtId,
+        external_id(),
+        begin
+            SessionId = bondy_session_id:new(ExtId),
+            bondy_session_id:to_external(SessionId) =:= ExtId
+        end
+    ).
 
 %% Property: to_external always returns a value in the valid range
 prop_new_with_external_id_in_range() ->
-    ?FORALL(ExtId, external_id(),
-            begin
-                SessionId = bondy_session_id:new(ExtId),
-                ResultExtId = bondy_session_id:to_external(SessionId),
-                ResultExtId >= 1 andalso ResultExtId =< ?MAX_EXT_ID
-            end).
-
+    ?FORALL(
+        ExtId,
+        external_id(),
+        begin
+            SessionId = bondy_session_id:new(ExtId),
+            ResultExtId = bondy_session_id:to_external(SessionId),
+            ResultExtId >= 1 andalso ResultExtId =< ?MAX_EXT_ID
+        end
+    ).
 
 %% Property: external ID is preserved through encode/decode
 prop_external_id_preserved() ->
-    ?FORALL(ExtId, external_id(),
-            begin
-                SessionId = bondy_session_id:new(ExtId),
-                %% The external ID should be extractable
-                ExtractedId = bondy_session_id:to_external(SessionId),
-                ExtractedId =:= ExtId
-            end).
-
+    ?FORALL(
+        ExtId,
+        external_id(),
+        begin
+            SessionId = bondy_session_id:new(ExtId),
+            %% The external ID should be extractable
+            ExtractedId = bondy_session_id:to_external(SessionId),
+            ExtractedId =:= ExtId
+        end
+    ).
 
 %% =============================================================================
 %% Properties: Uniqueness
@@ -108,13 +115,15 @@ prop_external_id_preserved() ->
 
 %% Property: Multiple calls to new/0 produce unique session IDs
 prop_uniqueness() ->
-    ?FORALL(N, range(2, 100),
-            begin
-                SessionIds = [bondy_session_id:new() || _ <- lists:seq(1, N)],
-                UniqueIds = lists:usort(SessionIds),
-                length(SessionIds) =:= length(UniqueIds)
-            end).
-
+    ?FORALL(
+        N,
+        range(2, 100),
+        begin
+            SessionIds = [bondy_session_id:new() || _ <- lists:seq(1, N)],
+            UniqueIds = lists:usort(SessionIds),
+            length(SessionIds) =:= length(UniqueIds)
+        end
+    ).
 
 %% =============================================================================
 %% Properties: Type Checking
@@ -122,15 +131,19 @@ prop_uniqueness() ->
 
 %% Property: is_type accepts valid session IDs
 prop_is_type_accepts_valid() ->
-    ?FORALL(ExtId, external_id(),
-            bondy_session_id:is_type(bondy_session_id:new(ExtId))).
-
+    ?FORALL(
+        ExtId,
+        external_id(),
+        bondy_session_id:is_type(bondy_session_id:new(ExtId))
+    ).
 
 %% Property: is_type rejects invalid terms
 prop_is_type_rejects_invalid() ->
-    ?FORALL(Invalid, invalid_session_id(),
-            not bondy_session_id:is_type(Invalid)).
-
+    ?FORALL(
+        Invalid,
+        invalid_session_id(),
+        not bondy_session_id:is_type(Invalid)
+    ).
 
 %% =============================================================================
 %% Properties: Encoding
@@ -138,16 +151,19 @@ prop_is_type_rejects_invalid() ->
 
 %% Property: Session IDs only contain valid base62 characters
 prop_base62_chars_only() ->
-    ?FORALL(_, term(),
-            begin
-                SessionId = bondy_session_id:new(),
-                is_valid_base62(SessionId)
-            end).
-
+    ?FORALL(
+        _,
+        term(),
+        begin
+            SessionId = bondy_session_id:new(),
+            is_valid_base62(SessionId)
+        end
+    ).
 
 %% Helper: Check if all characters are valid base62
 is_valid_base62(Bin) when is_binary(Bin) ->
-    Base62Chars = <<"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz">>,
+    Base62Chars =
+        <<"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz">>,
     lists:all(
         fun(Char) ->
             binary:match(Base62Chars, <<Char>>) =/= nomatch

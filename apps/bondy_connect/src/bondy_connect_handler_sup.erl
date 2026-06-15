@@ -25,18 +25,14 @@ the connection can `erlang:monitor/2` it.
 -export([start_worker/2]).
 -export([init/1]).
 
-
-
 -spec start_link() -> supervisor:startlink_ret().
 start_link() ->
     supervisor:start_link(?MODULE, []).
-
 
 -doc "Start a worker for `Job` under `SupPid`. Returns the worker pid.".
 -spec start_worker(pid(), map()) -> {ok, pid()} | {error, term()}.
 start_worker(SupPid, Job) when is_map(Job) ->
     supervisor:start_child(SupPid, [Job]).
-
 
 -spec init([]) ->
     {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.

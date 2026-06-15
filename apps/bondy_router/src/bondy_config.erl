@@ -19,16 +19,15 @@ An implementation of the `app_config` behaviour.
 -include("bondy.hrl").
 
 -if(?OTP_RELEASE >= 25).
-    -define(VALIDATE_MQ_DATA(X),
-        case X of
-            off_heap -> off_heap;
-            _ -> on_heap
-        end
-    ).
+-define(VALIDATE_MQ_DATA(X),
+    case X of
+        off_heap -> off_heap;
+        _ -> on_heap
+    end
+).
 -else.
-    -define(VALIDATE_MQ_DATA(_), on_heap).
+-define(VALIDATE_MQ_DATA(_), on_heap).
 -endif.
-
 
 -define(WAMP_EXT_OPTIONS, [
     {call, [
@@ -41,15 +40,20 @@ An implementation of the `app_config` behaviour.
         'x_session_info', '_session_info'
     ]},
     {register, [
-        'x_disclose_session_info', '_disclose_session_info',
-        '_prefer_local', '_prefer_local',
+        'x_disclose_session_info',
+        '_disclose_session_info',
+        '_prefer_local',
+        '_prefer_local',
         %% number of concurrent, outstanding calls that can exist
         %% for a single endpoint
         'x_concurrency',
         {invoke, [
-            <<"jump_consistent_hash">>, <<"jch">>,
-            <<"queue_least_loaded">>, <<"qll">>,
-            <<"queue_least_loaded_sample">>, <<"qlls">>
+            <<"jump_consistent_hash">>,
+            <<"jch">>,
+            <<"queue_least_loaded">>,
+            <<"qll">>,
+            <<"queue_least_loaded_sample">>,
+            <<"qlls">>
         ]}
     ]},
     {publish, [
@@ -60,32 +64,26 @@ An implementation of the `app_config` behaviour.
     {subscribe, [
         'x_disclose_session_info', '_disclose_session_info'
     ]},
-    {yield, [
-    ]}
+    {yield, []}
 ]).
 -define(WAMP_EXT_DETAILS, [
-    {abort, [
-    ]},
+    {abort, []},
     {hello, [
         'x_authroles', '_authroles'
     ]},
     {welcome, [
         'x_authroles', '_authroles'
     ]},
-    {goodbye, [
-    ]},
-    {error, [
-    ]},
+    {goodbye, []},
+    {error, []},
     {event, [
         'x_session_info', '_session_info'
     ]},
-    {call, [
-    ]},
+    {call, []},
     {invocation, [
         'x_session_info', '_session_info'
     ]},
-    {result, [
-    ]}
+    {result, []}
 ]).
 
 -define(CONFIG, [
@@ -162,7 +160,7 @@ An implementation of the `app_config` behaviour.
                 {write_concurrency, true},
                 {decentralized_counters, true}
             ]},
-            {bondy_rpc_promise,  [
+            {bondy_rpc_promise, [
                 ordered_set,
                 {keypos, 2},
                 named_table,
@@ -173,7 +171,7 @@ An implementation of the `app_config` behaviour.
             ]},
             %% Holds information required to implement the different invocation
             %% strategies like round_robin
-            {bondy_rpc_state,  [
+            {bondy_rpc_state, [
                 set,
                 {keypos, 2},
                 named_table,
@@ -186,7 +184,6 @@ An implementation of the `app_config` behaviour.
     ]}
 ]).
 
-
 -define(BONDY, bondy_router).
 
 -export([get/1]).
@@ -194,23 +191,17 @@ An implementation of the `app_config` behaviour.
 -export([init/1]).
 -export([set/2]).
 
-
 -export([node/0]).
 -export([nodestring/0]).
 -export([node_spec/0]).
 -export([listener_transport_opts/1]).
 -export([listener_protocol_opts/1]).
 
-
 -compile({no_auto_import, [get/1]}).
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 init(Args) ->
     %% We initialise the environment with the args
@@ -239,24 +230,19 @@ init(Args) ->
     ?LOG_NOTICE(#{description => "Bondy configuration finished"}),
     ok.
 
-
-
 -spec get(Key :: list() | atom() | tuple()) -> term().
 
 get(wamp_call_timeout = Key) ->
     Value = app_config:get(?BONDY, Key),
     Max = app_config:get(?BONDY, wamp_max_call_timeout),
     min(Value, Max);
-
 get(Key) ->
     app_config:get(?BONDY, Key).
-
 
 -spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
 
 get(Key, Default) ->
     app_config:get(?BONDY, Key, Default).
-
 
 -spec set(Key :: key_value:key() | tuple(), Value :: term()) -> ok.
 
@@ -265,17 +251,13 @@ set(status, Value) ->
     %% lifecycle so to avoid a loop (resulting in timeout) we avoid
     %% calling application:set_env/3.
     persistent_term:put({?BONDY, status}, Value);
-
 set(Key, Value) ->
     app_config:set(?BONDY, Key, Value).
-
-
 
 -spec node() -> atom().
 
 node() ->
     partisan_config:get(name).
-
 
 -spec nodestring() -> nodestring().
 
@@ -289,14 +271,10 @@ nodestring() ->
             Nodestring
     end.
 
-
-
 -spec node_spec() -> partisan:node_spec().
 
 node_spec() ->
     partisan:node_spec().
-
-
 
 -spec listener_transport_opts(ListenerName :: atom()) -> map().
 
@@ -309,21 +287,20 @@ listener_transport_opts(Name) ->
 
     Opts#{
         %% connection_type => worker,
-        num_conns_sups => NumAcceptors, % the default, made explicit
+
+        % the default, made explicit
+        num_conns_sups => NumAcceptors,
         socket_opts => SocketOpts
     }.
-
 
 -spec listener_protocol_opts(ListenerName :: atom()) -> map().
 
 listener_protocol_opts(Name) ->
     key_value:to_map(get([Name, protocol_opts])).
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 -doc """
@@ -339,14 +316,12 @@ set_vsn(Args) ->
             ok
     end.
 
-
 %% @private
 setup_mods() ->
     ok = jose:json_module(bondy_wamp_json),
     ok = configure_registry(),
     ok = configure_jobs_pool(),
     ok = configure_transport_queue().
-
 
 setup_partisan_channels() ->
     DefaultChannels = #{
@@ -358,12 +333,10 @@ setup_partisan_channels() ->
         case application:get_env(?BONDY, channels, []) of
             [] ->
                 DefaultChannels;
-
             Channels0 ->
                 Channels1 = lists:foldl(
-                    fun
-                        ({Channel, PList}, Acc) ->
-                            maps:put(Channel, maps:from_list(PList), Acc)
+                    fun({Channel, PList}, Acc) ->
+                        maps:put(Channel, maps:from_list(PList), Acc)
                     end,
                     maps:new(),
                     Channels0
@@ -376,7 +349,6 @@ setup_partisan_channels() ->
     DataChannelOpts = maps:get(?PLUM_DB_DATA_CHANNEL, Channels),
     application:set_env(plum_db, data_channel_opts, DataChannelOpts),
     application:set_env(partisan, channels, maps:to_list(Channels)).
-
 
 %% @private
 setup_partisan() ->
@@ -392,7 +364,6 @@ setup_partisan() ->
     %% We add the wamp_relay channel
     ok = bondy_config:set(aae_channel, ?BONDY_AAE_CHANNEL),
     ok = bondy_config:set(wamp_peer_channel, ?WAMP_RELAY_CHANNEL).
-
 
 %% @private
 setup_wamp() ->
@@ -420,7 +391,6 @@ setup_wamp() ->
     ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
     ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
 
-
 %% @private
 dynamic_buffer(Key) ->
     Low = memory:kibibytes(1),
@@ -429,21 +399,16 @@ dynamic_buffer(Key) ->
     case bondy_config:get(Key, []) of
         [] ->
             false;
-
         [{min, 0}, _] ->
             false;
-
         [_, {max, 0}] ->
             false;
-
         [{min, Min}, {max, Max}] when Min >= Low, Max =< Top ->
             {Min, Max};
-
         [{max, Max}, {min, Min}] when Min >= Low, Max =< Top ->
             {Min, Max};
-
         Other ->
-             ?LOG_ERROR(#{
+            ?LOG_ERROR(#{
                 description => "Error while preparing configuration",
                 reason => "invalid value for configuration option",
                 key => Key,
@@ -457,7 +422,6 @@ prepare_private_config() ->
     Config0 = configure_plum_db(?CONFIG),
     configure_message_retention(Config0).
 
-
 %% @private
 configure_plum_db(Config) ->
     PDBConfig = [
@@ -466,7 +430,6 @@ configure_plum_db(Config) ->
         {data_dir, get(platform_data_dir)}
     ],
     key_value:set(plum_db, PDBConfig, Config).
-
 
 %% @private
 configure_message_retention(Config0) ->
@@ -493,21 +456,20 @@ configure_message_retention(Config0) ->
             {error, Reason}
     end.
 
-
 %% @private
 configure_registry() ->
     %% Configure partition count
     KeyPath = [registry, partitions],
 
-    ok = case bondy_config:get(KeyPath, undefined) of
-        undefined ->
-            N = min(16, erlang:system_info(schedulers)),
-            bondy_config:set(KeyPath, N),
-            ok;
-
-        _ ->
-            ok
-    end,
+    ok =
+        case bondy_config:get(KeyPath, undefined) of
+            undefined ->
+                N = min(16, erlang:system_info(schedulers)),
+                bondy_config:set(KeyPath, N),
+                ok;
+            _ ->
+                ok
+        end,
 
     %% Configure partition spawn_opts
     Opts0 = bondy_config:get([registry, partition_spawn_opts], []),
@@ -516,7 +478,6 @@ configure_registry() ->
     ),
     Opts = key_value:put(message_queue_data, Value, Opts0),
     bondy_config:set([registry, partition_spawn_opts], Opts).
-
 
 configure_jobs_pool() ->
     %% Configure partition count
@@ -527,11 +488,9 @@ configure_jobs_pool() ->
             N = min(16, erlang:system_info(schedulers)),
             bondy_config:set(KeyPath, N),
             ok;
-
         _ ->
             ok
     end.
-
 
 %% @private
 configure_transport_queue() ->
@@ -558,17 +517,15 @@ configure_transport_queue() ->
     ),
     ok.
 
-
 %% @private
 apply_private_config({error, Reason}) ->
     exit(Reason);
-
 apply_private_config({ok, Config}) ->
     ?LOG_DEBUG(#{description => "Bondy private configuration started"}),
     try
         _ = [
             ok = application:set_env(App, Param, Val)
-            || {App, Params} <- Config, {Param, Val} <- Params
+         || {App, Params} <- Config, {Param, Val} <- Params
         ],
         ?LOG_NOTICE("Bondy private configuration initialised"),
         ok
@@ -582,8 +539,6 @@ apply_private_config({ok, Config}) ->
             }),
             exit(Reason)
     end.
-
-
 
 %% @private
 -spec normalise_socket_opts(SocketOpts :: [{atom(), any()}]) ->
@@ -605,25 +560,21 @@ normalise_socket_opts(SocketOpts0) ->
         case take(linger_timeout, SocketOpts3, undefined) of
             {undefined, SocketOpts4} ->
                 SocketOpts4;
-
             {-1, SocketOpts4} ->
                 Linger = {false, 0},
                 key_value:put(linger, Linger, SocketOpts4);
-
             {Timeout, SocketOpts4} ->
                 Linger = {true, Timeout},
                 key_value:put(linger, Linger, SocketOpts4)
-    end,
+        end,
 
     [Family | SocketOpts].
-
 
 %% @private
 -spec normalise_socket_buffer([{atom(), any()}]) -> [{atom(), any()}].
 
 normalise_socket_buffer([]) ->
     [];
-
 normalise_socket_buffer(Opts) when is_list(Opts) ->
     Sndbuf = key_value:get(sndbuf, Opts, 0),
     Recbuf = key_value:get(recbuf, Opts, 0),
@@ -633,12 +584,9 @@ normalise_socket_buffer(Opts) when is_list(Opts) ->
             Buffer0 = key_value:get(buffer, Opts, 0),
             Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
             key_value:put(buffer, Buffer1, Opts);
-
         false ->
             Opts
     end.
-
-
 
 take(Key, KV0, Default) ->
     case key_value:take(Key, KV0) of

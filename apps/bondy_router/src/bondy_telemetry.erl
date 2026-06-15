@@ -10,14 +10,9 @@ Telemetry helpers for Bondy, including the generation of trace identifiers.
 
 -export([trace_id/0]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Generates a 128 bit random integer to use as a trace id.

@@ -41,36 +41,33 @@ data and its indices:
 ).
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_SECS, 2 * 60). % 2 mins
+% 2 mins
+-define(LEEWAY_SECS, 2 * 60).
 -define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
-
-
 
 -define(REFRESH_TOKENS_PREFIX(Realm, IssuerOrSub),
     {oauth2_refresh_tokens, <<Realm/binary, $,, IssuerOrSub/binary>>}
 ).
 
 -define(REFRESH_TOKENS_PREFIX(Realm, Issuer, Sub),
-    {oauth2_refresh_tokens,
-        <<Realm/binary, $,, Issuer/binary, $,, Sub/binary>>}
+    {oauth2_refresh_tokens, <<Realm/binary, $,, Issuer/binary, $,, Sub/binary>>}
 ).
 
-
 -record(bondy_oauth2_token, {
-    issuer                  ::  binary(), %% aka client_id
-    username                ::  binary(),
-    groups = []             ::  [binary()],
-    meta = #{}              ::  map(),
-    expires_in              ::  pos_integer(),
-    issued_at               ::  pos_integer(),
-    is_active = true        ::  boolean()
+    %% aka client_id
+    issuer :: binary(),
+    username :: binary(),
+    groups = [] :: [binary()],
+    meta = #{} :: map(),
+    expires_in :: pos_integer(),
+    issued_at :: pos_integer(),
+    is_active = true :: boolean()
 }).
 
-
--type token_data()      ::  #bondy_oauth2_token{}.
--type grant_type()      ::  client_credentials | password | authorization_code.
--type error()           ::  oauth2_invalid_grant | {no_such_realm, uri()}.
--type token_type()      ::  access_token | refresh_token.
+-type token_data() :: #bondy_oauth2_token{}.
+-type grant_type() :: client_credentials | password | authorization_code.
+-type error() :: oauth2_invalid_grant | {no_such_realm, uri()}.
+-type token_type() :: access_token | refresh_token.
 
 -export_type([error/0]).
 
@@ -93,12 +90,9 @@ data and its indices:
 -export([issuer/1]).
 -export([issued_at/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc """
 Returns the issuer a.k.a. ClientId of the token data.
@@ -107,14 +101,12 @@ Returns the issuer a.k.a. ClientId of the token data.
 
 issuer(#bondy_oauth2_token{issuer = Val}) -> Val.
 
-
 -doc """
 Returns the timestamp for the token data.
 """.
 -spec issued_at(token_data()) -> pos_integer().
 
 issued_at(#bondy_oauth2_token{issued_at = Val}) -> Val.
-
 
 -doc """
 Generates an access token and a refresh token.
@@ -124,7 +116,8 @@ The function stores the refresh token in the store and creates a number of
 store indices.
 """.
 -spec issue_token(
-    grant_type(), bondy_realm:uri(), binary(), binary(), [binary()], map()) ->
+    grant_type(), bondy_realm:uri(), binary(), binary(), [binary()], map()
+) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
@@ -136,7 +129,6 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
         meta = Meta
     },
     issue_token(GrantType, RealmUri, Data).
-
 
 -doc """
 Generates an access token and a refresh token.
@@ -150,21 +142,20 @@ store indices.
     | {error, any()}.
 
 issue_token(GrantType, RealmUri, Data0) ->
-   case bondy_realm:lookup(RealmUri) of
+    case bondy_realm:lookup(RealmUri) of
         {ok, Realm} ->
             do_issue_token(Realm, Data0, supports_refresh_token(GrantType));
-
         {error, not_found} ->
-           {error, {no_such_realm, RealmUri}}
+            {error, {no_such_realm, RealmUri}}
     end.
-
 
 -doc """
 Returns the data `token_data()` associated with `Token` or the tuple
 `{error, not_found}`.
 """.
 -spec lookup_token(
-    Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()) ->
+    Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()
+) ->
     token_data() | {error, not_found}.
 
 lookup_token(RealmUri, Issuer0, Token) ->
@@ -175,12 +166,12 @@ lookup_token(RealmUri, Issuer0, Token) ->
         undefined -> {error, not_found}
     end.
 
-
 -doc """
 After refreshing a token, the previous refresh token will be revoked.
 """.
 -spec refresh_token(
-    Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()) ->
+    Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()
+) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, oauth2_invalid_grant}.
 
@@ -190,12 +181,12 @@ refresh_token(RealmUri, Issuer0, Token) ->
     Issuer = string:casefold(Issuer0),
 
     case lookup_token(RealmUri, Issuer, Token) of
-        #bondy_oauth2_token{issued_at = Ts}
-        when ?EXPIRY_TIME_SECS(Ts, Secs) =< Now  ->
+        #bondy_oauth2_token{issued_at = Ts} when
+            ?EXPIRY_TIME_SECS(Ts, Secs) =< Now
+        ->
             %% The refresh token expired, the user will need to login again and
             %% get a new one
             {error, oauth2_invalid_grant};
-
         #bondy_oauth2_token{username = Username} = Data0 ->
             %% We double check the user still exists
             case bondy_rbac_user:lookup(RealmUri, Username) of
@@ -209,7 +200,6 @@ refresh_token(RealmUri, Issuer0, Token) ->
                     %% We remove all refresh tokens for this user
                     _ = revoke_tokens(refresh_token, RealmUri, Username),
                     {error, oauth2_invalid_grant};
-
                 _ ->
                     %% Issue new tokens
                     %% We revoke the previous refresh token first because this
@@ -226,72 +216,64 @@ refresh_token(RealmUri, Issuer0, Token) ->
                         {error, _} = Error ->
                             Error
                     end
-                end;
-
+            end;
         {error, not_found} ->
             {error, oauth2_invalid_grant}
     end.
-
 
 -spec revoke_token(
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
     Issuer :: binary(),
-    TokenOrUsername :: binary()) -> ok | {error, unsupported_operation}.
+    TokenOrUsername :: binary()
+) -> ok | {error, unsupported_operation}.
 
 revoke_token(refresh_token, RealmUri, Issuer, Token) ->
     revoke_refresh_token(RealmUri, Issuer, Token);
-
 revoke_token(access_token, _, _, _) ->
     {error, unsupported_operation};
-
 revoke_token(undefined, _, _, _) ->
     {error, unsupported_operation}.
-
 
 -spec revoke_token(
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
     Issuer :: binary(),
     Username :: binary(),
-    DeviceId :: binary()) -> ok | {error, unsupported_operation}.
+    DeviceId :: binary()
+) -> ok | {error, unsupported_operation}.
 
 revoke_token(refresh_token, RealmUri, Issuer, Username, DeviceId) ->
     revoke_refresh_token(RealmUri, Issuer, Username, DeviceId);
-
 revoke_token(access_token, _, _, _, _) ->
     {error, unsupported_operation};
-
 revoke_token(undefined, _, _, _, _) ->
     {error, unsupported_operation}.
-
 
 -spec revoke_tokens(
     Hint :: token_type() | undefined,
     Realm :: bondy_realm:uri(),
-    Username :: binary()) ->
-        ok | {error, unsupported_operation}.
+    Username :: binary()
+) ->
+    ok | {error, unsupported_operation}.
 
 revoke_tokens(refresh_token, RealmUri, Username) ->
     revoke_refresh_tokens(RealmUri, Username);
-
 revoke_tokens(access_token, _RealmUri, _Username) ->
     {error, unsupported_operation}.
-
 
 -spec revoke_tokens(
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
     Issuer :: binary(),
-    Username :: binary()) ->
-        ok | {error, unsupported_operation}.
+    Username :: binary()
+) ->
+    ok | {error, unsupported_operation}.
 
 revoke_tokens(refresh_token, RealmUri, Issuer, Username) ->
     revoke_refresh_tokens(RealmUri, Issuer, Username);
-
 revoke_tokens(access_token, _RealmUri, _Issuer, _Username) ->
     {error, unsupported_operation}.
-
 
 -doc """
 Removes a refresh token from store using an index to match the function
@@ -301,13 +283,13 @@ This also removes all store indices.
 -spec revoke_refresh_token(
     Realm :: bondy_realm:uri(),
     IssuerOrData :: binary() | token_data(),
-    Token :: binary()) -> ok.
+    Token :: binary()
+) -> ok.
 
 revoke_refresh_token(RealmUri, #bondy_oauth2_token{} = Data, Token) ->
     %% This case occurs when iterating over the ?REFRESH_TOKENS_PREFIX/2
     Issuer = Data#bondy_oauth2_token.issuer,
     revoke_refresh_token(RealmUri, Issuer, Token);
-
 revoke_refresh_token(RealmUri, Issuer0, Token) ->
     Issuer = string:casefold(Issuer0),
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
@@ -318,7 +300,6 @@ revoke_refresh_token(RealmUri, Issuer0, Token) ->
             do_revoke_refresh_token(RealmUri, Token, Data)
     end.
 
-
 -doc """
 Removes a refresh token from store using an index to match the function
 arguments.
@@ -328,7 +309,8 @@ This also removes all store indices.
     bondy_realm:uri(),
     Issuer :: binary(),
     Username :: binary(),
-    DeviceId :: binary()) -> ok.
+    DeviceId :: binary()
+) -> ok.
 
 revoke_refresh_token(RealmUri, Issuer0, Username, DeviceId) ->
     Issuer = string:casefold(Issuer0),
@@ -340,7 +322,6 @@ revoke_refresh_token(RealmUri, Issuer0, Username, DeviceId) ->
         Token ->
             revoke_refresh_token(RealmUri, Issuer, Token)
     end.
-
 
 -spec revoke_refresh_tokens(bondy_realm:uri(), Username :: binary()) -> ok.
 
@@ -359,13 +340,13 @@ revoke_refresh_tokens(RealmUri, Username0) ->
 
     _ = [
         revoke_refresh_token(RealmUri, Issuer, Token)
-        || {Token, Issuer} <- UserTokens
+     || {Token, Issuer} <- UserTokens
     ],
     ok.
 
-
 -spec revoke_refresh_tokens(
-    bondy_realm:uri(), Issuer :: binary(), Username :: binary()) -> ok.
+    bondy_realm:uri(), Issuer :: binary(), Username :: binary()
+) -> ok.
 
 revoke_refresh_tokens(RealmUri, Issuer0, Username0) ->
     Issuer = string:casefold(Issuer0),
@@ -382,10 +363,9 @@ revoke_refresh_tokens(RealmUri, Issuer0, Username0) ->
 
     _ = [
         revoke_refresh_token(RealmUri, Issuer, Token)
-        || {_DeviceId, Token} <- DeviceTokens
+     || {_DeviceId, Token} <- DeviceTokens
     ],
     ok.
-
 
 -doc """
 Removes all refresh tokens whose user has been removed.
@@ -409,7 +389,6 @@ revoke_dangling_tokens(RealmUri, Issuer0) ->
     end,
     plum_db:foreach(Fun, Prefix, ?FOLD_OPTS).
 
-
 -doc """
 Rebuilds refresh_token indices.
 This function is used for db maintenance.
@@ -421,8 +400,9 @@ rebuild_token_indices(RealmUri, Issuer0) ->
     Fun = fun
         ({_, ?TOMBSTONE}) ->
             ok;
-        ({Token, #bondy_oauth2_token{issuer = Iss} = Data})
-        when Iss == Issuer ->
+        ({Token, #bondy_oauth2_token{issuer = Iss} = Data}) when
+            Iss == Issuer
+        ->
             store_token_indices(RealmUri, Token, Data);
         ({Token, #bondy_oauth2_token{issuer = Iss}}) ->
             ?LOG_WARNING(#{
@@ -435,28 +415,23 @@ rebuild_token_indices(RealmUri, Issuer0) ->
     end,
     plum_db:foreach(Fun, Prefix, ?FOLD_OPTS).
 
-
 -spec decode_jwt(binary()) -> map().
 
 decode_jwt(JWT) when is_binary(JWT) andalso byte_size(JWT) >= 32 ->
     {jose_jwt, Map} = jose_jwt:peek(JWT),
     Map;
-
 decode_jwt(Term) ->
     error({badarg, [Term]}).
-
 
 -spec verify_jwt(binary(), binary()) -> {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT) ->
     verify_jwt(RealmUri, JWT, #{}).
 
-
 -spec verify_jwt(RealmUri :: binary(), JWT :: binary(), MatchSpec :: map()) ->
     {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT, MatchSpec) ->
-
     case bondy_cache:get(RealmUri, JWT) of
         {ok, Claims} ->
             %% We skip verification as we found the JWT
@@ -471,13 +446,9 @@ verify_jwt(RealmUri, JWT, MatchSpec) ->
             maybe_cache(Result, JWT)
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 do_issue_token(Realm, Data0, RefreshTokenFlag) ->
@@ -510,14 +481,12 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     ok = cache(Claims, AccessToken),
     {ok, AccessToken, RefreshToken, Claims}.
 
-
 %% @private
 %% @TODO Commented to avoid breaking current apps, we will activate
 %% this in next major release
 maybe_issue_refresh_token(false, _, _, _) ->
     %% The client credentials flow should not return a refresh token
     undefined;
-
 maybe_issue_refresh_token(true, Uri, IssuedAt, Data0) ->
     %% We create the refresh token data by cloning the access token
     %% and changing only the expires_in property, so that the refresh_token
@@ -537,52 +506,57 @@ maybe_issue_refresh_token(true, Uri, IssuedAt, Data0) ->
     ok = store_token_indices(Uri, RefreshToken, Data1),
     RefreshToken.
 
-
-
 store_token_indices(Uri, Token, #bondy_oauth2_token{} = Data) ->
     Issuer = Data#bondy_oauth2_token.issuer,
     Username = Data#bondy_oauth2_token.username,
 
     %% 2. An index to find all refresh tokens issued for a Username
     %% A Username can have many active tokens per Iss (on different DeviceIds)
-    ok = case Issuer == Username of
-        true ->
-            ok;
-        false ->
-            plum_db:put(?REFRESH_TOKENS_PREFIX(Uri, Username), Token, Issuer)
-    end,
+    ok =
+        case Issuer == Username of
+            true ->
+                ok;
+            false ->
+                plum_db:put(
+                    ?REFRESH_TOKENS_PREFIX(Uri, Username), Token, Issuer
+                )
+        end,
 
     %% 2. We store an index to find the refresh token matching
     %% {Iss, Sub, DeviceId} or to iterate over all tokens for {Iss, Sub}
-    ok = case client_device_id(Data) of
-        undefined ->
-            ok;
-        DeviceId ->
-            plum_db:put(
-                ?REFRESH_TOKENS_PREFIX(Uri, Issuer, Username), DeviceId, Token)
-    end.
-
+    ok =
+        case client_device_id(Data) of
+            undefined ->
+                ok;
+            DeviceId ->
+                plum_db:put(
+                    ?REFRESH_TOKENS_PREFIX(Uri, Issuer, Username),
+                    DeviceId,
+                    Token
+                )
+        end.
 
 %% @private
 delete_token_indices(Uri, Token, #bondy_oauth2_token{} = Data) ->
     Issuer = Data#bondy_oauth2_token.issuer,
     Username = Data#bondy_oauth2_token.username,
 
-    ok = case Issuer == Username of
-        true ->
-            ok;
-        false ->
-            plum_db:delete(?REFRESH_TOKENS_PREFIX(Uri, Username), Token)
-    end,
+    ok =
+        case Issuer == Username of
+            true ->
+                ok;
+            false ->
+                plum_db:delete(?REFRESH_TOKENS_PREFIX(Uri, Username), Token)
+        end,
 
     case client_device_id(Data) of
         undefined ->
             ok;
         DeviceId ->
             plum_db:delete(
-                ?REFRESH_TOKENS_PREFIX(Uri, Issuer, Username), DeviceId)
+                ?REFRESH_TOKENS_PREFIX(Uri, Issuer, Username), DeviceId
+            )
     end.
-
 
 -doc """
 Removes the refresh token from store.
@@ -610,19 +584,16 @@ do_revoke_refresh_token(RealmUri, Token, #bondy_oauth2_token{} = Data) ->
     _ = plum_db:delete(?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), Token),
     delete_token_indices(RealmUri, Token, Data).
 
-
 %% @private
 supports_refresh_token(client_credentials) -> false;
 supports_refresh_token(application_code) -> true;
 supports_refresh_token(password) -> true;
 supports_refresh_token(Grant) -> error({oauth2_unsupported_grant_type, Grant}).
 
-
 %% @private
 sign(Key, Claims) ->
     Signed = jose_jwt:sign(Key, Claims),
     element(2, jose_jws:compact(Signed)).
-
 
 %% @private
 -spec do_verify_jwt(Realm :: binary(), binary(), map()) ->
@@ -665,15 +636,12 @@ do_verify_jwt(RealmUri, JWT, Match) ->
             {error, oauth2_invalid_grant}
     end.
 
-
 %% @private
 maybe_cache({ok, Claims} = OK, AccessToken) when is_map(Claims) ->
     ok = cache(Claims, AccessToken),
     OK;
-
 maybe_cache(Error, _) ->
     Error.
-
 
 %% @private
 cache(Claims, AccessToken) when is_map(Claims) ->
@@ -681,7 +649,6 @@ cache(Claims, AccessToken) when is_map(Claims) ->
     Opts = #{exp => ?EXPIRY_TIME_SECS(?NOW, Secs)},
     _ = bondy_cache:put(RealmUri, AccessToken, Claims, Opts),
     ok.
-
 
 %% @private
 maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, _JWT) ->
@@ -693,10 +660,8 @@ maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, _JWT) ->
         false ->
             {ok, Claims}
     end;
-
 maybe_expired(Error, _) ->
     Error.
-
 
 %% @private
 matches(RealmUri, Claims, Spec0) ->
@@ -710,16 +675,12 @@ matches(RealmUri, Claims, Spec0) ->
             {error, oauth2_invalid_grant}
     end.
 
-
 %% @private
 client_device_id(#bondy_oauth2_token{meta = Meta}) ->
     client_device_id(Meta);
-
 client_device_id(#{<<"client_device_id">> := <<>>}) ->
     undefined;
-
 client_device_id(#{<<"client_device_id">> := DeviceId}) ->
     DeviceId;
-
 client_device_id(_) ->
     undefined.

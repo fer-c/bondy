@@ -15,29 +15,25 @@ dispatching calls to the telemetry administrative procedures.
 
 -export([handle_call/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -spec handle_call(
-    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) -> ok
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()
+) ->
+    ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
-
 
 handle_call(?BONDY_TELEMETRY_METRICS, #call{} = M, _Ctxt) ->
     %% TODO
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E};
-
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.

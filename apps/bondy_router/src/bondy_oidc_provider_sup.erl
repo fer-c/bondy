@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_oidc_provider_sup).
 -moduledoc """
 A `simple_one_for_one` supervisor for `oidcc_provider_configuration_worker`
@@ -15,7 +14,6 @@ a specific (realm, provider) pair.
 
 -behaviour(supervisor).
 
-
 %% API
 -export([start_link/0]).
 -export([start_child/1]).
@@ -23,18 +21,13 @@ a specific (realm, provider) pair.
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -doc false.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
 
 -doc """
 Starts a new `oidcc_provider_configuration_worker` child.
@@ -47,13 +40,9 @@ Starts a new `oidcc_provider_configuration_worker` child.
 start_child(Args) when is_map(Args) ->
     supervisor:start_child(?MODULE, [Args]).
 
-
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     SupFlags = #{

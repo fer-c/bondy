@@ -22,7 +22,6 @@ and unsubscription.
 -define(HOST, "127.0.0.1").
 -define(PORT, 18082).
 
-
 all() ->
     [
         subscribe_and_receive,
@@ -33,7 +32,6 @@ all() ->
         unsubscribe_stops_events
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     {ok, _} = application:ensure_all_started(bondy_connect),
@@ -43,13 +41,9 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 subscribe_and_receive(_) ->
     Self = self(),
@@ -69,7 +63,6 @@ subscribe_and_receive(_) ->
     ok = bondy_connect:disconnect(Pub),
     ok = bondy_connect:disconnect(Sub).
 
-
 acknowledged_publish(_) ->
     Pub = connect(),
     Result = bondy_connect:publish(
@@ -77,7 +70,6 @@ acknowledged_publish(_) ->
     ),
     ?assertMatch({ok, PubId} when is_integer(PubId), Result),
     ok = bondy_connect:disconnect(Pub).
-
 
 ordered_events(_) ->
     Self = self(),
@@ -96,18 +88,20 @@ ordered_events(_) ->
         {ok, _} = bondy_connect:publish(
             Pub, <<"com.example.ordered">>, [N], #{}, #{acknowledge => true}
         )
-        || N <- lists:seq(1, 5)
+     || N <- lists:seq(1, 5)
     ],
 
     Seqs = [
-        receive {seq, S} -> S after 5000 -> ct:fail(timeout) end
-        || _ <- lists:seq(1, 5)
+        receive
+            {seq, S} -> S
+        after 5000 -> ct:fail(timeout)
+        end
+     || _ <- lists:seq(1, 5)
     ],
     ?assertEqual([1, 2, 3, 4, 5], Seqs),
 
     ok = bondy_connect:disconnect(Pub),
     ok = bondy_connect:disconnect(Sub).
-
 
 unordered_events(_) ->
     Self = self(),
@@ -130,7 +124,6 @@ unordered_events(_) ->
     ok = bondy_connect:disconnect(Pub),
     ok = bondy_connect:disconnect(Sub).
 
-
 %% A crashing ordered-subscription handler must not wedge the per-subscription
 %% FIFO: the worker DOWN drives `advance_event_down`, which drains the queued
 %% events in publication order. The handler for event 1 sleeps (so events 2..5
@@ -140,23 +133,31 @@ subscriber_crash_preserves_fifo(_) ->
     Sub = connect(),
     Handler = fun([Seq], _, _) ->
         case Seq of
-            1 -> timer:sleep(500), error(boom);
-            _ -> Self ! {seq, Seq}
+            1 ->
+                timer:sleep(500),
+                error(boom);
+            _ ->
+                Self ! {seq, Seq}
         end
     end,
-    {ok, _} = bondy_connect:subscribe(Sub, <<"com.example.crashfifo">>, Handler),
+    {ok, _} = bondy_connect:subscribe(
+        Sub, <<"com.example.crashfifo">>, Handler
+    ),
 
     Pub = connect(),
     _ = [
         {ok, _} = bondy_connect:publish(
             Pub, <<"com.example.crashfifo">>, [N], #{}, #{acknowledge => true}
         )
-        || N <- lists:seq(1, 5)
+     || N <- lists:seq(1, 5)
     ],
 
     Seqs = [
-        receive {seq, S} -> S after 5000 -> ct:fail(timeout) end
-        || _ <- lists:seq(1, 4)
+        receive
+            {seq, S} -> S
+        after 5000 -> ct:fail(timeout)
+        end
+     || _ <- lists:seq(1, 4)
     ],
     ?assertEqual([2, 3, 4, 5], Seqs),
 
@@ -166,12 +167,13 @@ subscriber_crash_preserves_fifo(_) ->
     ok = bondy_connect:disconnect(Pub),
     ok = bondy_connect:disconnect(Sub).
 
-
 unsubscribe_stops_events(_) ->
     Self = self(),
     Sub = connect(),
     Handler = fun(Args, _, _) -> Self ! {got, Args} end,
-    {ok, SubId} = bondy_connect:subscribe(Sub, <<"com.example.unsub">>, Handler),
+    {ok, SubId} = bondy_connect:subscribe(
+        Sub, <<"com.example.unsub">>, Handler
+    ),
     %% A control subscription on the SAME connection that stays subscribed. Its
     %% event is the deterministic barrier: both publishes are acknowledged and
     %% sequential, so a (hypothetical) leaked event for the unsubscribed topic is
@@ -187,7 +189,9 @@ unsubscribe_stops_events(_) ->
         Pub, <<"com.example.unsub">>, [<<"x">>], #{}, #{acknowledge => true}
     ),
     {ok, _} = bondy_connect:publish(
-        Pub, <<"com.example.unsub.ctrl">>, [<<"ok">>], #{}, #{acknowledge => true}
+        Pub, <<"com.example.unsub.ctrl">>, [<<"ok">>], #{}, #{
+            acknowledge => true
+        }
     ),
     receive
         {ctrl, _} -> ok
@@ -206,19 +210,14 @@ unsubscribe_stops_events(_) ->
     ok = bondy_connect:disconnect(Pub),
     ok = bondy_connect:disconnect(Sub).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 connect() ->
     {ok, Conn} = bondy_connect:connect(spec()),
     Conn.
-
 
 %% @private
 spec() ->
@@ -229,7 +228,6 @@ spec() ->
         auth => #{method => ?WAMP_ANON_AUTH},
         serializers => [json]
     }.
-
 
 %% @private
 add_anon_realm(RealmUri) ->

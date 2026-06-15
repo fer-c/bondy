@@ -9,8 +9,6 @@ Parsing, validation and matching of CIDR notation address ranges, represented
 in Erlang as `{inet:ip_address(), Maskbits}` tuples for both IPv4 and IPv6.
 """.
 
-
-
 -define(LOCAL_CIDRS, [
     %% single class A network 10.0.0.0 – 10.255.255.255
     {{10, 0, 0, 0}, 8},
@@ -20,7 +18,7 @@ in Erlang as `{inet:ip_address(), Maskbits}` tuples for both IPv4 and IPv6.
     {{192, 168, 0, 0}, 16}
 ]).
 
--type t()   ::  {inet:ip_address(), non_neg_integer()}.
+-type t() :: {inet:ip_address(), non_neg_integer()}.
 
 -export([parse/1]).
 -export([is_type/1]).
@@ -28,12 +26,9 @@ in Erlang as `{inet:ip_address(), Maskbits}` tuples for both IPv4 and IPv6.
 -export([anchor_mask/1]).
 -export([match/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc """
 Parses a binary string representation of a CIDR notation and returns its
@@ -52,10 +47,8 @@ parse(Bin) when is_binary(Bin) ->
         _ ->
             error(badarg)
     end;
-
 parse(_) ->
     error(badarg).
-
 
 -doc """
 Returns `true` if term `Term` is a valid CIDR notation representation in
@@ -63,23 +56,22 @@ erlang. Otherwise returns `false`.
 """.
 -spec is_type(Term :: binary()) -> t() | no_return().
 
-is_type({IP, Maskbits})
-when tuple_size(IP) == 4 andalso Maskbits >= 0 andalso Maskbits =< 32 ->
+is_type({IP, Maskbits}) when
+    tuple_size(IP) == 4 andalso Maskbits >= 0 andalso Maskbits =< 32
+->
     case inet:ntoa(IP) of
         {error, einval} -> false;
         _ -> true
     end;
-
-is_type({IP, Maskbits})
-when tuple_size(IP) == 8 andalso Maskbits >= 0 andalso Maskbits =< 128 ->
+is_type({IP, Maskbits}) when
+    tuple_size(IP) == 8 andalso Maskbits >= 0 andalso Maskbits =< 128
+->
     case inet:ntoa(IP) of
         {error, einval} -> false;
         _ -> true
     end;
-
 is_type(_) ->
     false.
-
 
 -doc """
 Returns `true` if `Left` and `Right` are CIDR notation representations
@@ -89,26 +81,24 @@ in erlang and they match. Otherwise returns false.
 
 match({_, Maskbits} = Left, {_, Maskbits} = Right) ->
     mask(Left) == mask(Right);
-
 match(_, _) ->
     false.
 
-
 -spec mask(t()) -> Subnet :: binary().
 
-mask({{_, _, _, _} = Addr, Maskbits})
-when Maskbits >= 0 andalso Maskbits =< 32 ->
+mask({{_, _, _, _} = Addr, Maskbits}) when
+    Maskbits >= 0 andalso Maskbits =< 32
+->
     B = list_to_binary(tuple_to_list(Addr)),
     <<Subnet:Maskbits, _Host/bitstring>> = B,
     Subnet;
-
-mask({{A, B, C, D, E, F, G, H}, Maskbits})
-when Maskbits >= 0 andalso Maskbits =< 128 ->
+mask({{A, B, C, D, E, F, G, H}, Maskbits}) when
+    Maskbits >= 0 andalso Maskbits =< 128
+->
     <<Subnet:Maskbits, _Host/bitstring>> = <<
-        A:16, B:16, C:16, D:16, E:16,F:16, G:16, H:16
+        A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16
     >>,
     Subnet.
-
 
 -doc """
 Returns the real bottom of a netmask. Eg if 192.168.1.1/16 is
@@ -116,18 +106,15 @@ provided, return 192.168.0.0/16.
 """.
 -spec anchor_mask(t()) -> t().
 
-
 anchor_mask({Addr, Maskbits} = CIDR) when tuple_size(Addr) == 4 ->
     M = mask(CIDR),
     Rem = 32 - Maskbits,
     <<A:8, B:8, C:8, D:8>> = <<M:Maskbits, 0:Rem>>,
     {{A, B, C, D}, Maskbits};
-
 anchor_mask({Addr, Maskbits} = CIDR) when tuple_size(Addr) == 8 ->
     M = mask(CIDR),
     Rem = 128 - Maskbits,
     <<A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>> = <<M:Maskbits, 0:Rem>>,
     {{A, B, C, D, E, F, G, H}, Maskbits};
-
 anchor_mask(_) ->
     error(badarg).

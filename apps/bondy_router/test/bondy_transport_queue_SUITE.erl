@@ -12,8 +12,6 @@
 
 -compile([nowarn_export_all, export_all]).
 
-
-
 all() ->
     [
         init_and_delete_transport,
@@ -30,15 +28,12 @@ all() ->
         partitions_survive_manager_crash
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 init_per_testcase(_TestCase, Config) ->
     %% Set small bounds for testing
@@ -47,17 +42,12 @@ init_per_testcase(_TestCase, Config) ->
     bondy_config:set([transport_queue, message_ttl], 300000),
     Config.
 
-
 end_per_testcase(_TestCase, _Config) ->
     ok.
-
-
 
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 init_and_delete_transport(_Config) ->
     TransportId = make_transport_id(),
@@ -95,7 +85,6 @@ init_and_delete_transport(_Config) ->
         bondy_transport_queue:enqueue(TransportId, Msg, #{})
     ).
 
-
 enqueue_dequeue_ordering(_Config) ->
     TransportId = make_transport_id(),
     ok = bondy_transport_queue:init_transport(
@@ -124,7 +113,6 @@ enqueue_dequeue_ordering(_Config) ->
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportId).
 
-
 max_messages_bound(_Config) ->
     TransportId = make_transport_id(),
     ok = bondy_transport_queue:init_transport(
@@ -139,7 +127,7 @@ max_messages_bound(_Config) ->
             ok = bondy_transport_queue:enqueue(TransportId, Msg, #{}),
             Msg
         end
-        || I <- lists:seq(1, 15)
+     || I <- lists:seq(1, 15)
     ],
 
     %% Count should be <= max_messages + EVICTION_BATCH_SIZE tolerance
@@ -177,7 +165,6 @@ max_messages_bound(_Config) ->
 
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportId).
-
 
 max_bytes_bound(_Config) ->
     TransportId = make_transport_id(),
@@ -220,7 +207,6 @@ max_bytes_bound(_Config) ->
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportId).
 
-
 ttl_expiry_dequeue(_Config) ->
     TransportId = make_transport_id(),
     ok = bondy_transport_queue:init_transport(
@@ -247,7 +233,6 @@ ttl_expiry_dequeue(_Config) ->
 
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportId).
-
 
 ttl_expiry_sweep(_Config) ->
     TransportId = make_transport_id(),
@@ -283,7 +268,6 @@ ttl_expiry_sweep(_Config) ->
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportId).
 
-
 concurrent_enqueue(_Config) ->
     TransportId = make_transport_id(),
     ok = bondy_transport_queue:init_transport(
@@ -310,13 +294,15 @@ concurrent_enqueue(_Config) ->
             ),
             Parent ! {done, self()}
         end)
-        || ProcIdx <- lists:seq(1, N)
+     || ProcIdx <- lists:seq(1, N)
     ],
 
     %% Wait for all processes to finish
     lists:foreach(
         fun(Pid) ->
-            receive {done, Pid} -> ok end
+            receive
+                {done, Pid} -> ok
+            end
         end,
         Pids
     ),
@@ -340,7 +326,6 @@ concurrent_enqueue(_Config) ->
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportId).
 
-
 dequeue_empty(_Config) ->
     %% Dequeue from nonexistent transport returns []
     FakeId = make_transport_id(),
@@ -355,7 +340,6 @@ dequeue_empty(_Config) ->
 
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportId).
-
 
 multiple_transports_isolation(_Config) ->
     TransportA = make_transport_id(),
@@ -414,7 +398,6 @@ multiple_transports_isolation(_Config) ->
     %% Cleanup
     ok = bondy_transport_queue:delete_transport(TransportB).
 
-
 init_is_idempotent(_Config) ->
     %% Partition tables and the meta table must survive a re-invocation of
     %% init/0 (simulating bondy_transport_queue_manager being restarted by
@@ -451,7 +434,6 @@ init_is_idempotent(_Config) ->
 
     ok = bondy_transport_queue:delete_transport(TransportId).
 
-
 partition_tables_are_anonymous(_Config) ->
     %% Each partition table must be an anonymous ets:tid(), not a named
     %% atom. This is the property that guarantees no atoms are allocated
@@ -468,7 +450,6 @@ partition_tables_are_anonymous(_Config) ->
         end,
         Tabs
     ).
-
 
 partitions_survive_manager_crash(_Config) ->
     %% The real property this suite is here to guard: when the transport
@@ -517,19 +498,14 @@ partitions_survive_manager_crash(_Config) ->
 
     ok = bondy_transport_queue:delete_transport(TransportId).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 make_transport_id() ->
     Bin = integer_to_binary(erlang:unique_integer([positive])),
     <<"test-transport-", Bin/binary>>.
-
 
 %% @private
 make_event(N) ->
@@ -541,11 +517,9 @@ make_event(N) ->
         kwargs = undefined
     }.
 
-
 %% @private
 wait_for_manager(0, _Every) ->
     undefined;
-
 wait_for_manager(Attempts, Every) ->
     case whereis(bondy_transport_queue_manager) of
         undefined ->

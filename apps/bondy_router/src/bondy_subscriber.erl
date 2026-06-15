@@ -17,16 +17,15 @@ It is used by `bondy_broker:subscribe/4` and `bondy_broker:unsubscribe/1`.
 -include("bondy.hrl").
 
 -record(state, {
-    realm_uri           ::  uri(),
-    session_id          ::  bondy_session_id:t(),
-    opts                ::  map(),
-    meta                ::  map(),
-    topic               ::  binary(),
-    callback_fun        ::  function(),
-    subscription_id     ::  id() | undefined,
-    stats = #{}         ::  map()
+    realm_uri :: uri(),
+    session_id :: bondy_session_id:t(),
+    opts :: map(),
+    meta :: map(),
+    topic :: binary(),
+    callback_fun :: function(),
+    subscription_id :: id() | undefined,
+    stats = #{} :: map()
 }).
-
 
 %% API
 -export([info/1]).
@@ -44,11 +43,9 @@ It is used by `bondy_broker:subscribe/4` and `bondy_broker:unsubscribe/1`.
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
 %% =============================================================================
 %% CALLBACK API
 %% =============================================================================
-
 
 % -callback init(Args :: any()) ->
 %     {ok, NewState :: any()} | {error, Reason :: any()}.
@@ -56,12 +53,9 @@ It is used by `bondy_broker:subscribe/4` and `bondy_broker:unsubscribe/1`.
 % -callback handle_event(Event :: wamp_event(), State :: any()) ->
 %     {ok, NewState :: any()}.
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec start_link(id(), uri(), map(), uri(), function()) ->
     {ok, pid()} | {error, any()}.
@@ -71,35 +65,25 @@ start_link(Id, RealmUri, Opts, Topic, Fun) ->
         {local, name(Id)}, ?MODULE, [Id, RealmUri, Opts, Topic, Fun], []
     ).
 
-
 %% @private
 name(Id) ->
     list_to_atom("bondy_subscriber_" ++ integer_to_list(Id)).
 
-
 pid(Id) ->
     bondy_gproc:lookup_pid({?MODULE, Id}).
-
 
 info(Subscriber) ->
     gen_server:call(Subscriber, info, 5000).
 
-
 handle_event(Subscriber, Event) ->
     gen_server:cast(Subscriber, Event).
-
 
 handle_event_sync(Subscriber, Event) ->
     gen_server:call(Subscriber, Event, 5000).
 
-
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
     Opts = maps:put(subscription_id, Id, Opts0),
@@ -123,8 +107,6 @@ init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
             Error
     end.
 
-
-
 handle_call(info, _From, State) ->
     Info = #{
         meta => State#state.meta,
@@ -135,7 +117,6 @@ handle_call(info, _From, State) ->
         topic => State#state.topic
     },
     {reply, Info, State};
-
 handle_call(#event{} = Event, _From, State) ->
     case do_handle_event(Event, State) of
         {ok, NewState} ->
@@ -151,7 +132,6 @@ handle_call(#event{} = Event, _From, State) ->
             }),
             {reply, {error, Reason}, NewState}
     end;
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -159,7 +139,6 @@ handle_call(Event, From, State) ->
         from => From
     }),
     {noreply, State}.
-
 
 handle_cast(#event{} = Event, State) ->
     case do_handle_event(Event, State) of
@@ -176,7 +155,6 @@ handle_cast(#event{} = Event, State) ->
             }),
             {noreply, NewState}
     end;
-
 handle_cast(Event, State) ->
     ?LOG_DEBUG(#{
         reason => unsupported_event,
@@ -184,9 +162,9 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
 handle_info(
-    {?BONDY_REQ, _Pid, _RealmUri, #event{} = WAMPEvent}, State) ->
+    {?BONDY_REQ, _Pid, _RealmUri, #event{} = WAMPEvent}, State
+) ->
     case do_handle_event(WAMPEvent, State) of
         {ok, NewState} ->
             {noreply, NewState};
@@ -201,7 +179,6 @@ handle_info(
             }),
             {noreply, NewState}
     end;
-
 handle_info(Event, State) ->
     ?LOG_DEBUG(#{
         reason => unsupported_event,
@@ -209,16 +186,12 @@ handle_info(Event, State) ->
     }),
     {noreply, State}.
 
-
 terminate(normal, State) ->
     do_unsubscribe(State);
-
 terminate(shutdown, State) ->
     do_unsubscribe(State);
-
 terminate({shutdown, _}, State) ->
     do_unsubscribe(State);
-
 terminate(Reason, State) ->
     do_unsubscribe(State),
     ?LOG_ERROR(#{
@@ -230,29 +203,22 @@ terminate(Reason, State) ->
     }),
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 do_unsubscribe(#state{subscription_id = undefined} = State) ->
     {{error, not_found}, State};
-
 do_unsubscribe(#state{subscription_id = Id} = State) ->
     RealmUri = State#state.realm_uri,
     {
         bondy_broker:unsubscribe(Id, RealmUri),
         State#state{subscription_id = undefined}
     }.
-
 
 %% @private
 do_handle_event(Event, State) ->
@@ -272,7 +238,6 @@ do_handle_event(Event, State) ->
             }),
             {error, Reason, State}
     end.
-
 
 %% @private
 retry_handle_event(Event, State, Time, Cnt) ->

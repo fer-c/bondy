@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_auth_anonymous).
 -moduledoc """
 This module implements the `bondy_auth` behaviour to allow access
@@ -27,13 +26,9 @@ group.
 -export([challenge/3]).
 -export([authenticate/4]).
 
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
-
 
 -doc """
 Raises `invalid_context`.
@@ -53,12 +48,10 @@ init(Ctxt) ->
             source_ip => bondy_auth:source_ip(Ctxt)
         },
         {ok, State}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec requirements() -> map().
 
@@ -69,10 +62,9 @@ requirements() ->
         authorized_keys => false
     }.
 
-
-
 -spec challenge(
-    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()
+) ->
     {false, NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
@@ -80,13 +72,12 @@ challenge(_, _, State) ->
     %% No challenge required
     {false, State}.
 
-
-
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    CBState :: state()) ->
+    CBState :: state()
+) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
@@ -105,10 +96,3 @@ authenticate(_, _, Ctxt, State) ->
         false ->
             {error, invalid_context, State}
     end.
-
-
-
-
-
-
-

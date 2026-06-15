@@ -42,8 +42,6 @@ to the `api_clients` group.
     }
 }).
 
-
-
 -define(UPDATE_SPEC, #{
     <<"client_secret">> => #{
         alias => client_secret,
@@ -64,23 +62,16 @@ to the `api_clients` group.
     }
 }).
 
--type t()       ::  bondy_rbac_user:t().
+-type t() :: bondy_rbac_user:t().
 
 -export([add/2]).
 -export([remove/2]).
 -export([update/3]).
 -export([to_external/1]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-
-
 
 -doc """
 Adds an API client to realm RealmUri.
@@ -92,31 +83,26 @@ add(RealmUri, Data) ->
     User = bondy_rbac_user:new(validate(Data, ?ADD_SPEC)),
     bondy_rbac_user:add(RealmUri, User).
 
-
 -spec update(uri(), binary(), map()) ->
-    {ok , t()} | {error, term()} | no_return().
+    {ok, t()} | {error, term()} | no_return().
 
 update(RealmUri, ClientId, Data0) ->
     Data = validate(Data0, ?UPDATE_SPEC),
     bondy_rbac_user:update(RealmUri, ClientId, Data).
-
 
 -spec remove(uri(), binary()) -> ok.
 
 remove(RealmUri, ClientId) ->
     bondy_rbac_user:remove(RealmUri, ClientId).
 
-
 -spec to_external(t()) -> map().
 
 to_external(Client) ->
     bondy_rbac_user:to_external(Client).
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 validate(Data0, Spec) ->
@@ -125,12 +111,10 @@ validate(Data0, Spec) ->
     Data = maps_utils:validate(Data0, Spec, #{keep_unknown => true}),
     maybe_add_groups(Data).
 
-
 %% @private
 maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
     Groups1 = [?API_CLIENTS | Groups0],
     maps:put(<<"groups">>, lists:usort(Groups1), M);
-
 maybe_add_groups(#{} = M) ->
     %% For update op
     M.

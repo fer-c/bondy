@@ -15,21 +15,20 @@ with jitter.
 
 %% Retry defaults
 -define(DEFAULT_RETRY_OPTS, #{
-        max_retries => 3,
-        base_delay => 100,
-        max_delay => 5000,
-        mode => jitter
+    max_retries => 3,
+    base_delay => 100,
+    max_delay => 5000,
+    mode => jitter
 }).
 
--type retry_opts()  :: #{
-                            max_retries => pos_integer() | infinity,
-                            base_delay => pos_integer(),
-                            max_delay => pos_integer(),
-                            mode => normal | jitter
-                        }.
+-type retry_opts() :: #{
+    max_retries => pos_integer() | infinity,
+    base_delay => pos_integer(),
+    max_delay => pos_integer(),
+    mode => normal | jitter
+}.
 
 -export_type([retry_opts/0]).
-
 
 -export([and_then/2]).
 -export([lazy_or_else/2]).
@@ -42,13 +41,9 @@ with jitter.
 -export([rand_increment/1]).
 -export([rand_increment/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 If `Value` is the atom `undefined`, return `undefined`, otherwise apply `Fun` to
@@ -62,10 +57,8 @@ Conceptually the dual of `or_else/2`:
 
 and_then(undefined, _Fun) ->
     undefined;
-
 and_then(Value, Fun) when is_function(Fun, 1) ->
     Fun(Value).
-
 
 -doc """
 Returns the first argument if it is not the atom `undefined`, otherwise the second.
@@ -74,10 +67,8 @@ Returns the first argument if it is not the atom `undefined`, otherwise the seco
 
 or_else(undefined, Default) ->
     Default;
-
 or_else(Value, _) ->
     Value.
-
 
 -doc """
 Returns the first argument if it is not the atom `undefined`, otherwise calls the second argument.
@@ -86,11 +77,8 @@ Returns the first argument if it is not the atom `undefined`, otherwise calls th
 
 lazy_or_else(undefined, Fun) when is_function(Fun, 0) ->
     Fun();
-
 lazy_or_else(Value, _) ->
     Value.
-
-
 
 -doc """
 Increment an integer exponentially
@@ -99,7 +87,6 @@ Increment an integer exponentially
 
 increment(N) when is_integer(N) ->
     N bsl 1.
-
 
 -doc """
 Increment an integer exponentially within a range.
@@ -124,7 +111,6 @@ rand_increment(N) ->
     Width = N bsl 1,
     N + rand:uniform(Width + 1) - 1.
 
-
 -doc """
 Increment an integer exponentially with randomness or jitter within a range.
 
@@ -143,14 +129,11 @@ rand_increment(N, Max) ->
     if
         MaxMinDelay =:= 0 ->
             rand:uniform(Max);
-
         N > MaxMinDelay ->
             rand_increment(MaxMinDelay);
-
         true ->
             rand_increment(N)
     end.
-
 
 -doc """
 Calls retry/2 with the default the follwing default options:
@@ -164,7 +147,6 @@ Calls retry/2 with the default the follwing default options:
 
 retry(Fun) ->
     retry(Fun, ?DEFAULT_RETRY_OPTS).
-
 
 -doc """
 Retries a function with full control over timing parameters.
@@ -217,20 +199,16 @@ retry(Fun, Opts) ->
     State = maps:merge(?DEFAULT_RETRY_OPTS, Opts),
     retry_loop(Fun, 0, undefined, State).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-retry_loop(Fun, Attempt, _Reason, #{max_retries := MaxRetries} = State0)
-when Attempt =< MaxRetries ->
+retry_loop(Fun, Attempt, _Reason, #{max_retries := MaxRetries} = State0) when
+    Attempt =< MaxRetries
+->
     Result = resulto:then_recover(Fun(), fun
         (Reason) when Attempt =:= MaxRetries ->
             {error, Reason};
-
         (Reason) ->
             State = incr_delay(State0),
             timer:sleep(maps:get(base_delay, State)),
@@ -239,21 +217,14 @@ when Attempt =< MaxRetries ->
 
     %% Ensure we return a result.
     resulto:flatten(resulto:ok(Result));
-
 retry_loop(_, _, Reason, _) ->
     {error, Reason}.
 
-
 incr_delay(#{mode := normal, max_delay := infinity} = State) ->
     State#{base_delay => increment(maps:get(base_delay, State))};
-
 incr_delay(#{mode := normal, max_delay := Max} = State) ->
     State#{base_delay => increment(maps:get(base_delay, State), Max)};
-
 incr_delay(#{mode := jitter, max_delay := infinity} = State) ->
     State#{base_delay => rand_increment(maps:get(base_delay, State))};
-
 incr_delay(#{mode := jitter, max_delay := Max} = State) ->
     State#{base_delay => rand_increment(maps:get(base_delay, State), Max)}.
-
-

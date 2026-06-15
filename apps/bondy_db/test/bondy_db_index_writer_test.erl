@@ -306,7 +306,9 @@ flush_index(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             ok = bondy_oplog_secondary_writer:flush_sync(Pid)
@@ -321,7 +323,9 @@ clear_index(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             %% Backend-agnostic: the durable table backs its indices with
             %% leveled, so use the projection adapter's clear/2 (exported by
             %% both the ets and leveled adapters) rather than assuming ETS.
@@ -331,9 +335,7 @@ clear_index(Table, IndexName) ->
             Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
             Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
             Scope =
-                case
-                    bondy_oplog_core_registry:entry_index_clear_scope(Entry)
-                of
+                case bondy_oplog_core_registry:entry_index_clear_scope(Entry) of
                     undefined -> {suffix, IndexName};
                     S -> S
                 end,

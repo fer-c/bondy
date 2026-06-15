@@ -19,19 +19,15 @@ IP addresses as public or private.
 
 -on_load(on_load/0).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -spec set_meta_headers(Req :: cowboy_req:req()) ->
     NewReq :: cowboy_req:req().
 
 set_meta_headers(Req) ->
     cowboy_req:set_resp_headers(meta_headers(), Req).
-
 
 -doc """
 Sets both meta headers and per-listener security headers on the
@@ -48,13 +44,10 @@ set_all_headers(Req) ->
     Req1 = cowboy_req:set_resp_headers(meta_headers(), Req),
     cowboy_req:set_resp_headers(SecurityHeaders, Req1).
 
-
 -spec meta_headers() -> map().
 
 meta_headers() ->
     persistent_term:get({?MODULE, meta_headers}).
-
-
 
 -spec parse_authorization(Req :: cowboy_req:req()) ->
     {basic, binary(), binary()}
@@ -87,7 +80,6 @@ parse_authorization(Req) ->
             Other
     end.
 
-
 -doc """
 Returns true if the argument is a valid public IP address.
 
@@ -100,21 +92,20 @@ the range fe80::/10.
 is_public_ip({A, B, _, _}) when
     A == 10;
     A == 172 andalso B >= 16 andalso B =< 31;
-    A == 192 andalso B == 168 ->
+    A == 192 andalso B == 168
+->
     % IP is private
     false;
-
-is_public_ip({A, _, _, _, _, _, _, _})
-when A == 65152 orelse A == 65153 orelse A == 65154 ->
+is_public_ip({A, _, _, _, _, _, _, _}) when
+    A == 65152 orelse A == 65153 orelse A == 65154
+->
     %% 65152 -> fc00::/7 (ULA)
     %% 65153 -> fd00::/7 (part of ULA)
     %% 65154 -> fe80::/10. Link local
     false;
-
 is_public_ip(IPAddr) when ?IS_IP(IPAddr) ->
     % IP is valid and public
     true;
-
 is_public_ip(undefined) ->
     % IP is invalid
     false.
@@ -123,12 +114,9 @@ is_public_ip(undefined) ->
 %% PRIVATE
 %% =============================================================================
 
-
 on_load() ->
     Meta = #{
         <<"server">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
     },
     ok = persistent_term:put({?MODULE, meta_headers}, Meta),
     ok.
-
-

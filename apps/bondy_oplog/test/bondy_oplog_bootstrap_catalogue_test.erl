@@ -83,7 +83,9 @@ fresh_replica_bootstraps_from_peer() ->
     %% Verify every key has the right cell present on the local replica.
     PeerEntry = peer_entry(Peer),
     LocalEntry = peer_entry(Local),
-    LocalAdapter = bondy_oplog_core_registry:entry_projection_adapter(LocalEntry),
+    LocalAdapter = bondy_oplog_core_registry:entry_projection_adapter(
+        LocalEntry
+    ),
     LocalHandle = bondy_oplog_core_registry:entry_projection_handle(LocalEntry),
     PeerAdapter = bondy_oplog_core_registry:entry_projection_adapter(PeerEntry),
     PeerHandle = bondy_oplog_core_registry:entry_projection_handle(PeerEntry),

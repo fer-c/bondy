@@ -53,22 +53,19 @@ all() ->
         security_disabled_allows_all
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.rbac">>,
     ok = add_realm(RealmUri),
 
-    [{realm_uri, RealmUri}| Config].
+    [{realm_uri, RealmUri} | Config].
 
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
-
 add_realm(RealmUri) ->
     add_realm(RealmUri, undefined).
-
 
 add_realm(RealmUri, Prototype) ->
     Config = #{
@@ -155,10 +152,9 @@ add_realm(RealmUri, Prototype) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
-    Peer = {{127,0,0,0}, 52000},
+    Peer = {{127, 0, 0, 0}, 52000},
     SessionOpts = #{
         is_anonymous => false,
         security_enabled => bondy_realm:is_security_enabled(RealmUri),
@@ -221,11 +217,10 @@ test_1(Config) ->
         "U3 can register"
     ).
 
-
 test_grants(_) ->
     Uri = <<"com.example.foo">>,
     Data = #{
-        uri  => Uri,
+        uri => Uri,
         authmethods => [
             <<"wampcra">>, <<"anonymous">>, <<"password">>, <<"cryptosign">>
         ],
@@ -233,7 +228,7 @@ test_grants(_) ->
         users => [
             #{
                 username => <<"urn:user:admin">>,
-                authorized_keys =>[
+                authorized_keys => [
                     <<"1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd">>
                 ],
                 groups => [
@@ -376,51 +371,58 @@ test_grants(_) ->
     ).
 
 group_topsort_error(_) ->
-    Groups = [bondy_rbac_group:new(G) || G <- [
-        #{
-            name => <<"a">>,
-            groups => [<<"b">>],
-            meta => #{}
-        },
-        #{
-            name => <<"b">>,
-            groups => [<<"a">>],
-            meta => #{}
-        }
-    ]],
+    Groups = [
+        bondy_rbac_group:new(G)
+     || G <- [
+            #{
+                name => <<"a">>,
+                groups => [<<"b">>],
+                meta => #{}
+            },
+            #{
+                name => <<"b">>,
+                groups => [<<"a">>],
+                meta => #{}
+            }
+        ]
+    ],
     ?assertError(
-        {cycle, [<<"b">>,<<"a">>]},
+        {cycle, [<<"b">>, <<"a">>]},
         [maps:get(name, G) || G <- bondy_rbac_group:topsort(Groups)]
     ).
 
 group_topsort(_) ->
-    Groups = [bondy_rbac_group:new(G) || G <- [
-        #{
-            name => <<"a">>,
-            groups => [<<"z">>],
-            meta => #{}
-        },
-        #{
-            name => <<"b">>,
-            groups => [<<"a">>],
-            meta => #{}
-        },
-        #{
-            name => <<"c">>,
-            groups => [<<"d">>, <<"b">>],
-            meta => #{}
-        },
-        #{
-            name => <<"d">>,
-            groups => [<<"z">>],
-            meta => #{}
-        }
-    ]],
+    Groups = [
+        bondy_rbac_group:new(G)
+     || G <- [
+            #{
+                name => <<"a">>,
+                groups => [<<"z">>],
+                meta => #{}
+            },
+            #{
+                name => <<"b">>,
+                groups => [<<"a">>],
+                meta => #{}
+            },
+            #{
+                name => <<"c">>,
+                groups => [<<"d">>, <<"b">>],
+                meta => #{}
+            },
+            #{
+                name => <<"d">>,
+                groups => [<<"z">>],
+                meta => #{}
+            }
+        ]
+    ],
 
     {_, L} = lists:foldl(
         fun(X, {Cnt, Acc}) ->
             NewCnt = Cnt + 1,
-            {NewCnt, [{maps:get(name, X), NewCnt}|Acc]} end,
+            {NewCnt, [{maps:get(name, X), NewCnt} | Acc]}
+        end,
         {1, []},
         bondy_rbac_group:topsort(Groups)
     ),
@@ -436,9 +438,7 @@ group_topsort(_) ->
         maps:get(<<"d">>, Map) < maps:get(<<"c">>, Map)
     ).
 
-
 prototype_1(_) ->
-
     Config = #{
         uri => <<"prototype_1.proto">>,
         authmethods => [
@@ -532,13 +532,9 @@ prototype_1(_) ->
         "U1 should no longer have permission via prototypical inheritance, because we have overridden prototype_group_b"
     ).
 
-
-
 %% =============================================================================
 %% is_reserved_name / normalise_name
 %% =============================================================================
-
-
 
 is_reserved_name_atoms(_) ->
     ?assert(bondy_rbac:is_reserved_name(all)),
@@ -550,7 +546,6 @@ is_reserved_name_atoms(_) ->
     ?assertNot(bondy_rbac:is_reserved_name(foobar)),
     ?assertNot(bondy_rbac:is_reserved_name(admin)).
 
-
 is_reserved_name_binaries(_) ->
     ?assert(bondy_rbac:is_reserved_name(<<"all">>)),
     ?assert(bondy_rbac:is_reserved_name(<<"anonymous">>)),
@@ -561,14 +556,12 @@ is_reserved_name_binaries(_) ->
     %% Non-existing atoms as binaries should return false
     ?assertNot(bondy_rbac:is_reserved_name(<<"not_a_reserved_name_xyz123">>)).
 
-
 is_reserved_name_non_reserved(_) ->
     ?assertNot(bondy_rbac:is_reserved_name(<<"admin">>)),
     ?assertNot(bondy_rbac:is_reserved_name(<<"my_group">>)),
     ?assertNot(bondy_rbac:is_reserved_name(<<"com.example.service">>)),
     %% Non-binary, non-atom should error
     ?assertError(invalid_name, bondy_rbac:is_reserved_name(123)).
-
 
 normalise_name_casefold(_) ->
     ?assertEqual(<<"hello">>, bondy_rbac:normalise_name(<<"Hello">>)),
@@ -581,13 +574,9 @@ normalise_name_casefold(_) ->
     N2 = bondy_rbac:normalise_name(N1),
     ?assertEqual(N1, N2).
 
-
-
 %% =============================================================================
 %% REQUEST VALIDATION
 %% =============================================================================
-
-
 
 request_v1_format(_) ->
     %% v1 format uses top-level uri/match (single resource)
@@ -601,8 +590,9 @@ request_v1_format(_) ->
     ?assertMatch(#{type := request}, Req),
     ?assertEqual([<<"wamp.call">>], maps:get(permissions, Req)),
     ?assertEqual([<<"my_group">>], maps:get(roles, Req)),
-    ?assertMatch([{<<"com.example.">>, <<"prefix">>}], maps:get(resources, Req)).
-
+    ?assertMatch(
+        [{<<"com.example.">>, <<"prefix">>}], maps:get(resources, Req)
+    ).
 
 request_v2_format(_) ->
     %% v2 format uses resources list
@@ -625,13 +615,9 @@ request_v2_format(_) ->
     ?assert(lists:member({<<"com.foo.">>, <<"prefix">>}, Resources)),
     ?assert(lists:member({<<"com.bar.baz">>, <<"exact">>}, Resources)).
 
-
-
 %% =============================================================================
 %% GRANT / REVOKE LIFECYCLE
 %% =============================================================================
-
-
 
 grant_revoke_lifecycle(_) ->
     Uri = <<"com.test.grant_revoke_lifecycle">>,
@@ -652,7 +638,9 @@ grant_revoke_lifecycle(_) ->
     }),
 
     C1 = bondy_rbac:get_context(Uri, <<"tester_1">>),
-    ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.api.foo">>, C1)),
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.api.foo">>, C1)
+    ),
 
     %% Revoke it
     ok = bondy_rbac:revoke(Uri, #{
@@ -667,7 +655,6 @@ grant_revoke_lifecycle(_) ->
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.api.foo">>, C2)
     ).
-
 
 partial_revoke(_) ->
     Uri = <<"com.test.partial_revoke">>,
@@ -688,8 +675,12 @@ partial_revoke(_) ->
     }),
 
     C1 = bondy_rbac:get_context(Uri, <<"dev_1">>),
-    ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.svc.a">>, C1)),
-    ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.register">>, <<"com.svc.a">>, C1)),
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.svc.a">>, C1)
+    ),
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.register">>, <<"com.svc.a">>, C1)
+    ),
 
     %% Revoke only wamp.register
     ok = bondy_rbac:revoke(Uri, #{
@@ -700,12 +691,13 @@ partial_revoke(_) ->
     }),
 
     C2 = bondy_rbac:get_context(Uri, <<"dev_1">>),
-    ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.svc.a">>, C2)),
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.svc.a">>, C2)
+    ),
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.svc.a">>, C2)
     ).
-
 
 grant_deduplication(_) ->
     Uri = <<"com.test.dedup">>,
@@ -738,7 +730,6 @@ grant_deduplication(_) ->
         PermLists
     ).
 
-
 grant_unknown_role_error(_) ->
     Uri = <<"com.test.unknown_role">>,
     _ = bondy_realm:create(#{
@@ -754,7 +745,6 @@ grant_unknown_role_error(_) ->
         <<"roles">> => [<<"nonexistent_role">>]
     }),
     ?assertMatch({error, {unknown_roles, [<<"nonexistent_role">>]}}, Result).
-
 
 revoke_user_grants(_) ->
     Uri = <<"com.test.revoke_user">>,
@@ -784,7 +774,6 @@ revoke_user_grants(_) ->
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.call">>, <<"anything">>, C2)
     ).
-
 
 revoke_group_grants(_) ->
     Uri = <<"com.test.revoke_group">>,
@@ -817,13 +806,9 @@ revoke_group_grants(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"any_uri">>, C2)
     ).
 
-
-
 %% =============================================================================
 %% MATCH STRATEGIES
 %% =============================================================================
-
-
 
 exact_match_grant(_) ->
     Uri = <<"com.test.exact_match">>,
@@ -859,7 +844,6 @@ exact_match_grant(_) ->
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.my.other">>, C)
     ).
-
 
 wildcard_match_grant(_) ->
     Uri = <<"com.test.wildcard_match">>,
@@ -900,7 +884,6 @@ wildcard_match_grant(_) ->
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.foo.other">>, C)
     ).
-
 
 mixed_match_strategies(_) ->
     Uri = <<"com.test.mixed_match">>,
@@ -950,13 +933,9 @@ mixed_match_strategies(_) ->
         ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.api.other">>, C)
     ).
 
-
-
 %% =============================================================================
 %% USER-SPECIFIC GRANTS
 %% =============================================================================
-
-
 
 user_specific_grants(_) ->
     Uri = <<"com.test.user_grants">>,
@@ -1012,13 +991,9 @@ user_specific_grants(_) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% ANONYMOUS AUTHORIZATION
 %% =============================================================================
-
-
 
 anonymous_context_authorization(_) ->
     Uri = <<"com.test.anon_auth">>,
@@ -1057,7 +1032,6 @@ anonymous_context_authorization(_) ->
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.public.data">>, AnonC)
     ).
 
-
 anonymous_permission_denied_message(_) ->
     Uri = <<"com.test.anon_denied_msg">>,
     _ = bondy_realm:create(#{
@@ -1078,13 +1052,9 @@ anonymous_permission_denied_message(_) ->
             ?assertNotEqual(nomatch, binary:match(Msg, <<"Anonymous user">>))
     end.
 
-
-
 %% =============================================================================
 %% CONTEXT REFRESH
 %% =============================================================================
-
-
 
 context_refresh_after_epoch(_) ->
     Uri = <<"com.test.ctx_refresh">>,
@@ -1108,13 +1078,9 @@ context_refresh_after_epoch(_) ->
     %% Now it should refresh
     {true, _C3} = bondy_rbac:refresh_context(C1).
 
-
-
 %% =============================================================================
 %% EXPLICIT GROUPS (OIDC)
 %% =============================================================================
-
-
 
 explicit_groups_oidc(_) ->
     Uri = <<"com.test.oidc_groups">>,
@@ -1163,13 +1129,9 @@ explicit_groups_oidc(_) ->
         bondy_rbac:authorize(<<"wamp.publish">>, <<"com.admin.x">>, C)
     ).
 
-
-
 %% =============================================================================
 %% NESTED GROUP INHERITANCE
 %% =============================================================================
-
-
 
 nested_group_inheritance_deep(_) ->
     Uri = <<"com.test.deep_groups">>,
@@ -1203,7 +1165,6 @@ nested_group_inheritance_deep(_) ->
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.deep.resource">>, C)
     ).
-
 
 %% @doc Tests that `bondy_rbac:get_context/3` (the OIDC explicit-groups path)
 %% correctly computes the transitive closure of group inheritance up to 4
@@ -1368,19 +1329,14 @@ explicit_groups_deep_inheritance(_) ->
 
     ok.
 
-
-
 %% =============================================================================
 %% EXTERNALIZE GRANTS
 %% =============================================================================
 
-
-
 externalize_grant_formats(_) ->
     %% Test role + resource format
     Ext1 = bondy_rbac:externalize_grant(
-        {{<<"group/admin">>, {<<"com.api.">>, <<"prefix">>}},
-         [<<"wamp.call">>]}
+        {{<<"group/admin">>, {<<"com.api.">>, <<"prefix">>}}, [<<"wamp.call">>]}
     ),
     ?assertMatch(
         #{
@@ -1437,13 +1393,9 @@ externalize_grant_formats(_) ->
         Ext4
     ).
 
-
-
 %% =============================================================================
 %% GROUP DELETION CASCADES GRANTS
 %% =============================================================================
-
-
 
 group_deletion_cascades_grants(_) ->
     Uri = <<"com.test.group_delete_cascade">>,
@@ -1477,13 +1429,9 @@ group_deletion_cascades_grants(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.eph.x">>, C2)
     ).
 
-
-
 %% =============================================================================
 %% GRANT TO 'any' RESOURCE
 %% =============================================================================
-
-
 
 grant_to_any_resource(_) ->
     Uri = <<"com.test.any_resource">>,
@@ -1540,13 +1488,9 @@ grant_to_any_resource(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"totally.different">>, C2)
     ).
 
-
-
 %% =============================================================================
 %% SECURITY DISABLED
 %% =============================================================================
-
-
 
 security_disabled_allows_all(_) ->
     Uri = <<"com.test.sec_disabled">>,

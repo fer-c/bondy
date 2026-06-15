@@ -42,10 +42,13 @@ a node crash or manually stopped and re-started they will not be restarted.
         %% re-configured on restart, so we default all the dynamically created
         %% to transient too.
         default => transient,
-        datatype => {in, [
-            permanent, transient,
-            <<"permanent">>, <<"transient">>
-        ]},
+        datatype =>
+            {in, [
+                permanent,
+                transient,
+                <<"permanent">>,
+                <<"transient">>
+            ]},
         validator => fun
             (permanent) -> true;
             (transient) -> true;
@@ -126,13 +129,17 @@ a node crash or manually stopped and re-started they will not be restarted.
         alias => <<"reconnect">>,
         required => true,
         default => #{},
-        validator => begin ?RECONNECT_SPEC end
+        validator => begin
+            ?RECONNECT_SPEC
+        end
     },
     ping => #{
         alias => <<"ping">>,
         required => true,
         default => #{},
-        validator => begin ?PING_SPEC end
+        validator => begin
+            ?PING_SPEC
+        end
     },
     %% Client opts!
     tls_opts => #{
@@ -141,7 +148,9 @@ a node crash or manually stopped and re-started they will not be restarted.
         default => #{
             verify => verify_none
         },
-        validator => begin ?TLS_OPTS_SPEC end
+        validator => begin
+            ?TLS_OPTS_SPEC
+        end
     },
     socket_opts => #{
         alias => <<"socket_opts">>,
@@ -150,7 +159,9 @@ a node crash or manually stopped and re-started they will not be restarted.
             keepalive => true,
             nodelay => true
         },
-        validator => begin ?SOCKET_OPTS_SPEC end
+        validator => begin
+            ?SOCKET_OPTS_SPEC
+        end
     },
     parallelism => #{
         alias => <<"parallelism">>,
@@ -173,7 +184,10 @@ a node crash or manually stopped and re-started they will not be restarted.
     realms => #{
         alias => <<"realms">>,
         required => true,
-        validator => {list, begin ?REALM_SPEC end}
+        validator =>
+            {list, begin
+                ?REALM_SPEC
+            end}
     }
 }).
 
@@ -197,10 +211,13 @@ a node crash or manually stopped and re-started they will not be restarted.
         alias => <<"verify">>,
         required => true,
         default => verify_none,
-        datatype => {in, [
-            verify_peer, verify_none,
-            <<"verify_peer">>, <<"verify_none">>
-        ]},
+        datatype =>
+            {in, [
+                verify_peer,
+                verify_none,
+                <<"verify_peer">>,
+                <<"verify_none">>
+            ]},
         validator => fun
             (verify_peer) -> true;
             (verify_none) -> true;
@@ -214,10 +231,13 @@ a node crash or manually stopped and re-started they will not be restarted.
         %% We rename the prop
         key => customize_hostname_check,
         required => false,
-        datatype => {in, [
-            wildcard, none,
-            <<"wildcard">>, <<"none">>
-        ]},
+        datatype =>
+            {in, [
+                wildcard,
+                none,
+                <<"wildcard">>,
+                <<"none">>
+            ]},
         validator => fun
             (V) when V == <<"wildcard">>; V == wildcard ->
                 %% tls_options will end up having
@@ -235,11 +255,16 @@ a node crash or manually stopped and re-started they will not be restarted.
         alias => <<"versions">>,
         required => true,
         default => ['tlsv1.3'],
-        datatype => {list, {in, [
-            'tlsv1.2', 'tlsv1.3',
-            <<"tlsv1.2">>, <<"tlsv1.3">>,
-            <<"1.2">>, <<"1.3">>
-        ]}},
+        datatype =>
+            {list,
+                {in, [
+                    'tlsv1.2',
+                    'tlsv1.3',
+                    <<"tlsv1.2">>,
+                    <<"tlsv1.3">>,
+                    <<"1.2">>,
+                    <<"1.3">>
+                ]}},
         validator => fun bondy_data_validators:tls_versions/1
     }
 }).
@@ -261,10 +286,13 @@ a node crash or manually stopped and re-started they will not be restarted.
         alias => <<"backoff_type">>,
         required => true,
         default => jitter,
-        datatype => {in, [
-            'jitter', 'normal',
-            <<"jitter">>, <<"normal">>
-        ]},
+        datatype =>
+            {in, [
+                'jitter',
+                'normal',
+                <<"jitter">>,
+                <<"normal">>
+            ]},
         validator => fun
             (jitter) -> true;
             (normal) -> true;
@@ -363,7 +391,7 @@ a node crash or manually stopped and re-started they will not be restarted.
                         {ok, binary_to_list(Name)}
                 end
             },
-             %% For testing only, this will be removed on 1.0.0
+            %% For testing only, this will be removed on 1.0.0
             privkey => #{
                 alias => <<"privkey">>,
                 required => false,
@@ -385,14 +413,17 @@ a node crash or manually stopped and re-started they will not be restarted.
         alias => <<"procedures">>,
         required => true,
         default => [],
-        validator => begin {list, ?PROCEDURE_ACTION_SPEC} end
-
+        validator => begin
+            {list, ?PROCEDURE_ACTION_SPEC}
+        end
     },
     topics => #{
         alias => <<"topics">>,
         required => true,
         default => [],
-        validator => begin {list, ?TOPIC_ACTION_SPEC} end
+        validator => begin
+            {list, ?TOPIC_ACTION_SPEC}
+        end
     }
 }).
 
@@ -405,8 +436,12 @@ a node crash or manually stopped and re-started they will not be restarted.
     match => #{
         alias => <<"match">>,
         required => false,
-        default => begin ?EXACT_MATCH end,
-        datatype => begin {in, ?MATCH_STRATEGIES} end
+        default => begin
+            ?EXACT_MATCH
+        end,
+        datatype => begin
+            {in, ?MATCH_STRATEGIES}
+        end
     },
     direction => #{
         alias => <<"direction">>,
@@ -437,10 +472,13 @@ a node crash or manually stopped and re-started they will not be restarted.
     }
 }).
 
--define(TOPIC_ACTION_SPEC, begin ?ACTION_SPEC end #{
-}).
+-define(TOPIC_ACTION_SPEC, begin
+    ?ACTION_SPEC
+end#{}).
 
--define(PROCEDURE_ACTION_SPEC, begin ?ACTION_SPEC end #{
+-define(PROCEDURE_ACTION_SPEC, begin
+    ?ACTION_SPEC
+end#{
     registration => #{
         alias => <<"registration">>,
         required => false,
@@ -464,36 +502,36 @@ a node crash or manually stopped and re-started they will not be restarted.
 }).
 
 -type t() :: #{
-    name            :=  binary(),
-    nodestring      :=  binary(),
-    enabled         :=  boolean(),
-    restart         :=  restart(),
-    endpoint        :=  endpoint(),
-    transport       :=  tcp | tls,
-    reconnect       :=  reconnect(),
-    ping            :=  ping(),
-    tls_opts        :=  tls_opts(),
-    timeout         :=  timeout(),
-    idle_timeout    :=  timeout(),
-    parallelism     :=  pos_integer(),
-    max_frame_size  :=  pos_integer() | infinity,
-    realms          :=  [realm()]
+    name := binary(),
+    nodestring := binary(),
+    enabled := boolean(),
+    restart := restart(),
+    endpoint := endpoint(),
+    transport := tcp | tls,
+    reconnect := reconnect(),
+    ping := ping(),
+    tls_opts := tls_opts(),
+    timeout := timeout(),
+    idle_timeout := timeout(),
+    parallelism := pos_integer(),
+    max_frame_size := pos_integer() | infinity,
+    realms := [realm()]
 }.
 
--type endpoint()    ::  {
-                            inet:ip_address() | inet:hostname(),
-                            inet:port_number()
-                        }.
--type restart()     ::  permanent | transient.
--type realm()       ::  #{}.
--type reconnect()   ::  #{}.
--type ping()        ::  #{}.
--type tls_opts()    ::  #{
-    cacertfile      :=  file:filename_all(),
-    certfile        :=  file:filename_all(),
-    keyfile         :=  file:filename_all(),
-    verify          :=  ssl:verify_type(),
-    versions        :=  [ssl:tls_version()]
+-type endpoint() :: {
+    inet:ip_address() | inet:hostname(),
+    inet:port_number()
+}.
+-type restart() :: permanent | transient.
+-type realm() :: #{}.
+-type reconnect() :: #{}.
+-type ping() :: #{}.
+-type tls_opts() :: #{
+    cacertfile := file:filename_all(),
+    certfile := file:filename_all(),
+    keyfile := file:filename_all(),
+    verify := ssl:verify_type(),
+    versions := [ssl:tls_version()]
 }.
 
 % -export([fetch/1]).
@@ -507,34 +545,25 @@ a node crash or manually stopped and re-started they will not be restarted.
 -export([remove/1]).
 -export([to_external/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-
 
 -spec forward(Ref :: bondy_ref:t() | [bondy_ref:t()], Msg :: any()) ->
     ok.
 
 forward([], _) ->
     ok;
-
-forward([H|T], Msg) ->
+forward([H | T], Msg) ->
     ok = forward(H, Msg),
     forward(T, Msg);
-
 forward(Ref, Msg) ->
     bondy_bridge_relay_client:forward(Ref, Msg).
-
 
 -spec new(Data :: map()) -> t() | no_return().
 
 new(Data) ->
     type_and_version(maps_utils:validate(Data, ?BRIDGE_RELAY_SPEC)).
-
 
 -spec add(t()) -> ok | {error, already_exists | any()}.
 
@@ -547,12 +576,10 @@ add(#{type := ?TYPE, name := Name} = Bridge0) ->
             plum_db:put(?PLUMDB_PREFIX, Name, Bridge)
     end.
 
-
 -spec remove(Name :: binary()) -> ok.
 
 remove(Name) ->
     plum_db:delete(?PLUMDB_PREFIX, Name).
-
 
 -spec exists(Name :: binary()) -> boolean().
 
@@ -561,7 +588,6 @@ exists(Name) ->
         {ok, _} -> true;
         {error, not_found} -> false
     end.
-
 
 -spec lookup(Name :: binary()) -> {ok, t()} | {error, not_found}.
 
@@ -573,7 +599,6 @@ lookup(Name) ->
             {ok, Value}
     end.
 
-
 -spec list() -> [t()].
 
 list() ->
@@ -582,7 +607,6 @@ list() ->
         {remove_tombstones, true}
     ],
     [V || {_, V} <- plum_db:match(?PLUMDB_PREFIX, '_', PDBOpts)].
-
 
 -spec to_external(Bridge :: t()) -> map().
 
@@ -598,12 +622,9 @@ to_external(Bridge) ->
         endpoint => Endpoint
     }.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 type_and_version(Map) ->

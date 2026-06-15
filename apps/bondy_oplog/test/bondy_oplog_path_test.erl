@@ -7,15 +7,12 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-
 layout_defaults_to_sharded_test() ->
     ?assertEqual(sharded, bondy_oplog_path:layout(#{})).
-
 
 layout_reads_explicit_value_test() ->
     ?assertEqual(flat, bondy_oplog_path:layout(#{path_layout => flat})),
     ?assertEqual(sharded, bondy_oplog_path:layout(#{path_layout => sharded})).
-
 
 layout_rejects_unknown_value_test() ->
     ?assertError(
@@ -23,13 +20,11 @@ layout_rejects_unknown_value_test() ->
         bondy_oplog_path:layout(#{path_layout => bananas})
     ).
 
-
 flat_storage_path_test() ->
     Path = bondy_oplog_path:storage_path(<<"hello">>, <<"/data">>, flat),
     ?assertEqual(
         <<"/data/hello">>, unicode:characters_to_binary(Path)
     ).
-
 
 sharded_storage_path_test() ->
     %% sha256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e...
@@ -37,7 +32,6 @@ sharded_storage_path_test() ->
     ?assertEqual(
         <<"/data/2c/2cf2/hello">>, unicode:characters_to_binary(Path)
     ).
-
 
 instance_dir_resolves_layout_from_opts_test() ->
     Sharded = bondy_oplog_path:instance_dir(<<"hello">>, <<"/data">>, #{}),

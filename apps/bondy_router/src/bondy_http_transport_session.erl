@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_http_transport_session).
 -moduledoc """
 A gen_server implementing a per-transport session process for HTTP transports
@@ -94,25 +93,23 @@ For Longpoll transports, the gen_server additionally manages:
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
-
 -record(state, {
-    transport_id            ::  binary(),
-    realm_uri               ::  uri(),
-    session_id              ::  optional(bondy_session_id:t()),
-    created_at              ::  pos_integer(),
-    last_activity           ::  pos_integer(),
-    transport_ttl           ::  pos_integer(),
-    protocol_state          ::  optional(bondy_wamp_protocol:state()),
-    subprotocol             ::  optional(subprotocol()),
-    encoding                ::  optional(encoding()),
-    sse_pid                 ::  optional(pid()),
-    sse_monitor             ::  optional(reference()),
-    reply_buffer = []       ::  [binary()],
-    poll_from               ::  optional(gen_server:from()),
-    poll_timer              ::  optional(reference()),
-    auth_claims             ::  optional(map())
+    transport_id :: binary(),
+    realm_uri :: uri(),
+    session_id :: optional(bondy_session_id:t()),
+    created_at :: pos_integer(),
+    last_activity :: pos_integer(),
+    transport_ttl :: pos_integer(),
+    protocol_state :: optional(bondy_wamp_protocol:state()),
+    subprotocol :: optional(subprotocol()),
+    encoding :: optional(encoding()),
+    sse_pid :: optional(pid()),
+    sse_monitor :: optional(reference()),
+    reply_buffer = [] :: [binary()],
+    poll_from :: optional(gen_server:from()),
+    poll_timer :: optional(reference()),
+    auth_claims :: optional(map())
 }).
-
 
 %% API
 -export([auth_claims/1]).
@@ -137,20 +134,15 @@ For Longpoll transports, the gen_server additionally manages:
 -export([terminate/2]).
 -export([code_change/3]).
 
-
 %% Inactivity check interval (half the TTL, minimum 5 seconds)
 -define(MIN_CHECK_INTERVAL, 5000).
 
 %% Default batch size for dequeue operations
 -define(DEQUEUE_BATCH_SIZE, 50).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Starts a transport session gen_server.
@@ -164,14 +156,14 @@ transport queue via `bondy_transport_queue:init_transport/3`.
     SessionId :: bondy_session_id:t()
 ) -> {ok, pid()} | {error, term()}.
 
-start_link(TransportId, RealmUri, SessionId)
-when is_binary(TransportId) ->
+start_link(TransportId, RealmUri, SessionId) when
+    is_binary(TransportId)
+->
     gen_server:start_link(
         ?MODULE,
         [TransportId, RealmUri, SessionId],
         []
     ).
-
 
 -doc """
 Gracefully closes a transport session.
@@ -190,7 +182,6 @@ close(Pid) when is_pid(Pid) ->
         exit:{normal, _} ->
             ok
     end;
-
 close(TransportId) when is_binary(TransportId) ->
     case ?MODULE:whereis(TransportId) of
         undefined ->
@@ -198,7 +189,6 @@ close(TransportId) when is_binary(TransportId) ->
         Pid ->
             close(Pid)
     end.
-
 
 -doc """
 Looks up the pid of the transport session registered for `TransportId`.
@@ -215,7 +205,6 @@ whereis(TransportId) when is_binary(TransportId) ->
             undefined
     end.
 
-
 -doc """
 Updates the `last_activity` timestamp of the transport session.
 
@@ -225,7 +214,6 @@ Called by HTTP handlers on each request to reset the inactivity timer.
 
 touch(Pid) when is_pid(Pid) ->
     gen_server:cast(Pid, touch).
-
 
 -doc """
 Initialises the WAMP protocol state within the transport session.
@@ -241,7 +229,6 @@ that will be used for all subsequent message handling.
 
 init_protocol(Pid, Subprotocol, Peer) when is_pid(Pid) ->
     gen_server:call(Pid, {init_protocol, Subprotocol, Peer}).
-
 
 -doc """
 Processes an inbound WAMP message from the client.
@@ -259,7 +246,6 @@ is connected.
 handle_client_message(Pid, Data) when is_pid(Pid) andalso is_binary(Data) ->
     gen_server:call(Pid, {client_message, Data}).
 
-
 -doc """
 Registers the SSE stream pid with the transport session.
 
@@ -271,10 +257,10 @@ are flushed to the stream pid immediately.
     StreamPid :: pid()
 ) -> ok.
 
-register_sse_stream(SessionPid, StreamPid)
-when is_pid(SessionPid) andalso is_pid(StreamPid) ->
+register_sse_stream(SessionPid, StreamPid) when
+    is_pid(SessionPid) andalso is_pid(StreamPid)
+->
     gen_server:call(SessionPid, {register_sse_stream, StreamPid}).
-
 
 -doc """
 Notifies the transport session that a message was enqueued.
@@ -294,7 +280,6 @@ notify_enqueue(TransportId) when is_binary(TransportId) ->
             ok
     end.
 
-
 -doc """
 Blocking receive for longpoll transports.
 
@@ -310,10 +295,10 @@ or `{ok, {messages, []}}` on timeout.
     Timeout :: pos_integer()
 ) -> {ok, {replies, [binary()]} | {messages, [wamp_message()]}}.
 
-poll_receive(Pid, Timeout)
-when is_pid(Pid) andalso is_integer(Timeout) andalso Timeout > 0 ->
+poll_receive(Pid, Timeout) when
+    is_pid(Pid) andalso is_integer(Timeout) andalso Timeout > 0
+->
     gen_server:call(Pid, {poll_receive, Timeout}, Timeout + 5000).
-
 
 -doc """
 Async alternative to `poll_receive/2`.
@@ -324,10 +309,10 @@ is available or the timeout expires.
 """.
 -spec request_poll(Pid :: pid(), Timeout :: pos_integer()) -> ok.
 
-request_poll(Pid, Timeout)
-when is_pid(Pid) andalso is_integer(Timeout) andalso Timeout > 0 ->
+request_poll(Pid, Timeout) when
+    is_pid(Pid) andalso is_integer(Timeout) andalso Timeout > 0
+->
     gen_server:cast(Pid, {request_poll, Timeout, self()}).
-
 
 -doc """
 Returns the negotiated encoding for this transport session.
@@ -336,8 +321,6 @@ Returns the negotiated encoding for this transport session.
 
 encoding(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, encoding).
-
-
 
 -doc """
 Stores verified auth claims (from `bondy_ticket:verify/1`) in the transport
@@ -348,7 +331,6 @@ session. Used for cookie validation on subsequent requests.
 set_auth_claims(Pid, Claims) when is_pid(Pid) andalso is_map(Claims) ->
     gen_server:cast(Pid, {set_auth_claims, Claims}).
 
-
 -doc """
 Returns the stored auth claims for this transport session.
 """.
@@ -357,13 +339,9 @@ Returns the stored auth claims for this transport session.
 auth_claims(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, auth_claims).
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init([TransportId, RealmUri, SessionId]) ->
     process_flag(trap_exit, true),
@@ -372,7 +350,9 @@ init([TransportId, RealmUri, SessionId]) ->
     true = bondy_gproc:register({http_transport, TransportId}),
 
     %% Initialise the transport queue
-    case bondy_transport_queue:init_transport(TransportId, RealmUri, SessionId) of
+    case
+        bondy_transport_queue:init_transport(TransportId, RealmUri, SessionId)
+    of
         ok ->
             TTL = bondy_config:get([transport_queue, transport_ttl], 3600000),
             Now = erlang:system_time(millisecond),
@@ -388,13 +368,11 @@ init([TransportId, RealmUri, SessionId]) ->
 
             ok = schedule_inactivity_check(State),
             {ok, State};
-
         {error, already_exists} ->
             %% Clean up gproc and fail
             true = bondy_gproc:unregister({http_transport, TransportId}),
             {stop, {error, already_exists}}
     end.
-
 
 handle_call({init_protocol, Subprotocol, Peer}, _From, State) ->
     {TransportType, _, Enc} = Subprotocol,
@@ -413,15 +391,15 @@ handle_call({init_protocol, Subprotocol, Peer}, _From, State) ->
         {error, Reason, _ProtoState} ->
             {reply, {error, Reason}, State}
     end;
-
 handle_call({client_message, Data}, _From, State) ->
     #state{protocol_state = ProtoState0} = State,
-    ProtoState = case State#state.auth_claims of
-        undefined ->
-            ProtoState0;
-        Claims ->
-            bondy_wamp_protocol:set_auth_claims(Claims, ProtoState0)
-    end,
+    ProtoState =
+        case State#state.auth_claims of
+            undefined ->
+                ProtoState0;
+            Claims ->
+                bondy_wamp_protocol:set_auth_claims(Claims, ProtoState0)
+        end,
     try bondy_wamp_protocol:handle_inbound(Data, ProtoState) of
         {reply, Bins, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
@@ -454,7 +432,6 @@ handle_call({client_message, Data}, _From, State) ->
             }),
             {reply, {error, Reason}, State}
     end;
-
 handle_call({register_sse_stream, StreamPid}, _From, State) ->
     MonRef = erlang:monitor(process, StreamPid),
     %% Flush any buffered sync replies
@@ -469,7 +446,6 @@ handle_call({register_sse_stream, StreamPid}, _From, State) ->
         reply_buffer = []
     },
     {reply, ok, S1};
-
 handle_call({poll_receive, Timeout}, From, State) ->
     %% Check for buffered sync replies first.
     %% Return one reply at a time; the longpoll handler operates in unbatched
@@ -498,13 +474,10 @@ handle_call({poll_receive, Timeout}, From, State) ->
                     {noreply, S1}
             end
     end;
-
 handle_call(encoding, _From, State) ->
     {reply, State#state.encoding, State};
-
 handle_call(auth_claims, _From, State) ->
     {reply, State#state.auth_claims, State};
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -513,14 +486,11 @@ handle_call(Event, From, State) ->
     }),
     {noreply, State}.
 
-
 handle_cast(touch, State) ->
     Now = erlang:system_time(millisecond),
     {noreply, State#state{last_activity = Now}};
-
 handle_cast({set_auth_claims, Claims}, State) ->
     {noreply, State#state{auth_claims = Claims}};
-
 handle_cast({request_poll, Timeout, ReplyTo}, State) ->
     case State#state.reply_buffer of
         [_ | _] ->
@@ -545,7 +515,6 @@ handle_cast({request_poll, Timeout, ReplyTo}, State) ->
                     {noreply, S1}
             end
     end;
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -553,9 +522,9 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
-handle_info(queue_ready, #state{poll_from = {async, ReplyTo}} = State)
-when is_pid(ReplyTo) ->
+handle_info(queue_ready, #state{poll_from = {async, ReplyTo}} = State) when
+    is_pid(ReplyTo)
+->
     %% An async longpoll caller is waiting — dequeue and send message.
     TransportId = State#state.transport_id,
     Msgs = bondy_transport_queue:dequeue_batch(TransportId, 1),
@@ -563,9 +532,9 @@ when is_pid(ReplyTo) ->
     _ = erlang:cancel_timer(State#state.poll_timer),
     S1 = State#state{poll_from = undefined, poll_timer = undefined},
     {noreply, S1};
-
-handle_info(queue_ready, #state{poll_from = PollFrom} = State)
-when PollFrom =/= undefined ->
+handle_info(queue_ready, #state{poll_from = PollFrom} = State) when
+    PollFrom =/= undefined
+->
     %% A sync longpoll caller is waiting — dequeue one message and reply.
     %% Remaining messages stay in the queue for subsequent poll_receive calls.
     TransportId = State#state.transport_id,
@@ -574,16 +543,14 @@ when PollFrom =/= undefined ->
     _ = erlang:cancel_timer(State#state.poll_timer),
     S1 = State#state{poll_from = undefined, poll_timer = undefined},
     {noreply, S1};
-
-handle_info(queue_ready, #state{sse_pid = SsePid} = State)
-when is_pid(SsePid) ->
+handle_info(queue_ready, #state{sse_pid = SsePid} = State) when
+    is_pid(SsePid)
+->
     SsePid ! drain_queue,
     {noreply, State};
-
 handle_info(queue_ready, State) ->
     %% No SSE stream or longpoll caller, messages stay in queue
     {noreply, State};
-
 handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
     #state{protocol_state = ProtoState} = State,
     try bondy_wamp_protocol:handle_outbound(M, ProtoState) of
@@ -618,7 +585,6 @@ handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
             }),
             {noreply, State}
     end;
-
 handle_info(
     {poll_timeout, {async, ReplyTo} = From},
     #state{poll_from = From} = State
@@ -627,17 +593,14 @@ handle_info(
     ReplyTo ! {poll_result, {ok, {messages, []}}},
     S1 = State#state{poll_from = undefined, poll_timer = undefined},
     {noreply, S1};
-
 handle_info({poll_timeout, From}, #state{poll_from = From} = State) ->
     %% Sync longpoll timeout expired — reply with empty result
     gen_server:reply(From, {ok, {messages, []}}),
     S1 = State#state{poll_from = undefined, poll_timer = undefined},
     {noreply, S1};
-
 handle_info({poll_timeout, _StaleFrom}, State) ->
     %% Stale timeout for an already-completed poll, ignore
     {noreply, State};
-
 handle_info(
     {'DOWN', Ref, process, Pid, _Reason},
     #state{sse_pid = Pid, sse_monitor = Ref} = State
@@ -647,14 +610,13 @@ handle_info(
         sse_monitor = undefined
     },
     {noreply, S1};
-
-handle_info(check_inactivity, #state{sse_pid = SsePid} = State)
-when is_pid(SsePid) ->
+handle_info(check_inactivity, #state{sse_pid = SsePid} = State) when
+    is_pid(SsePid)
+->
     %% An SSE stream is connected — the session is actively serving events,
     %% so skip the inactivity check and reschedule.
     ok = schedule_inactivity_check(State),
     {noreply, State};
-
 handle_info(check_inactivity, State) ->
     #state{
         last_activity = LastActivity,
@@ -678,14 +640,12 @@ handle_info(check_inactivity, State) ->
             ok = schedule_inactivity_check(State),
             {noreply, State}
     end;
-
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Info
     }),
     {noreply, State}.
-
 
 terminate(_Reason, #state{transport_id = TransportId} = State) ->
     %% Cleanup transport queue FIRST — this is the most important cleanup
@@ -744,17 +704,12 @@ terminate(_Reason, #state{transport_id = TransportId} = State) ->
 
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 schedule_inactivity_check(#state{transport_ttl = TTL}) ->
@@ -763,40 +718,36 @@ schedule_inactivity_check(#state{transport_ttl = TTL}) ->
     _ = erlang:send_after(Interval, self(), check_inactivity),
     ok.
 
-
 %% @private
 forward_or_buffer(Bin, State) when is_binary(Bin) ->
     forward_or_buffer([Bin], State);
-
-forward_or_buffer(Bins, #state{sse_pid = SsePid} = State)
-when is_pid(SsePid) ->
+forward_or_buffer(Bins, #state{sse_pid = SsePid} = State) when
+    is_pid(SsePid)
+->
     lists:foreach(
         fun(Bin) -> SsePid ! {sync_reply, Bin} end,
         Bins
     ),
     State;
-
-forward_or_buffer(Bins, #state{poll_from = {async, ReplyTo}} = State)
-when is_pid(ReplyTo) ->
+forward_or_buffer(Bins, #state{poll_from = {async, ReplyTo}} = State) when
+    is_pid(ReplyTo)
+->
     %% An async longpoll caller is waiting — send sync replies via message
     ReplyTo ! {poll_result, {ok, {replies, Bins}}},
     _ = erlang:cancel_timer(State#state.poll_timer),
     State#state{poll_from = undefined, poll_timer = undefined};
-
-forward_or_buffer(Bins, #state{poll_from = PollFrom} = State)
-when PollFrom =/= undefined ->
+forward_or_buffer(Bins, #state{poll_from = PollFrom} = State) when
+    PollFrom =/= undefined
+->
     %% A sync longpoll caller is waiting — reply with sync replies directly
     gen_server:reply(PollFrom, {ok, {replies, Bins}}),
     _ = erlang:cancel_timer(State#state.poll_timer),
     State#state{poll_from = undefined, poll_timer = undefined};
-
 forward_or_buffer(Bins, #state{reply_buffer = Buf} = State) ->
     State#state{reply_buffer = lists:reverse(Bins) ++ Buf}.
-
 
 %% @private
 signal_sse_stop(FinalBins, #state{sse_pid = SsePid}) when is_pid(SsePid) ->
     SsePid ! {stop_stream, FinalBins};
-
 signal_sse_stop(_FinalBins, _State) ->
     ok.

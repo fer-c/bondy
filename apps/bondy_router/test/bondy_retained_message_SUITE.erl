@@ -8,8 +8,6 @@
 -include_lib("stdlib/include/assert.hrl").
 -compile([nowarn_export_all, export_all]).
 
-
-
 all() ->
     [
         {group, crud}
@@ -24,8 +22,6 @@ groups() ->
         ]}
     ].
 
-
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
@@ -33,8 +29,6 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     %% bondy_ct:stop_bondy(),
     {save_config, Config}.
-
-
 
 put(Config0) ->
     R = <<"com.leapsight.test">>,
@@ -51,11 +45,11 @@ put(Config0) ->
         begin
             Topic = <<"com.foo.bar.2.", (integer_to_binary(X))/binary>>,
             bondy_retained_message:put(R, Topic, Event, #{})
-        end || X <- lists:seq(1, 500)
+        end
+     || X <- lists:seq(1, 500)
     ],
     Config = [{realm, R}, {topic, T} | Config0],
     {save_config, Config}.
-
 
 exact_match(Config) ->
     SavedConfig = element(2, ?config(saved_config, Config)),
@@ -65,23 +59,24 @@ exact_match(Config) ->
     ?assertEqual(1, length(Result)),
     {save_config, SavedConfig}.
 
-
 prefix_match(Config) ->
     SavedConfig = element(2, ?config(saved_config, Config)),
     R = ?config(realm, SavedConfig),
     T = ?config(topic, SavedConfig),
-    {Result, _}  = bondy_retained_message:match(R, T, 1, <<"prefix">>),
+    {Result, _} = bondy_retained_message:match(R, T, 1, <<"prefix">>),
     ?assertEqual(3, length(Result)),
     {save_config, SavedConfig}.
-
 
 wildcard_match(Config) ->
     SavedConfig = element(2, ?config(saved_config, Config)),
     R = ?config(realm, SavedConfig),
     {Result, _} = bondy_retained_message:match(
-        R, <<"com...">>, 1, <<"wildcard">>),
+        R, <<"com...">>, 1, <<"wildcard">>
+    ),
     ?assertEqual(1, length(Result)),
-    {L1, C1} = bondy_retained_message:match(R, <<"com....">>, 1, <<"wildcard">>),
+    {L1, C1} = bondy_retained_message:match(
+        R, <<"com....">>, 1, <<"wildcard">>
+    ),
     ?assertEqual(100, length(L1)),
     {L2, C2} = bondy_retained_message:match(C1),
     ?assertEqual(100, length(L2)),

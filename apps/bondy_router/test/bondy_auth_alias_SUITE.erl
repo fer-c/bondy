@@ -89,28 +89,22 @@ all() ->
         context_user_id_is_username_not_alias
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.auth_alias">>,
     ok = add_realm(RealmUri),
-    [{realm_uri, RealmUri}|Config].
+    [{realm_uri, RealmUri} | Config].
 
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 add_realm(RealmUri) ->
     _ = bondy_realm:create(maps:merge(?REALM, #{uri => RealmUri})),
     ok.
 
-
-
 %% =============================================================================
 %% ORIGINAL TESTS (PRESERVED)
 %% =============================================================================
-
-
 
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -123,7 +117,6 @@ test_1(Config) ->
 
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, Alias, Roles, SourceIP),
 
-
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
@@ -132,42 +125,44 @@ test_1(Config) ->
     ok = bondy_rbac_user:remove_alias(RealmUri, ?U1, Alias),
 
     ?assertEqual(
-        {error,{no_such_user, Alias}},
+        {error, {no_such_user, Alias}},
         bondy_auth:init(SessionId, RealmUri, Alias, Roles, SourceIP)
     ).
-
 
 sso(_) ->
     SSOUri = <<"com.leapsight.test+auth_alias_sso">>,
     Uri = <<"com.leapsight.test+auth_alias">>,
 
-    _ = bondy_realm:create(maps:merge(?REALM, #{
-        uri => SSOUri,
-        is_sso_realm => true,
-        users => [],
-        sources => [
-            #{
-                usernames => <<"all">>,
-                authmethod => ?PASSWORD_AUTH,
-                cidr => <<"0.0.0.0/0">>
-            }
-        ]
-
-    })),
-    _ = bondy_realm:create(maps:merge(?REALM, #{
-        uri => Uri,
-        authmethods => [?PASSWORD_AUTH],
-        is_sso_realm => false,
-        sso_realm_uri => SSOUri,
-        users => [],
-        sources => [
-            #{
-                usernames => <<"all">>,
-                authmethod => ?PASSWORD_AUTH,
-                cidr => <<"0.0.0.0/0">>
-            }
-        ]
-    })),
+    _ = bondy_realm:create(
+        maps:merge(?REALM, #{
+            uri => SSOUri,
+            is_sso_realm => true,
+            users => [],
+            sources => [
+                #{
+                    usernames => <<"all">>,
+                    authmethod => ?PASSWORD_AUTH,
+                    cidr => <<"0.0.0.0/0">>
+                }
+            ]
+        })
+    ),
+    _ = bondy_realm:create(
+        maps:merge(?REALM, #{
+            uri => Uri,
+            authmethods => [?PASSWORD_AUTH],
+            is_sso_realm => false,
+            sso_realm_uri => SSOUri,
+            users => [],
+            sources => [
+                #{
+                    usernames => <<"all">>,
+                    authmethod => ?PASSWORD_AUTH,
+                    cidr => <<"0.0.0.0/0">>
+                }
+            ]
+        })
+    ),
 
     User = #{
         username => ?U1,
@@ -195,7 +190,6 @@ sso(_) ->
 
     ok = bondy_rbac_user:add_alias(Uri, ?U1, Alias),
 
-
     {ok, Ctxt3} = bondy_auth:init(SessionId, SSOUri, Alias, Roles, SourceIP),
     ?assertMatch(
         {ok, _, _},
@@ -211,21 +205,17 @@ sso(_) ->
     ok = bondy_rbac_user:remove_alias(Uri, ?U1, Alias),
 
     ?assertEqual(
-        {error,{no_such_user, Alias}},
+        {error, {no_such_user, Alias}},
         bondy_auth:init(SessionId, SSOUri, Alias, Roles, SourceIP)
     ),
     ?assertEqual(
-        {error,{no_such_user, Alias}},
+        {error, {no_such_user, Alias}},
         bondy_auth:init(SessionId, Uri, Alias, Roles, SourceIP)
     ).
-
-
 
 %% =============================================================================
 %% ALIAS AUTHENTICATION
 %% =============================================================================
-
-
 
 alias_auth_correct_password(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -244,7 +234,6 @@ alias_auth_correct_password(Config) ->
 
     ok = bondy_rbac_user:remove_alias(RealmUri, ?U1, Alias).
 
-
 alias_auth_wrong_password(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -262,13 +251,9 @@ alias_auth_wrong_password(Config) ->
 
     ok = bondy_rbac_user:remove_alias(RealmUri, ?U1, Alias).
 
-
-
 %% =============================================================================
 %% ALIAS LIFECYCLE
 %% =============================================================================
-
-
 
 remove_alias_then_fail(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -295,7 +280,6 @@ remove_alias_then_fail(Config) ->
         bondy_auth:init(SessionId, RealmUri, Alias, [], {127, 0, 0, 1})
     ).
 
-
 alias_not_found_after_remove(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -307,13 +291,9 @@ alias_not_found_after_remove(Config) ->
         bondy_auth:init(SessionId, RealmUri, Alias, [], {127, 0, 0, 1})
     ).
 
-
-
 %% =============================================================================
 %% MULTIPLE ALIASES
 %% =============================================================================
-
-
 
 multiple_aliases_same_user(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -359,13 +339,9 @@ multiple_aliases_same_user(Config) ->
 
     ok = bondy_rbac_user:remove_alias(RealmUri, ?U1, Alias2).
 
-
-
 %% =============================================================================
 %% ALIAS WITH CIDR RESTRICTION
 %% =============================================================================
-
-
 
 alias_respects_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -397,13 +373,9 @@ alias_respects_cidr(Config) ->
 
     ok = bondy_rbac_user:remove_alias(RealmUri, ?U2, Alias).
 
-
-
 %% =============================================================================
 %% CONTEXT VIA ALIAS
 %% =============================================================================
-
-
 
 context_user_id_is_username_not_alias(Config) ->
     RealmUri = ?config(realm_uri, Config),

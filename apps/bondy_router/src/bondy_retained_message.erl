@@ -19,42 +19,41 @@ moment.**
 -define(DB_PREFIX(Realm), {retained_messages, Realm}).
 
 -record(bondy_retained_message, {
-    valid_to            ::  pos_integer(),
-    publication_id      ::  id(),
-    match_opts          ::  map(),
+    valid_to :: pos_integer(),
+    publication_id :: id(),
+    match_opts :: map(),
     %% Decoded payload
-    details             ::  map(),
-    args                ::  list() | undefined,
-    kwargs              ::  map() | undefined,
-    partial             ::  bondy_wamp_message:partial(),
+    details :: map(),
+    args :: list() | undefined,
+    kwargs :: map() | undefined,
+    partial :: bondy_wamp_message:partial(),
     %% Encoded payload
-    payload             ::  binary() | undefined
+    payload :: binary() | undefined
 }).
 
 -record(bondy_retained_continuation, {
-    realm               ::  binary(),
-    topic               ::  binary(),
-    session_id          ::  id(),
-    strategy            ::  binary(),
-    opts                ::  list()
+    realm :: binary(),
+    topic :: binary(),
+    session_id :: id(),
+    strategy :: binary(),
+    opts :: list()
 }).
 
 -define(RESOLVER, lww).
 
--type t()               ::  #bondy_retained_message{}.
--type eot()             ::  ?EOT.
--type continuation()    ::  #bondy_retained_continuation{}.
--type match_opts()      ::  #{
+-type t() :: #bondy_retained_message{}.
+-type eot() :: ?EOT.
+-type continuation() :: #bondy_retained_continuation{}.
+-type match_opts() :: #{
     eligible => [id()],
     exclude => [id()]
 }.
--type evict_fun()       ::  fun((uri(), t()) -> ok).
+-type evict_fun() :: fun((uri(), t()) -> ok).
 
 -export_type([t/0]).
 -export_type([match_opts/0]).
 -export_type([eot/0]).
 -export_type([continuation/0]).
-
 
 -export([evict_expired/0]).
 -export([evict_expired/1]).
@@ -69,13 +68,9 @@ moment.**
 -export([to_event/2]).
 -export([size/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec get(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
@@ -83,28 +78,23 @@ get(Realm, Topic) ->
     Opts = [{resolver, ?RESOLVER}],
     plum_db:get(?DB_PREFIX(Realm), Topic, Opts).
 
-
 -spec take(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 take(Realm, Topic) ->
     Opts = [{resolver, ?RESOLVER}],
     plum_db:take(?DB_PREFIX(Realm), Topic, Opts).
 
-
 -spec size(t()) -> integer().
 
 size(Mssg) ->
     term_size(Mssg).
 
-
 -spec match(continuation() | eot()) -> {[t()] | continuation()} | eot().
 
 match(?EOT) ->
     ?EOT;
-
 match(#bondy_retained_continuation{opts = undefined}) ->
     ?EOT;
-
 match(#bondy_retained_continuation{} = Cont) ->
     Realm = Cont#bondy_retained_continuation.realm,
     Topic = Cont#bondy_retained_continuation.topic,
@@ -113,50 +103,51 @@ match(#bondy_retained_continuation{} = Cont) ->
     Opts = Cont#bondy_retained_continuation.opts,
     match(Realm, Topic, SessionId, Strategy, Opts).
 
-
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
     SessionId :: id(),
-    Strategy :: binary()) ->
+    Strategy :: binary()
+) ->
     {[t()], continuation()} | eot().
 
 match(Realm, Topic, SessionId, Strategy) ->
     match(Realm, Topic, SessionId, Strategy, [{limit, 100}]).
-
 
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
     SessionId :: id(),
     Strategy :: binary(),
-    Opts :: plum_db:fold_opts()) ->
+    Opts :: plum_db:fold_opts()
+) ->
     {[t()], continuation()} | eot().
 
 match(Realm, Topic, SessionId, <<"exact">>, _) ->
     Result = get(Realm, Topic),
     {Matches, _} = maybe_append(Result, SessionId, {[], 0}),
     {Matches, ?EOT};
-
 match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
     Len = byte_size(Topic),
     Opts = key_value:set(first, key_value:get(first, Opts0, Topic), Opts0),
     Limit = key_value:get(limit, Opts, 100),
 
     Fun = fun
-        ({{_, <<Prefix:Len/binary, _/binary>>}, Obj}, {_, Cnt} = Acc)
-        when Prefix =:= Topic andalso Cnt < Limit ->
+        ({{_, <<Prefix:Len/binary, _/binary>>}, Obj}, {_, Cnt} = Acc) when
+            Prefix =:= Topic andalso Cnt < Limit
+        ->
             Result = plum_db_object:value(
                 plum_db_object:resolve(Obj, ?RESOLVER)
             ),
             maybe_append(Result, SessionId, Acc);
-        ({{_, <<Prefix:Len/binary, _/binary>> = Key}, _}, {List, _})
-        when Prefix =:= Topic ->
+        ({{_, <<Prefix:Len/binary, _/binary>> = Key}, _}, {List, _}) when
+            Prefix =:= Topic
+        ->
             Cont = #bondy_retained_continuation{
                 realm = Realm,
                 topic = Topic,
                 session_id = SessionId,
-                strategy  = Strategy,
+                strategy = Strategy,
                 opts = key_value:set(first, Key, Opts)
             },
             throw({break, {List, Cont}});
@@ -169,7 +160,6 @@ match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
         Other ->
             Other
     end;
-
 match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
     {First, MatchFun} = wildcard_opts(Topic),
     Opts = key_value:set(first, key_value:get(first, Opts0, First), Opts0),
@@ -193,7 +183,7 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
                 realm = Realm,
                 topic = Topic,
                 session_id = SessionId,
-                strategy  = Strategy,
+                strategy = Strategy,
                 opts = key_value:set(first, Key, Opts)
             },
             throw({break, {List, Cont}})
@@ -206,24 +196,23 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
             Other
     end.
 
-
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
     Event :: wamp_event(),
-    MatchOpts :: match_opts()) -> ok.
+    MatchOpts :: match_opts()
+) -> ok.
 
 put(Realm, Topic, Event, MatchOpts) ->
     put(Realm, Topic, Event, MatchOpts, 0).
-
 
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
     Event :: wamp_event(),
     MatchOpts :: match_opts(),
-    TTL :: non_neg_integer()) -> ok.
-
+    TTL :: non_neg_integer()
+) -> ok.
 
 put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     Retained = new(Event, MatchOpts, TTL),
@@ -244,8 +233,6 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
             Retained
     end,
 
-
-
     %% TODO This will never scale as plumdb (due to replication and
     %% multi-versioning) cannot scale to high-frequency writes.
     %% We should either implement a partial replication mechanism and sessions
@@ -256,7 +243,6 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     %% minute do we want as resolution.
 
     plum_db:put(?DB_PREFIX(Realm), Topic, Modifier).
-
 
 -spec to_event(Retained :: t(), SubscriptionId :: id()) -> wamp_event().
 
@@ -279,7 +265,6 @@ Evict expired retained messages from all realms.
 evict_expired() ->
     evict_expired('_').
 
-
 -doc """
 Evict expired retained messages from realm `Realm`.
 """.
@@ -288,7 +273,6 @@ Evict expired retained messages from realm `Realm`.
 evict_expired(Realm) ->
     evict_expired(Realm, undefined).
 
-
 -doc """
 Evict expired retained messages from realm `Realm` or all realms if
 wildcard `'_'` is used.
@@ -296,14 +280,17 @@ Evaluates function `Fun` for each entry passing `Realm` and `Entry` as arguments
 """.
 -spec evict_expired(uri() | '_', evict_fun() | undefined) -> non_neg_integer().
 
-evict_expired(Realm, EvictFun)
-when is_binary(Realm) orelse Realm == '_'
-andalso is_function(EvictFun, 2) ->
+evict_expired(Realm, EvictFun) when
+    is_binary(Realm) orelse
+        Realm == '_' andalso
+            is_function(EvictFun, 2)
+->
     Now = erlang:system_time(second),
     Fun = fun({{FP, Key}, Obj}, Acc) ->
         case plum_db_object:value(plum_db_object:resolve(Obj, ?RESOLVER)) of
-            #bondy_retained_message{valid_to = T} = Mssg
-            when T > 0 andalso T =< Now  ->
+            #bondy_retained_message{valid_to = T} = Mssg when
+                T > 0 andalso T =< Now
+            ->
                 _ = plum_db:delete(FP, Key),
                 ok = maybe_eval(Realm, EvictFun, Mssg),
                 Acc + 1;
@@ -313,18 +300,17 @@ andalso is_function(EvictFun, 2) ->
     end,
     plum_db:fold_elements(Fun, 0, ?DB_PREFIX(Realm)).
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 -spec new(
-    Event :: wamp_event(), MatchOps :: map(), TTL :: non_neg_integer()) -> t().
+    Event :: wamp_event(), MatchOps :: map(), TTL :: non_neg_integer()
+) -> t().
 
-new(#event{} = Event, MatchOps, TTL)
-when is_map(MatchOps) andalso is_integer(TTL) andalso TTL >= 0 ->
+new(#event{} = Event, MatchOps, TTL) when
+    is_map(MatchOps) andalso is_integer(TTL) andalso TTL >= 0
+->
     %% Todo manage alternative when event has encoded payload in the future
     #bondy_retained_message{
         valid_to = valid_to(TTL),
@@ -336,13 +322,11 @@ when is_map(MatchOps) andalso is_integer(TTL) andalso TTL >= 0 ->
         partial = Event#event.partial
     }.
 
-
 %% @private
 valid_to(0) ->
     0;
 valid_to(TTL) ->
     erlang:system_time(second) + TTL.
-
 
 %% @private
 -spec wildcard_opts(binary()) -> {binary(), fun((binary()) -> boolean())}.
@@ -350,7 +334,6 @@ valid_to(TTL) ->
 wildcard_opts(<<$., _/binary>> = Bin) ->
     Components = binary:split(Bin, [<<$.>>], [global]),
     {<<>>, match_fun(Components)};
-
 wildcard_opts(Bin) ->
     case binary:match(Bin, [<<"..">>]) of
         nomatch ->
@@ -360,7 +343,6 @@ wildcard_opts(Bin) ->
             Components = binary:split(Bin, [<<$.>>], [global]),
             {First, match_fun(Components)}
     end.
-
 
 match_fun(Components) ->
     Len = length(Components),
@@ -376,7 +358,6 @@ match_fun(Components) ->
         end
     end.
 
-
 %% @private
 -doc """
 Returns true if both lists have the same length and if each element of
@@ -386,22 +367,16 @@ empty binary (wildcard).
 """.
 subsumes(Term, Term) ->
     true;
-
 subsumes(H1, H2) when length(H1) =/= length(H2) ->
     false;
-
-subsumes([H|T1], [H|T2]) ->
+subsumes([H | T1], [H | T2]) ->
     subsumes(T1, T2);
-
-subsumes([<<>>|T1], [_|T2]) ->
+subsumes([<<>> | T1], [_ | T2]) ->
     subsumes(T1, T2);
-
 subsumes([], []) ->
     true;
-
 subsumes(_, _) ->
     false.
-
 
 %% @private
 maybe_append(#bondy_retained_message{} = Event, SessionId, {List, Cnt} = Acc) ->
@@ -415,11 +390,8 @@ maybe_append(#bondy_retained_message{} = Event, SessionId, {List, Cnt} = Acc) ->
         throw:break ->
             Acc
     end;
-
 maybe_append(_, _, Acc) ->
     Acc.
-
-
 
 %% @private
 is_eligible(SessionId, Opts) ->
@@ -433,7 +405,6 @@ is_eligible(SessionId, Opts) ->
         error ->
             true
     end.
-
 
 %% @private
 is_excluded(SessionId, Opts) ->
@@ -450,11 +421,9 @@ is_excluded(SessionId, Opts) ->
 is_expired(#bondy_retained_message{valid_to = T}) ->
     T > 0 andalso T =< erlang:system_time(second).
 
-
 %% @private
 maybe_eval(_, undefined, _) ->
     ok;
-
 maybe_eval(Realm, Fun, Mssg) ->
     try
         Fun(Realm, Mssg)
@@ -468,7 +437,6 @@ maybe_eval(Realm, Fun, Mssg) ->
             }),
             ok
     end.
-
 
 %% @private
 term_size(Term) ->

@@ -17,41 +17,34 @@ legacy procedure URIs to their current equivalents.
 -export([handle_call/2]).
 -export([resolve/1]).
 
-
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
 
-
-
 -callback handle_call(
     Procedure :: uri(),
     M :: bondy_wamp_message:call(),
-    Ctxt :: bondy_context:t()) ->
+    Ctxt :: bondy_context:t()
+) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-
 
 -spec handle_call(M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(#call{options = #{ppt_scheme := _}} = Msg, _) ->
@@ -63,92 +56,68 @@ handle_call(#call{options = #{ppt_scheme := _}} = Msg, _) ->
         [~"Payload Passthru Mode is not supported on Bondy Meta API."]
     ),
     {reply, Error};
-
 handle_call(#call{procedure_uri = Proc} = M0, Ctxt) ->
     %% We make sure the partial payload is decoded (if any)
     M = bondy_wamp_message:decode_partial(M0),
     do_handle_call(resolve(Proc), M, Ctxt).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 -spec do_handle_call(
-    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()
+) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
 
 do_handle_call(<<"bondy.ping">>, M, _Ctxt) ->
     %% Always authorized
     R = bondy_wamp_message:result(M#call.request_id, #{}, [~"pong"]),
     {reply, R};
-
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
     bondy_backup_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.cert_manager.", _/binary>> = Proc, M, Ctxt) ->
     bondy_cert_manager_wamp_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->
     bondy_cluster_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.grant.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
     bondy_http_gateway_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
     bondy_oauth2_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
     bondy_realm_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.session.", _/binary>> = Proc, M, Ctxt) ->
     bondy_session_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.registration.", _/binary>> = Proc, M, Ctxt) ->
     bondy_registry_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.router.bridge.", _/binary>> = Proc, M, Ctxt) ->
     bondy_bridge_relay_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.subscription.", _/binary>> = Proc, M, Ctxt) ->
     bondy_registry_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.telemetry.", _/binary>> = Proc, M, Ctxt) ->
     bondy_telemetry_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.ticket.", _/binary>> = Proc, M, Ctxt) ->
     bondy_ticket_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.user.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
-
 do_handle_call(<<"bondy.", _/binary>>, M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
-
-
 
 %% @private
 -doc """
@@ -254,6 +223,3 @@ resolve(?BONDY_REGISTRY_CALLEE_LIST_OLD) ->
     ?BONDY_REGISTRATION_CALLEE_LIST;
 resolve(Uri) ->
     Uri.
-
-
-

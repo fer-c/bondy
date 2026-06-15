@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_oidc_provider).
 -moduledoc """
 Manages OIDC provider configuration and `oidcc_provider_configuration_worker`
@@ -17,7 +16,6 @@ periodically refreshes the provider metadata (JWKS, endpoints).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
-
 %% API
 -export([get_client_context/2]).
 -export([get_provider_config/2]).
@@ -26,13 +24,9 @@ periodically refreshes the provider metadata (JWKS, endpoints).
 -export([start_provider_worker/3]).
 -export([stop_provider_worker/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Starts an `oidcc_provider_configuration_worker` for the given provider.
@@ -47,15 +41,15 @@ If a worker is already running for this (realm, provider) pair, returns
     Config :: map()
 ) -> {ok, pid()} | {error, term()}.
 
-start_provider_worker(RealmUri, ProviderName, Config)
-when is_binary(RealmUri) andalso is_binary(ProviderName) andalso is_map(Config) ->
+start_provider_worker(RealmUri, ProviderName, Config) when
+    is_binary(RealmUri) andalso is_binary(ProviderName) andalso is_map(Config)
+->
     case whereis_worker(RealmUri, ProviderName) of
         undefined ->
             do_start_worker(RealmUri, ProviderName, Config);
         Pid ->
             {ok, Pid}
     end.
-
 
 -doc """
 Stops the provider configuration worker for the given (realm, provider) pair.
@@ -65,8 +59,9 @@ Stops the provider configuration worker for the given (realm, provider) pair.
     ProviderName :: binary()
 ) -> ok.
 
-stop_provider_worker(RealmUri, ProviderName)
-when is_binary(RealmUri) andalso is_binary(ProviderName) ->
+stop_provider_worker(RealmUri, ProviderName) when
+    is_binary(RealmUri) andalso is_binary(ProviderName)
+->
     case whereis_worker(RealmUri, ProviderName) of
         undefined ->
             ok;
@@ -79,7 +74,6 @@ when is_binary(RealmUri) andalso is_binary(ProviderName) ->
             end
     end.
 
-
 -doc """
 Returns an `oidcc_client_context` for the given (realm, provider) pair.
 
@@ -90,8 +84,9 @@ Lazily starts the provider worker if needed.
     ProviderName :: binary()
 ) -> {ok, oidcc_client_context:t()} | {error, term()}.
 
-get_client_context(RealmUri, ProviderName)
-when is_binary(RealmUri) andalso is_binary(ProviderName) ->
+get_client_context(RealmUri, ProviderName) when
+    is_binary(RealmUri) andalso is_binary(ProviderName)
+->
     case get_provider_config(RealmUri, ProviderName) of
         {ok, #{client_id := ClientId, client_secret := ClientSecret} = Config} ->
             Pid = ensure_worker(RealmUri, ProviderName, Config),
@@ -115,7 +110,6 @@ when is_binary(RealmUri) andalso is_binary(ProviderName) ->
             Error
     end.
 
-
 -doc """
 Looks up provider configuration from the realm.
 """.
@@ -124,8 +118,9 @@ Looks up provider configuration from the realm.
     ProviderName :: binary()
 ) -> {ok, map()} | {error, not_found | {no_such_realm, uri()}}.
 
-get_provider_config(RealmUri, ProviderName)
-when is_binary(RealmUri) andalso is_binary(ProviderName) ->
+get_provider_config(RealmUri, ProviderName) when
+    is_binary(RealmUri) andalso is_binary(ProviderName)
+->
     try
         Realm = bondy_realm:fetch(RealmUri),
         bondy_realm:get_oidc_provider(Realm, ProviderName)
@@ -133,8 +128,6 @@ when is_binary(RealmUri) andalso is_binary(ProviderName) ->
         error:{no_such_realm, _} = Reason ->
             {error, Reason}
     end.
-
-
 
 -doc """
 Returns a JWKS refresh function for the given (realm, provider) pair.
@@ -148,8 +141,9 @@ JWKS re-fetch from the provider.
     ProviderName :: binary()
 ) -> {ok, oidcc_jwt_util:refresh_jwks_for_unknown_kid_fun()} | {error, term()}.
 
-get_refresh_jwks_fun(RealmUri, ProviderName)
-when is_binary(RealmUri) andalso is_binary(ProviderName) ->
+get_refresh_jwks_fun(RealmUri, ProviderName) when
+    is_binary(RealmUri) andalso is_binary(ProviderName)
+->
     case get_provider_config(RealmUri, ProviderName) of
         {ok, Config} ->
             Pid = ensure_worker(RealmUri, ProviderName, Config),
@@ -157,7 +151,6 @@ when is_binary(RealmUri) andalso is_binary(ProviderName) ->
         {error, _} = Error ->
             Error
     end.
-
 
 -doc """
 Returns the `request_opts` map (including SSL options) for the given provider
@@ -173,12 +166,9 @@ request_opts(#{issuer := Issuer} = Config) ->
     AllowUnsafeHttp = maps:get(allow_unsafe_http, Config, false),
     #{ssl => ssl_opts(Issuer, AllowUnsafeHttp)}.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 whereis_worker(RealmUri, ProviderName) ->
@@ -189,7 +179,6 @@ whereis_worker(RealmUri, ProviderName) ->
         error:badarg ->
             undefined
     end.
-
 
 %% @private
 ensure_worker(RealmUri, ProviderName, Config) ->
@@ -203,12 +192,12 @@ ensure_worker(RealmUri, ProviderName, Config) ->
             Pid
     end.
 
-
 %% @private
 do_start_worker(RealmUri, ProviderName, Config) ->
     #{issuer := Issuer} = Config,
 
-    GprocName = {via, gproc, {n, l, {bondy_oidc_provider, RealmUri, ProviderName}}},
+    GprocName =
+        {via, gproc, {n, l, {bondy_oidc_provider, RealmUri, ProviderName}}},
 
     AllowUnsafeHttp = maps:get(allow_unsafe_http, Config, false),
 
@@ -251,7 +240,6 @@ do_start_worker(RealmUri, ProviderName, Config) ->
             Error
     end.
 
-
 %% @private
 %% Returns SSL options for httpc requests to the OIDC provider.
 %% We must always provide explicit ssl options because httpc computes default
@@ -266,14 +254,12 @@ ssl_opts(Issuer, _AllowUnsafeHttp) when is_binary(Issuer) ->
             bondy_cert_manager:ssl_opts()
     end.
 
-
 %% @private
 %% Waits for the provider worker to finish loading its configuration and JWKS.
 %% The oidcc worker loads these in handle_continue after init, so gen_server
 %% calls will time out until both are done.
 await_worker_ready(Pid, RealmUri, ProviderName) ->
     await_worker_ready(Pid, RealmUri, ProviderName, 10).
-
 
 %% @private
 await_worker_ready(_Pid, RealmUri, ProviderName, 0) ->
@@ -283,7 +269,6 @@ await_worker_ready(_Pid, RealmUri, ProviderName, 0) ->
         provider => ProviderName
     }),
     {error, {provider_not_ready, ProviderName}};
-
 await_worker_ready(Pid, RealmUri, ProviderName, Retries) ->
     try
         case gen_server:call(Pid, get_provider_configuration, 3000) of

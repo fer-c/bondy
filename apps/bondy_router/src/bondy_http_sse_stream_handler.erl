@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_http_sse_stream_handler).
 -moduledoc """
 A `cowboy_loop` handler for SSE (Server-Sent Events) streams.
@@ -26,31 +25,24 @@ intermediaries from closing the connection.
 -include("bondy.hrl").
 -include("http_api.hrl").
 
-
 -record(state, {
-    transport_id            ::  binary(),
-    session_pid             ::  pid(),
-    session_mon             ::  reference(),
-    encoding                ::  encoding(),
-    keepalive_ref           ::  optional(reference())
+    transport_id :: binary(),
+    session_pid :: pid(),
+    session_mon :: reference(),
+    encoding :: encoding(),
+    keepalive_ref :: optional(reference())
 }).
-
 
 -define(DEFAULT_KEEPALIVE_INTERVAL, 15000).
 -define(DRAIN_BATCH_SIZE, 50).
-
 
 -export([init/2]).
 -export([info/3]).
 -export([terminate/3]).
 
-
-
 %% =============================================================================
 %% COWBOY LOOP CALLBACKS
 %% =============================================================================
-
-
 
 init(Req0, Opts) ->
     CorsConfig = bondy_http_cors:config_from_req(Req0),
@@ -70,7 +62,6 @@ init(Req0, Opts) ->
                 Req1
             ),
             {ok, Req, Opts};
-
         SessionPid ->
             case validate_sse_auth(SessionPid, Req1) of
                 {error, unauthorized} ->
@@ -117,8 +108,8 @@ init(Req0, Opts) ->
                     ),
                     ok = cowboy_req:cast(
                         {set_options, #{
-                          idle_timeout => IdleTimeout,
-                          reset_idle_timeout_on_send => ResetOnSend
+                            idle_timeout => IdleTimeout,
+                            reset_idle_timeout_on_send => ResetOnSend
                         }},
                         Req
                     ),
@@ -139,7 +130,6 @@ init(Req0, Opts) ->
             end
     end.
 
-
 info({sync_reply, Bin}, Req, State) ->
     ok = cowboy_req:stream_events(
         #{event => <<"wamp">>, data => Bin},
@@ -147,7 +137,6 @@ info({sync_reply, Bin}, Req, State) ->
         Req
     ),
     {ok, Req, State};
-
 info(drain_queue, Req, #state{transport_id = TransportId} = State) ->
     Messages = bondy_transport_queue:dequeue_batch(
         TransportId, ?DRAIN_BATCH_SIZE
@@ -161,7 +150,6 @@ info(drain_queue, Req, #state{transport_id = TransportId} = State) ->
             ok
     end,
     {ok, Req, State};
-
 info(keepalive, Req, State) ->
     ok = cowboy_req:stream_events(
         #{comment => <<"keepalive">>},
@@ -170,7 +158,6 @@ info(keepalive, Req, State) ->
     ),
     KeepaliveRef = schedule_keepalive(),
     {ok, Req, State#state{keepalive_ref = KeepaliveRef}};
-
 info(
     {'DOWN', Ref, process, Pid, _Reason},
     Req,
@@ -182,7 +169,6 @@ info(
         Req
     ),
     {stop, Req, State};
-
 info({stop_stream, FinalBins}, Req, State) ->
     lists:foreach(
         fun(Bin) ->
@@ -195,25 +181,18 @@ info({stop_stream, FinalBins}, Req, State) ->
         FinalBins
     ),
     {stop, Req, State};
-
 info(_Msg, Req, State) ->
     {ok, Req, State}.
-
 
 terminate(_Reason, _Req, #state{keepalive_ref = Ref}) when is_reference(Ref) ->
     _ = erlang:cancel_timer(Ref),
     ok;
-
 terminate(_Reason, _Req, _State) ->
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 validate_sse_auth(SessionPid, Req) ->
@@ -235,8 +214,10 @@ validate_sse_auth(SessionPid, Req) ->
                                 authid := ExpAuthid,
                                 authrealm := ExpAuthrealm
                             } = StoredClaims,
-                            case Authid =:= ExpAuthid
-                                    andalso Authrealm2 =:= ExpAuthrealm of
+                            case
+                                Authid =:= ExpAuthid andalso
+                                    Authrealm2 =:= ExpAuthrealm
+                            of
                                 true -> ok;
                                 false -> {error, unauthorized}
                             end;
@@ -246,7 +227,6 @@ validate_sse_auth(SessionPid, Req) ->
             end
     end.
 
-
 %% @private
 schedule_keepalive() ->
     Interval = bondy_config:get(
@@ -254,11 +234,9 @@ schedule_keepalive() ->
     ),
     erlang:send_after(Interval, self(), keepalive).
 
-
 %% @private
 send_wamp_events([], _Req, _State) ->
     ok;
-
 send_wamp_events(Messages, Req, #state{encoding = Encoding}) ->
     Events = lists:map(
         fun(Msg) ->
@@ -268,5 +246,3 @@ send_wamp_events(Messages, Req, #state{encoding = Encoding}) ->
         Messages
     ),
     cowboy_req:stream_events(Events, nofin, Req).
-
-

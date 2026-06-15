@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_oidc_state).
 -moduledoc """
 ETS-based storage for OIDC authorization state during the auth code flow.
@@ -21,22 +20,22 @@ The ETS table is owned by a gen_server that handles periodic cleanup.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(TABLE, ?MODULE).
--define(TTL_MS, 300_000). %% 5 minutes
--define(CLEANUP_INTERVAL_MS, 60_000). %% 1 minute
-
+%% 5 minutes
+-define(TTL_MS, 300_000).
+%% 1 minute
+-define(CLEANUP_INTERVAL_MS, 60_000).
 
 -record(oidc_state, {
-    state_token             ::  binary(),
-    nonce                   ::  binary(),
-    code_verifier           ::  binary(),
-    provider_name           ::  binary(),
-    realm_uri               ::  uri(),
-    redirect_uri            ::  binary(),
-    client_id               ::  binary(),
-    device_id               ::  binary(),
-    created_at              ::  pos_integer()
+    state_token :: binary(),
+    nonce :: binary(),
+    code_verifier :: binary(),
+    provider_name :: binary(),
+    realm_uri :: uri(),
+    redirect_uri :: binary(),
+    client_id :: binary(),
+    device_id :: binary(),
+    created_at :: pos_integer()
 }).
-
 
 %% API
 -export([new/8]).
@@ -53,13 +52,9 @@ The ETS table is owned by a gen_server that handles periodic cleanup.
 -export([handle_info/2]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Stores a new OIDC authorization state entry.
@@ -77,12 +72,21 @@ The entry will be automatically cleaned up after 5 minutes.
     DeviceId :: binary()
 ) -> ok.
 
-new(StateToken, Nonce, CodeVerifier, ProviderName, RealmUri, RedirectUri,
-    ClientId, DeviceId)
-when is_binary(StateToken) andalso is_binary(Nonce)
-andalso is_binary(CodeVerifier) andalso is_binary(ProviderName)
-andalso is_binary(RealmUri) andalso is_binary(RedirectUri)
-andalso is_binary(ClientId) andalso is_binary(DeviceId) ->
+new(
+    StateToken,
+    Nonce,
+    CodeVerifier,
+    ProviderName,
+    RealmUri,
+    RedirectUri,
+    ClientId,
+    DeviceId
+) when
+    is_binary(StateToken) andalso is_binary(Nonce) andalso
+        is_binary(CodeVerifier) andalso is_binary(ProviderName) andalso
+        is_binary(RealmUri) andalso is_binary(RedirectUri) andalso
+        is_binary(ClientId) andalso is_binary(DeviceId)
+->
     Entry = #oidc_state{
         state_token = StateToken,
         nonce = Nonce,
@@ -96,7 +100,6 @@ andalso is_binary(ClientId) andalso is_binary(DeviceId) ->
     },
     true = ets:insert(?TABLE, Entry),
     ok.
-
 
 -doc """
 Retrieves and deletes an OIDC authorization state entry (single-use).
@@ -129,7 +132,6 @@ take(StateToken) when is_binary(StateToken) ->
             {error, not_found}
     end.
 
-
 -doc """
 Removes all expired entries from the ETS table.
 """.
@@ -137,32 +139,26 @@ Removes all expired entries from the ETS table.
 
 cleanup_expired() ->
     Cutoff = erlang:system_time(millisecond) - ?TTL_MS,
-    MS = [{
-        #oidc_state{created_at = '$1', _ = '_'},
-        [{'<', '$1', Cutoff}],
-        [true]
-    }],
+    MS = [
+        {
+            #oidc_state{created_at = '$1', _ = '_'},
+            [{'<', '$1', Cutoff}],
+            [true]
+        }
+    ],
     ets:select_delete(?TABLE, MS).
-
-
 
 %% =============================================================================
 %% GEN_SERVER API
 %% =============================================================================
 
-
-
 -doc false.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 -doc false.
 init([]) ->
@@ -177,16 +173,13 @@ init([]) ->
     schedule_cleanup(),
     {ok, #{}}.
 
-
 -doc false.
 handle_call(_Request, _From, State) ->
     {reply, {error, unsupported}, State}.
 
-
 -doc false.
 handle_cast(_Msg, State) ->
     {noreply, State}.
-
 
 -doc false.
 handle_info(cleanup, State) ->
@@ -202,22 +195,16 @@ handle_info(cleanup, State) ->
     end,
     schedule_cleanup(),
     {noreply, State};
-
 handle_info(_Info, State) ->
     {noreply, State}.
-
 
 -doc false.
 terminate(_Reason, _State) ->
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 schedule_cleanup() ->

@@ -15,8 +15,6 @@ network listeners, and tearing them down gracefully on stop.
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
-
-
 -export([prep_stop/1]).
 -export([start/2]).
 -export([status/0]).
@@ -24,14 +22,9 @@ network listeners, and tearing them down gracefully on stop.
 -export([stop/1]).
 -export([vsn/0]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 A convenience function. Calls `init:stop/0`.
@@ -39,25 +32,19 @@ A convenience function. Calls `init:stop/0`.
 stop() ->
     init:stop().
 
-
 status() ->
     #{
         vsn => vsn(),
         status => bondy_config:get(status)
     }.
 
-
 -spec vsn() -> list().
 vsn() ->
     bondy_config:get(vsn, "undefined").
 
-
-
 %% =============================================================================
 %% APPLICATION BEHAVIOUR CALLBACKS
 %% =============================================================================
-
-
 
 -doc """
 Application behaviour callback.
@@ -80,10 +67,12 @@ start(_Type, Args) ->
     {ok, _} = application:ensure_all_started(plum_db, permanent),
 
     %% Now that Partisan is up we can get our nodename
-    ok = logger:update_primary_config(#{metadata => #{
-        node => partisan:node(),
-        router_vsn => vsn()
-    }}),
+    ok = logger:update_primary_config(#{
+        metadata => #{
+            node => partisan:node(),
+            router_vsn => vsn()
+        }
+    }),
 
     %% We wait for plum_db partitions to be up, we need to do this before
     %% we start the supervisor
@@ -124,17 +113,13 @@ start(_Type, Args) ->
                 %%     bondy_broker_bridge, permanent
                 %% ),
                 {ok, Pid}
-
             else
                 {error, _} = Error ->
                     Error
-
             end;
-
-        Error  ->
+        Error ->
             Error
     end.
-
 
 -doc """
 Application behaviour callback.
@@ -167,7 +152,6 @@ prep_stop(_State) ->
 
     ok = stop_listeners().
 
-
 -doc """
 Application behaviour callback.
 """.
@@ -175,17 +159,13 @@ stop(_State) ->
     ?LOG_NOTICE(#{description => "Shutdown finished"}),
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
 %% @private
 setup_commons() ->
     ok.
-
 
 %% @private
 maybe_wait_for_pdb_partitions() ->
@@ -202,25 +182,23 @@ maybe_wait_for_pdb_partitions() ->
             ok
     end.
 
-
 %% @private
 maybe_wait_for_pdb_hashtrees() ->
     case wait_for_pdb_hashtrees() of
         true ->
             %% We block until all hashtrees are built
-            ?LOG_NOTICE(#{description =>
-                "Application master is waiting for "
-                "plum_db hashtrees to be built"
+            ?LOG_NOTICE(#{
+                description =>
+                    "Application master is waiting for "
+                    "plum_db hashtrees to be built"
             }),
             plum_db_startup_coordinator:wait_for_hashtrees();
-
         false ->
             ok
     end,
 
     %% We stop the coordinator as it is a transcient worker
     plum_db_startup_coordinator:stop().
-
 
 %% @private
 maybe_wait_for_pdb_aae_exchange() ->
@@ -235,7 +213,6 @@ maybe_wait_for_pdb_aae_exchange() ->
                 [] ->
                     %% We have not yet joined a cluster, so we finish
                     ok;
-
                 Peers ->
                     ?LOG_NOTICE(#{
                         description =>
@@ -244,39 +221,34 @@ maybe_wait_for_pdb_aae_exchange() ->
                     }),
                     %% We are in a cluster, we randomnly pick a peer and
                     %% perform an AAE exchange
-                    [Peer|_] = lists_utils:shuffle(Peers),
+                    [Peer | _] = lists_utils:shuffle(Peers),
                     %% We block until the exchange finishes successfully
                     %% or with error, we finish anyway
                     _ = plum_db:sync_exchange(Peer),
                     ok
             end;
-
         false ->
             ok
     end.
 
-
 %% @private
 wait_for_pdb_aae_exchange() ->
     plum_db_config:get(aae_enabled) andalso
-    plum_db_config:get(wait_for_aae_exchange).
-
+        plum_db_config:get(wait_for_aae_exchange).
 
 %% @private
 wait_for_partitions() ->
     %% Waiting for hashtrees implies waiting for partitions
     plum_db_config:get(wait_for_partitions) orelse wait_for_pdb_hashtrees().
 
-
 %% @private
 wait_for_pdb_hashtrees() ->
     %% If aae is disabled the hastrees will never get build
     %% and we would block forever
-    (
-        plum_db_config:get(aae_enabled)
-        andalso plum_db_config:get(wait_for_hashtrees)
-    ) orelse wait_for_pdb_aae_exchange().
 
+    (plum_db_config:get(aae_enabled) andalso
+        plum_db_config:get(wait_for_hashtrees)) orelse
+        wait_for_pdb_aae_exchange().
 
 %% @private
 configure_services() ->
@@ -293,17 +265,14 @@ configure_services() ->
     ok = bondy_realm:apply_config(),
     ok = bondy_http_gateway:apply_config().
 
-
 %% @private
 init_registry_indices() ->
     case bondy_registry:init_indices() of
         ok ->
             ok;
-
         {error, Reason} ->
             exit(Reason)
     end.
-
 
 %% @private
 start_admin_listeners() ->
@@ -312,7 +281,6 @@ start_admin_listeners() ->
     %% bondy_config:get(status) will return `initialising'
     ?LOG_NOTICE(#{description => "Starting Admin API listeners"}),
     bondy_http_gateway:start_admin_listeners().
-
 
 %% @private
 start_public_listeners() ->
@@ -342,7 +310,6 @@ start_public_listeners() ->
 
     %% Bondy Router Bridge Relay (client) connections
     ok = bondy_bridge_relay_manager:start_bridges().
-
 
 %% @private
 setup_event_handlers() ->
@@ -384,7 +351,6 @@ setup_event_handlers() ->
 
     ok.
 
-
 %% @private
 -doc """
 Sets up some internal WAMP subscribers. These are processes supervised
@@ -393,7 +359,6 @@ by `bondy_subsribers_sup`.
 setup_wamp_subscriptions() ->
     ok.
 
-
 %% @private
 suspend_pdb_aae() ->
     case application:get_env(plum_db, aae_enabled, true) of
@@ -401,13 +366,13 @@ suspend_pdb_aae() ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
             ok = application:set_env(plum_db, aae_enabled, false),
             ?LOG_NOTICE(#{
-                description => "Temporarily disabled active anti-entropy (AAE) during initialisation"
+                description =>
+                    "Temporarily disabled active anti-entropy (AAE) during initialisation"
             }),
             ok;
         false ->
             ok
     end.
-
 
 %% @private
 restore_pdb_aae() ->
@@ -423,7 +388,6 @@ restore_pdb_aae() ->
             ok
     end.
 
-
 suspend_listeners() ->
     %% We stop accepting new connections on all listeners.
     %% Existing connections are unaffected.
@@ -435,19 +399,20 @@ suspend_listeners() ->
     }),
     ok = bondy_http_gateway:suspend_listeners(),
 
-    ?LOG_NOTICE(#{description =>
-        "Suspending TCP(TLS) client listeners. "
-        "No new connections will be accepted from now on."
+    ?LOG_NOTICE(#{
+        description =>
+            "Suspending TCP(TLS) client listeners. "
+            "No new connections will be accepted from now on."
     }),
     ok = bondy_wamp_tcp:suspend_listeners(),
     ok = bondy_wamp_uds:suspend_listeners(),
 
-    ?LOG_NOTICE(#{description =>
-        "Suspending Bridge Relay listeners. "
-        "No new connections will be accepted from now on."
+    ?LOG_NOTICE(#{
+        description =>
+            "Suspending Bridge Relay listeners. "
+            "No new connections will be accepted from now on."
     }),
     ok = bondy_bridge_relay_manager:suspend_listeners().
-
 
 stop_listeners() ->
     %% We force all listeners to stop.
@@ -456,7 +421,7 @@ stop_listeners() ->
     ?LOG_NOTICE(#{
         description =>
             "Terminating all client HTTP(S) and WS(S) client connections."
-        }),
+    }),
     ok = bondy_http_gateway:stop_listeners(),
 
     ?LOG_NOTICE(#{
@@ -470,7 +435,6 @@ stop_listeners() ->
         description => "Terminating all Bridge Relay connections."
     }),
     ok = bondy_bridge_relay_manager:stop_listeners().
-
 
 maybe_leave() ->
     case bondy_config:get(automatic_leave, false) of

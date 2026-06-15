@@ -16,15 +16,12 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
-
 -define(DELETE, <<"DELETE">>).
 -define(GET, <<"GET">>).
 -define(HEAD, <<"HEAD">>).
 -define(OPTIONS, <<"OPTIONS">>).
 -define(POST, <<"POST">>).
 -define(PUT, <<"PUT">>).
-
 
 %% =============================================================================
 %% SUCCESS
@@ -46,7 +43,6 @@
 %% =============================================================================
 %% CLIENT ERROR
 %% =============================================================================
-
 
 %% This response means that server could not understand the request due to
 %% invalid syntax.
@@ -107,7 +103,7 @@
 -define(HTTP_MISDIRECTED_REQUEST, 421).
 
 %% (WEBDAV) The request was well-formed but was unable to be followed due to semantic errors.
--define(HTTP_UNPROCESSABLE_ENTITY , 422).
+-define(HTTP_UNPROCESSABLE_ENTITY, 422).
 
 %% (WebDAV)The resource that is being accessed is locked.
 -define(HTTP_LOCKED, 423).
@@ -133,16 +129,9 @@
 %% The user requests an illegal resource, such as a web page censored by a government.
 -define(HTTP_UNAVAILABLE_FOR_LEGAL_REASONS, 451).
 
-
-
-
-
 %% =============================================================================
 %% SERVER ERRORS
 %% =============================================================================
-
-
-
 
 %% The server has encountered a situation it doesn't know how to handle.
 -define(HTTP_INTERNAL_SERVER_ERROR, 500).
@@ -169,7 +158,7 @@
 -define(HTTP_INSUFFICIENT_STORAGE, 507).
 
 %% (WebDAV)The server detected an infinite loop while processing the request.
--define(HTTP_LOOP_DETECTED , 508).
+-define(HTTP_LOOP_DETECTED, 508).
 
 %% Further extensions to the request are required for the server to fulfill it.
 -define(HTTP_NOT_EXTENDED, 510).
@@ -177,9 +166,5 @@
 %% The 511 status code indicates that the client needs to authenticate to gain network access.
 -define(HTTP_NETWORK_AUTHENTICATION_REQUIRED, 511).
 
-
-
 -define(TICKET_COOKIE_PREFIX, <<"bondy_ticket_">>).
 -define(CSRF_COOKIE_PREFIX, <<"bondy_csrf_">>).
-
-

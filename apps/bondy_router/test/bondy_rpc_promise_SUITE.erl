@@ -29,19 +29,15 @@ all() ->
         dealer_flush_callee_promises_delivers_error
     ].
 
-
 init_per_suite(Config) ->
-
     bondy_ct:start_bondy(),
     %% We disable eviction so that we can test it manually
     bondy_config:set(rpc_promise_eviction, false),
     Config.
 
-
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
     {save_config, Config}.
-
 
 add_new(_) ->
     Me = self(),
@@ -79,15 +75,15 @@ add_new(_) ->
         on_evict => fun(P) -> Me ! {evicted, P} end
     }),
 
-    Res = receive
-        {evicted, P} when P == Promise ->
-            Promise;
-        {evicted, Other} ->
-            Other
-    after
-        0 ->
+    Res =
+        receive
+            {evicted, P} when P == Promise ->
+                Promise;
+            {evicted, Other} ->
+                Other
+        after 0 ->
             {error, on_evict_failed}
-    end,
+        end,
 
     % meck:unload(bondy_rpc_promise_manager),
 
@@ -105,14 +101,12 @@ add_new(_) ->
 
     ok.
 
-
 add_existing(_) ->
     Me = self(),
     CallerSessionId = bondy_session_id:new(),
     CalleeSessionId = bondy_session_id:new(),
     Caller = bondy_ref:new(client, self(), CallerSessionId),
     Callee = bondy_ref:new(client, self(), CalleeSessionId),
-
 
     Promise = bondy_rpc_promise:new_invocation(?REALM, Caller, 1, Callee, 1, #{
         procedure_uri => <<"com.example.test">>,
@@ -136,16 +130,13 @@ add_existing(_) ->
     receive
         {evicted, P} when P == Promise ->
             Promise;
-
         {evicted, Other} ->
             error({wrong_promise, Other})
-    after
-        0 ->
-            error(on_evict_failed)
+    after 0 ->
+        error(on_evict_failed)
     end,
 
     ok.
-
 
 properties(_) ->
     CallerSessionId = bondy_session_id:new(),
@@ -194,7 +185,6 @@ properties(_) ->
 
     ok.
 
-
 flush_invocation_with_callback(_) ->
     %% flush/3 must invoke on_callee_flush once per invocation promise whose
     %% callee is the Ref being flushed, then delete the entry.
@@ -211,14 +201,16 @@ flush_invocation_with_callback(_) ->
     ?assertEqual(ok, bondy_rpc_promise:add(Promise)),
 
     ok = bondy_rpc_promise:flush(?REALM, Callee, #{
-        on_callee_flush => fun(P) -> Me ! {flushed, P}, ok end
+        on_callee_flush => fun(P) ->
+            Me ! {flushed, P},
+            ok
+        end
     }),
 
     receive
         {flushed, P} when P == Promise -> ok;
         {flushed, Other} -> ct:fail({wrong_promise, Other})
-    after
-        500 -> ct:fail("callback was not invoked")
+    after 500 -> ct:fail("callback was not invoked")
     end,
 
     Pattern = bondy_rpc_promise:invocation_key_pattern(
@@ -227,7 +219,6 @@ flush_invocation_with_callback(_) ->
     ?assertEqual(error, bondy_rpc_promise:find(Pattern)),
 
     ok.
-
 
 flush_call_no_callback_trigger(_) ->
     %% When the flushed Ref is the caller, the call promise must be removed
@@ -242,21 +233,22 @@ flush_call_no_callback_trigger(_) ->
     ?assertEqual(ok, bondy_rpc_promise:add(Promise)),
 
     ok = bondy_rpc_promise:flush(?REALM, Caller, #{
-        on_callee_flush => fun(P) -> Me ! {unexpected, P}, ok end
+        on_callee_flush => fun(P) ->
+            Me ! {unexpected, P},
+            ok
+        end
     }),
 
     receive
         {unexpected, _} ->
             ct:fail("callback should not fire for call promises")
-    after
-        200 -> ok
+    after 200 -> ok
     end,
 
     Pattern = bondy_rpc_promise:call_key_pattern(?REALM, Caller, 101),
     ?assertEqual(error, bondy_rpc_promise:find(Pattern)),
 
     ok.
-
 
 flush_other_ref_untouched(_) ->
     %% Only promises whose callee matches the flushed Ref are affected.
@@ -280,21 +272,22 @@ flush_other_ref_untouched(_) ->
     ok = bondy_rpc_promise:add([Promise1, Promise2]),
 
     ok = bondy_rpc_promise:flush(?REALM, Callee1, #{
-        on_callee_flush => fun(P) -> Me ! {flushed, P}, ok end
+        on_callee_flush => fun(P) ->
+            Me ! {flushed, P},
+            ok
+        end
     }),
 
     receive
         {flushed, P1} when P1 == Promise1 -> ok;
         {flushed, Other} -> ct:fail({wrong_promise, Other})
-    after
-        500 -> ct:fail("callback was not invoked for Callee1")
+    after 500 -> ct:fail("callback was not invoked for Callee1")
     end,
 
     receive
         {flushed, _} ->
             ct:fail("callback should not fire for Callee2")
-    after
-        200 -> ok
+    after 200 -> ok
     end,
 
     Pattern1 = bondy_rpc_promise:invocation_key_pattern(
@@ -307,7 +300,6 @@ flush_other_ref_untouched(_) ->
     ?assertEqual({ok, Promise2}, bondy_rpc_promise:find(Pattern2)),
 
     ok.
-
 
 flush_backward_compat(_) ->
     %% flush/2 must still remove promises without requiring a callback.
@@ -331,7 +323,6 @@ flush_backward_compat(_) ->
 
     ok.
 
-
 flush_bad_opts(_) ->
     Caller = bondy_ref:new(client, self(), bondy_session_id:new()),
 
@@ -343,7 +334,6 @@ flush_bad_opts(_) ->
     ),
 
     ok.
-
 
 dealer_flush_callee_promises_delivers_error(_) ->
     %% bondy_dealer:flush_callee_promises/2 must deliver a
@@ -366,18 +356,16 @@ dealer_flush_callee_promises_delivers_error(_) ->
 
     ExpectedUri = <<"wamp.error.no_eligible_callee">>,
     receive
-        {?BONDY_REQ, _Pid, ?REALM,
-            #error{
-                request_type = ?CALL,
-                request_id = CallId,
-                error_uri = ExpectedUri
-            }} ->
+        {?BONDY_REQ, _Pid, ?REALM, #error{
+            request_type = ?CALL,
+            request_id = CallId,
+            error_uri = ExpectedUri
+        }} ->
             ok;
         {?BONDY_REQ, _Pid, ?REALM, Other} ->
             ct:fail({unexpected_message, Other})
-    after
-        500 ->
-            ct:fail("caller did not receive no_eligible_callee error")
+    after 500 ->
+        ct:fail("caller did not receive no_eligible_callee error")
     end,
 
     Pattern = bondy_rpc_promise:invocation_key_pattern(
@@ -386,5 +374,3 @@ dealer_flush_callee_promises_delivers_error(_) ->
     ?assertEqual(error, bondy_rpc_promise:find(Pattern)),
 
     ok.
-
-

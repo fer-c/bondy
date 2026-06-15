@@ -18,17 +18,12 @@ Manages the per-realm security status (enabled or disabled), persisting it in
 -export([rbac_mod/1]).
 -export([status/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 rbac_mod(_) ->
     bondy_rbac.
-
 
 is_enabled(RealmUri) ->
     bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
@@ -37,16 +32,13 @@ is_enabled(RealmUri) ->
         _ -> false
     end.
 
-
 enable(RealmUri) ->
     bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     plum_db:put(?STATUS_PREFIX(RealmUri), enabled, true).
 
-
 disable(RealmUri) ->
     bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     plum_db:put(?STATUS_PREFIX(RealmUri), enabled, false).
-
 
 status(RealmUri) ->
     case is_enabled(RealmUri) of

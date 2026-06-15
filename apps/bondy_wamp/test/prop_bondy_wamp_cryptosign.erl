@@ -18,13 +18,9 @@
     prop_key_pair_seed_derives_consistent_public/0
 ]).
 
-
-
 %% =============================================================================
 %% PROPERTIES
 %% =============================================================================
-
-
 
 %% Signing any challenge with a key pair always verifies with its public key.
 prop_sign_verify_round_trip() ->
@@ -34,11 +30,10 @@ prop_sign_verify_round_trip() ->
         begin
             KeyPair = #{public := Pub} = bondy_wamp_cryptosign:key_pair(Seed),
             Sig = bondy_wamp_cryptosign:sign(Challenge, KeyPair),
-            byte_size(Sig) =:= 64
-                andalso bondy_wamp_cryptosign:verify(Sig, Challenge, Pub)
+            byte_size(Sig) =:= 64 andalso
+                bondy_wamp_cryptosign:verify(Sig, Challenge, Pub)
         end
     ).
-
 
 %% A signature never verifies against a different challenge.
 prop_verify_rejects_other_challenge() ->
@@ -48,7 +43,8 @@ prop_verify_rejects_other_challenge() ->
         ?IMPLIES(
             C1 =/= C2,
             begin
-                KeyPair = #{public := Pub} =
+                KeyPair =
+                    #{public := Pub} =
                     bondy_wamp_cryptosign:key_pair(Seed),
                 Sig = bondy_wamp_cryptosign:sign(C1, KeyPair),
                 not bondy_wamp_cryptosign:verify(Sig, C2, Pub)
@@ -56,17 +52,16 @@ prop_verify_rejects_other_challenge() ->
         )
     ).
 
-
 %% encode_hex/decode_hex round-trips for any binary.
 prop_hex_round_trip() ->
     ?FORALL(
         Bin,
         binary(),
-        Bin =:= bondy_wamp_cryptosign:decode_hex(
-            bondy_wamp_cryptosign:encode_hex(Bin)
-        )
+        Bin =:=
+            bondy_wamp_cryptosign:decode_hex(
+                bondy_wamp_cryptosign:encode_hex(Bin)
+            )
     ).
-
 
 %% decode_hex accepts both upper- and lower-case forms.
 prop_hex_decode_case_insensitive() ->
@@ -76,11 +71,10 @@ prop_hex_decode_case_insensitive() ->
         begin
             Upper = bondy_wamp_cryptosign:encode_hex(Bin),
             Lower = string:lowercase(Upper),
-            Bin =:= bondy_wamp_cryptosign:decode_hex(Upper)
-                andalso Bin =:= bondy_wamp_cryptosign:decode_hex(Lower)
+            Bin =:= bondy_wamp_cryptosign:decode_hex(Upper) andalso
+                Bin =:= bondy_wamp_cryptosign:decode_hex(Lower)
         end
     ).
-
 
 %% Normalising the 32-byte seed and the 64-byte (seed ++ pub) form yields the
 %% same, consistent public key.

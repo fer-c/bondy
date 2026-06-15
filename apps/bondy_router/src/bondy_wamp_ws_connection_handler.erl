@@ -38,33 +38,28 @@ WebSocket subprotocol registry.
 
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?IDLE_TIMEOUT
--define(IDLE_TIMEOUT, 60000*10).
+-define(IDLE_TIMEOUT, 60000 * 10).
 -define(SUBPROTO_HEADER, <<"sec-websocket-protocol">>).
 
-
 -record(state, {
-    frame_type              ::  bondy_wamp_protocol:frame_type(),
-    auth_token              ::  map() | undefined,
-    proxy_protocol          ::  bondy_http_proxy_protocol:t(),
-    source_ip               ::  inet:ip_address(),
-    ping_idle_timeout       ::  non_neg_integer(),
-    ping_tref               ::  optional(reference()),
-    ping_payload            ::  binary(),
-    ping_retry              ::  optional(bondy_retry:t()),
-    protocol_state          ::  optional(bondy_wamp_protocol:state())
+    frame_type :: bondy_wamp_protocol:frame_type(),
+    auth_token :: map() | undefined,
+    proxy_protocol :: bondy_http_proxy_protocol:t(),
+    source_ip :: inet:ip_address(),
+    ping_idle_timeout :: non_neg_integer(),
+    ping_tref :: optional(reference()),
+    ping_payload :: binary(),
+    ping_retry :: optional(bondy_retry:t()),
+    protocol_state :: optional(bondy_wamp_protocol:state())
 }).
 
--type state()               ::  #state{}.
-
-
+-type state() :: #state{}.
 
 -export([init/2]).
 -export([websocket_init/1]).
 -export([websocket_handle/2]).
 -export([websocket_info/2]).
 -export([terminate/3]).
-
-
 
 %% =============================================================================
 %% COWBOY HANDLER CALLBACKS
@@ -107,11 +102,9 @@ init(Req0, _) ->
                 },
 
                 do_init(Subproto, BinProto, Req0, State0);
-
             {error, Reason} ->
                 throw({Reason, ProxyProtocol})
         end
-
     catch
         throw:{{protocol_error, Message}, PP} ->
             ?LOG_NOTICE(#{
@@ -124,7 +117,6 @@ init(Req0, _) ->
             }),
             Req1 = cowboy_req:reply(?HTTP_FORBIDDEN, Req0),
             {ok, Req1, undefined};
-
         throw:invalid_scheme ->
             ?LOG_NOTICE(#{
                 description => "Connection rejected.",
@@ -132,7 +124,6 @@ init(Req0, _) ->
             }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
-
         throw:missing_subprotocol ->
             ?LOG_NOTICE(#{
                 description => "Closing WS connection",
@@ -141,7 +132,6 @@ init(Req0, _) ->
             }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
-
         throw:invalid_subprotocol ->
             %% At the moment we only support WAMP, not plain WS
             ?LOG_NOTICE(#{
@@ -152,7 +142,6 @@ init(Req0, _) ->
             }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
-
         Class:EReason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Closing connection.",
@@ -164,13 +153,9 @@ init(Req0, _) ->
             {ok, Req1, undefined}
     end.
 
-
-
 %% =============================================================================
 %% COWBOY_WEBSOCKET CALLBACKS
 %% =============================================================================
-
-
 
 -doc """
 Called once the connection has been upgraded to websockets.
@@ -186,7 +171,6 @@ websocket_init(#state{protocol_state = undefined} = State) ->
         <<"Missing value for header 'sec-websocket-protocol'.">>
     },
     {[Frame], State};
-
 websocket_init(#state{protocol_state = PSt} = State) ->
     ok = logger:update_process_metadata(#{
         transport => websockets,
@@ -198,7 +182,6 @@ websocket_init(#state{protocol_state = PSt} = State) ->
     ?LOG_INFO(#{description => "Established connection with client."}),
 
     {[], reset_ping(State), hibernate}.
-
 
 -doc """
 Called for every frame received from the client.
@@ -213,25 +196,20 @@ websocket_handle(Data, #state{protocol_state = undefined} = State) ->
         data => Data
     }),
     {[close], State};
-
 websocket_handle(ping, State) ->
     %% Cowboy already replies to pings for us, we return nothing
     {[], reset_ping(State)};
-
 websocket_handle({ping, _}, State) ->
     %% Cowboy already replies to pings for us, we return nothing
     {[], reset_ping(State), hibernate};
-
 websocket_handle(pong, State) ->
     %% https://datatracker.ietf.org/doc/html/rfc6455#page-37
     %% A Pong frame MAY be sent unsolicited.  This serves as a unidirectional
     %% heartbeat. A response to an unsolicited Pong frame is not expected.
     {[], reset_ping(State), hibernate};
-
 websocket_handle({pong, Data}, #state{ping_payload = Data} = State) ->
     %% We've got an answer to a Bondy-initiated ping.
     {[], reset_ping(State), hibernate};
-
 websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     ProtoState0 = State0#state.protocol_state,
 
@@ -239,28 +217,23 @@ websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
         {noreply, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
             {[], reset_ping(State), hibernate};
-
         {reply, L, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
             {data_frames(T, L), reset_ping(State), hibernate};
-
         {stop, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
             {[close], disable_ping(State), hibernate};
-
         {stop, L, ProtoState} ->
             self() ! {stop, normal},
             State = State0#state{protocol_state = ProtoState},
             Cmds = data_frames(T, L) ++ [close],
             {Cmds, disable_ping(State)};
-
         {stop, Reason, L, ProtoState} ->
             self() ! {stop, Reason},
             State = State0#state{protocol_state = ProtoState},
             Cmds = data_frames(T, L) ++ [{shutdown_reason, Reason}, close],
             {Cmds, disable_ping(State)}
     end;
-
 websocket_handle(Data, State) ->
     %% We ignore this message and carry on listening
     ?LOG_DEBUG(#{
@@ -269,32 +242,29 @@ websocket_handle(Data, State) ->
     }),
     {[], State, hibernate}.
 
-
 -doc """
 Called for every Erlang message received.
 Handles internal erlang messages and WAMP messages BONDY wants to send to the
 client. See `bondy:send/2`.
 """.
-websocket_info({?BONDY_REQ, Pid, _RealmUri, M}, State)
-when Pid =:= self() ->
+websocket_info({?BONDY_REQ, Pid, _RealmUri, M}, State) when
+    Pid =:= self()
+->
     handle_outbound(State#state.frame_type, M, State);
-
 websocket_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using bondy:send/2,3
     %% ok = bondy:ack(Pid, Ref),
     handle_outbound(State#state.frame_type, M, State);
-
 websocket_info(
-    {timeout, Ref, ping_idle_timeout}, #state{ping_tref = Ref} = State) ->
+    {timeout, Ref, ping_idle_timeout}, #state{ping_tref = Ref} = State
+) ->
     ?LOG_DEBUG(#{
         description => "Connection timeout, sending first ping",
         attempts => bondy_retry:count(State#state.ping_retry)
     }),
     %% ping_idle_timeout (not to be confused with Cowboy WS idle_timeout)
     maybe_send_ping(State);
-
-
 websocket_info({timeout, Ref, ping_timeout}, #state{ping_tref = Ref} = State) ->
     ?LOG_DEBUG(#{
         description => "Ping timeout, retrying ping",
@@ -302,7 +272,6 @@ websocket_info({timeout, Ref, ping_timeout}, #state{ping_tref = Ref} = State) ->
     }),
     %% We will retry or fail depending on retry configuration and state
     maybe_send_ping(State);
-
 websocket_info({timeout, Ref, Msg}, State) ->
     ?LOG_DEBUG(#{
         description => "Received unknown timeout",
@@ -310,21 +279,18 @@ websocket_info({timeout, Ref, Msg}, State) ->
         ref => Ref
     }),
     {[], State, hibernate};
-
 websocket_info({stop, Reason}, State) ->
     ?LOG_INFO(#{
         description => "Connection closing",
         reason => Reason
     }),
     {[{shutdown_reason, Reason}, close], State};
-
 websocket_info(Msg, State) ->
     ?LOG_DEBUG(#{
         description => "Received unknown message",
         message => Msg
     }),
     {[], State, hibernate}.
-
 
 -doc """
 Termination.
@@ -339,14 +305,12 @@ terminate(normal, _Req, State) ->
         reason => normal
     }),
     do_terminate(State);
-
 terminate(stop, _Req, State) ->
     ?LOG_INFO(#{
         description => "Connection closed",
         reason => stop
     }),
     do_terminate(State);
-
 terminate(timeout, _Req, State) ->
     Timeout = bondy_config:get([wamp_websocket, idle_timeout]),
     ?LOG_ERROR(#{
@@ -355,7 +319,6 @@ terminate(timeout, _Req, State) ->
         idle_timeout => Timeout
     }),
     do_terminate(State);
-
 terminate(remote, _Req, State) ->
     %% The remote endpoint closed the connection without giving any further
     %% details.
@@ -364,7 +327,6 @@ terminate(remote, _Req, State) ->
         reason => remote
     }),
     do_terminate(State);
-
 terminate({remote, Code, Payload}, _Req, State) ->
     ?LOG_INFO(#{
         description => "Connection closed by client",
@@ -373,7 +335,6 @@ terminate({remote, Code, Payload}, _Req, State) ->
         payload => Payload
     }),
     do_terminate(State);
-
 terminate({error, closed = Reason}, _Req, State) ->
     %% The socket has been closed brutally without a close frame being received
     %% first.
@@ -382,7 +343,6 @@ terminate({error, closed = Reason}, _Req, State) ->
         reason => Reason
     }),
     do_terminate(State);
-
 terminate({error, badencoding = Reason}, _Req, State) ->
     %% A text frame was sent by the client with invalid encoding. All text
     %% frames must be valid UTF-8.
@@ -391,7 +351,6 @@ terminate({error, badencoding = Reason}, _Req, State) ->
         reason => Reason
     }),
     do_terminate(State);
-
 terminate({error, badframe = Reason}, _Req, State) ->
     %% A protocol error has been detected.
     ?LOG_ERROR(#{
@@ -399,14 +358,12 @@ terminate({error, badframe = Reason}, _Req, State) ->
         reason => Reason
     }),
     do_terminate(State);
-
 terminate({error, Reason}, _Req, State) ->
     ?LOG_ERROR(#{
         description => "Connection closed",
         reason => Reason
     }),
     do_terminate(State);
-
 terminate({crash, Class, Reason}, _Req, State) ->
     %% A crash occurred in the handler.
     ?LOG_ERROR(#{
@@ -415,7 +372,6 @@ terminate({crash, Class, Reason}, _Req, State) ->
         reason => Reason
     }),
     do_terminate(State);
-
 terminate(Other, _Req, State) ->
     ?LOG_ERROR(#{
         description => "Connection closed",
@@ -423,34 +379,26 @@ terminate(Other, _Req, State) ->
     }),
     do_terminate(State).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 handle_outbound(T, M, State) ->
     case bondy_wamp_protocol:handle_outbound(M, State#state.protocol_state) of
         {ok, Bin, PSt} ->
             {data_frames(T, Bin), State#state{protocol_state = PSt}, hibernate};
-
         {stop, PSt} ->
             {[close], State#state{protocol_state = PSt}};
-
         {stop, Bin, PSt} ->
             Cmds = data_frames(T, [Bin]) ++ [close],
             {Cmds, State#state{protocol_state = PSt}};
-
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
             %% We schedule the stop (this is to allow the client to reply a
             %% WAMP Goodbye).
             erlang:send_after(Time, self(), {stop, normal}),
             {data_frames(T, [Bin]), State#state{protocol_state = PSt}}
     end.
-
 
 %% @private
 maybe_token(Req) ->
@@ -462,7 +410,6 @@ maybe_token(Req) ->
         _ ->
             throw(invalid_scheme)
     end.
-
 
 %% @private
 do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
@@ -504,13 +451,11 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
             %% - compress
             %% - deplate_opts
             {cowboy_websocket, Req, State, Opts};
-
         {error, _Reason} ->
             %% Returning ok will cause the handler to stop in websocket_handle
             Req = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req, undefined}
     end.
-
 
 %% @private
 -doc """
@@ -522,7 +467,6 @@ The order is undefined.
 
 select_subprotocol(undefined) ->
     throw(missing_subprotocol);
-
 select_subprotocol(L) when is_list(L) ->
     try
         Fun = fun(X) ->
@@ -540,15 +484,12 @@ select_subprotocol(L) when is_list(L) ->
             {ok, SP, X}
     end.
 
-
 %% @private
 do_terminate(undefined) ->
     ok;
-
 do_terminate(State) ->
     ok = cancel_timer(State#state.ping_tref),
     bondy_wamp_protocol:terminate(State#state.protocol_state).
-
 
 %% @private
 -doc """
@@ -563,17 +504,12 @@ From `cow_ws:frame()`.
 """.
 data_frames(Type, L) when is_list(L) ->
     [{Type, E} || E <- L];
-
 data_frames(Type, E) ->
     [{Type, E}].
-
-
 
 %% =============================================================================
 %% PRIVATE: PING TIMEOUT
 %% =============================================================================
-
-
 
 %% @private
 maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
@@ -584,7 +520,8 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Retry = bondy_retry:init(
         ping_timeout,
         #{
-            deadline => 0, % disable, use max_retries only
+            % disable, use max_retries only
+            deadline => 0,
             interval => Timeout,
             max_retries => Attempts,
             backoff_enabled => false
@@ -596,22 +533,18 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
         ping_payload = bondy_utils:generate_fragment(16),
         ping_retry = Retry
     };
-
 maybe_enable_ping(#{enabled := false}, State) ->
     State.
-
 
 %% @private
 reset_ping(#state{ping_retry = undefined} = State) ->
     %% ping disabled
     State;
-
 reset_ping(#state{ping_tref = undefined} = State) ->
     Time = State#state.ping_idle_timeout,
     Ref = erlang:start_timer(Time, self(), ping_idle_timeout),
 
     State#state{ping_tref = Ref};
-
 reset_ping(#state{} = State) ->
     ok = cancel_timer(State#state.ping_tref),
 
@@ -626,44 +559,37 @@ reset_ping(#state{} = State) ->
         ping_tref = Ref
     }.
 
-
 %% @private
 disable_ping(#state{ping_retry = undefined} = State) ->
     State;
-
 disable_ping(#state{} = State) ->
     ok = cancel_timer(State#state.ping_tref),
     State#state{ping_retry = undefined}.
-
 
 %% @private
 cancel_timer(Ref) when is_reference(Ref) ->
     _ = erlang:cancel_timer(Ref),
     ok;
-
 cancel_timer(_) ->
     ok.
-
 
 %% @private
 maybe_send_ping(#state{ping_idle_timeout = undefined} = State) ->
     %% ping disabled
     {[], State};
-
 maybe_send_ping(#state{} = State) ->
     {Result, Retry} = bondy_retry:fail(State#state.ping_retry),
     maybe_send_ping(Result, State#state{ping_retry = Retry}).
 
-
 %% @private
-maybe_send_ping(Limit, State)
-when Limit == deadline orelse Limit == max_retries ->
+maybe_send_ping(Limit, State) when
+    Limit == deadline orelse Limit == max_retries
+->
     ?LOG_INFO(#{
         description => "Connection closing.",
         reason => ping_timeout
     }),
     {[close], State};
-
 maybe_send_ping(_Time, #state{} = State0) ->
     %% We schedule the next retry
     Ref = bondy_retry:fire(State0#state.ping_retry),
@@ -677,4 +603,3 @@ maybe_send_ping(_Time, #state{} = State0) ->
     %% For that reason the payload is static.
     Msg = {ping, State#state.ping_payload},
     {[Msg], State}.
-

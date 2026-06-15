@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_transport_queue_manager).
 -moduledoc """
 A gen_server that manages the `bondy_transport_queue` lifecycle and runs
@@ -21,9 +20,8 @@ TTL has elapsed.
 -define(DEFAULT_EVICTION_INTERVAL, 5000).
 
 -record(state, {
-    evict_interval          ::  pos_integer()
+    evict_interval :: pos_integer()
 }).
-
 
 %% API
 -export([start_link/0]).
@@ -36,13 +34,9 @@ TTL has elapsed.
 -export([terminate/2]).
 -export([code_change/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Starts the transport queue manager as a locally registered gen_server.
@@ -52,13 +46,9 @@ Starts the transport queue manager as a locally registered gen_server.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init(_) ->
     process_flag(trap_exit, true),
@@ -77,7 +67,6 @@ init(_) ->
 
     {ok, State}.
 
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -86,14 +75,12 @@ handle_call(Event, From, State) ->
     }),
     {noreply, State}.
 
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
     {noreply, State}.
-
 
 handle_info(evict, State) ->
     try
@@ -109,7 +96,6 @@ handle_info(evict, State) ->
     end,
     ok = schedule_eviction(State),
     {noreply, State};
-
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -117,21 +103,15 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(_Reason, _State) ->
     ok.
-
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 schedule_eviction(State) ->

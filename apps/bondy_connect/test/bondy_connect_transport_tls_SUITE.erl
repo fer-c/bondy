@@ -31,14 +31,12 @@ M5 — **raw WAMP socket over TLS** integration tests against a live Bondy
 -define(HOST, "127.0.0.1").
 -define(PORT, 18085).
 
-
 all() ->
     [
         tls_call_round_trip,
         tls_pubsub_round_trip,
         verify_peer_round_trip
     ].
-
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -53,23 +51,20 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 %% A full register→call works over the TLS transport.
 tls_call_round_trip(_) ->
     Conn = connect(#{verify => verify_none}),
     ?assertEqual(established, bondy_connect:status(Conn)),
-    {ok, _} = bondy_connect:register(Conn, <<"com.example.res.tls">>, echo_handler()),
+    {ok, _} = bondy_connect:register(
+        Conn, <<"com.example.res.tls">>, echo_handler()
+    ),
     {ok, R} = bondy_connect:call(Conn, <<"com.example.res.tls">>, [<<"hi">>]),
     ?assertEqual([<<"hi">>], maps:get(args, R)),
     ok = bondy_connect:disconnect(Conn).
-
 
 %% A subscribe→publish→event round trip works over the TLS transport, proving the
 %% EVENT path (not just request/response) survives the encrypted link.
@@ -91,7 +86,6 @@ tls_pubsub_round_trip(_) ->
     ok = bondy_connect:disconnect(Sub),
     ok = bondy_connect:disconnect(Pub).
 
-
 %% Secure-by-default verification is real: with `verify_peer` and the test CA
 %% bundle the TLS handshake validates the server's certificate chain and a full
 %% register→call round trip succeeds over the verified link. (Hostname checking
@@ -112,28 +106,27 @@ verify_peer_round_trip(Config) ->
         }
     }),
     ?assertEqual(established, bondy_connect:status(Conn)),
-    {ok, _} = bondy_connect:register(Conn, <<"com.example.res.tls.vp">>, echo_handler()),
+    {ok, _} = bondy_connect:register(
+        Conn, <<"com.example.res.tls.vp">>, echo_handler()
+    ),
     {ok, R} = bondy_connect:call(Conn, <<"com.example.res.tls.vp">>, [<<"hi">>]),
     ?assertEqual([<<"hi">>], maps:get(args, R)),
     ok = bondy_connect:disconnect(Conn).
-
-
 
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
 
-
-
 %% @private
 echo_handler() ->
     fun(Args, _, _) -> {reply, Args} end.
 
-
 %% @private An event handler that forwards each event's args to `Pid`.
 event_handler(Pid) ->
-    fun(Args, _, _) -> Pid ! {event, Args}, ok end.
-
+    fun(Args, _, _) ->
+        Pid ! {event, Args},
+        ok
+    end.
 
 %% @private Connect over TLS with the given `tls` options merged in.
 connect(TLS) ->
@@ -146,7 +139,6 @@ connect(TLS) ->
         tls => TLS
     }),
     Conn.
-
 
 %% @private
 add_anon_realm(RealmUri) ->

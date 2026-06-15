@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_auth_wamp_cryptosign).
 -moduledoc """
 Implements the WAMP Cryptosign authentication method as a `bondy_auth` callback
@@ -19,9 +18,8 @@ verifying the signature against the user's authorized public keys.
 
 -include("bondy_security.hrl").
 
-
--type state()           ::  map().
--type challenge_error() ::  missing_pubkey | no_matching_pubkey.
+-type state() :: map().
+-type challenge_error() :: missing_pubkey | no_matching_pubkey.
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
@@ -29,35 +27,26 @@ verifying the signature against the user's authorized public keys.
 -export([challenge/3]).
 -export([authenticate/4]).
 
-
-
-
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
 
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
 init(Ctxt) ->
     try
-
         User = bondy_auth:user(Ctxt),
 
-        User =/= undefined
-        andalso true == bondy_rbac_user:has_authorized_keys(User)
-        orelse throw(invalid_context),
+        User =/= undefined andalso
+            true == bondy_rbac_user:has_authorized_keys(User) orelse
+            throw(invalid_context),
 
         {ok, maps:new()}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec requirements() -> map().
 
@@ -68,9 +57,9 @@ requirements() ->
         authorized_keys => true
     }.
 
-
 -spec challenge(
-    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()
+) ->
     {true, Extra :: map(), NewState :: state()}
     | {error, challenge_error(), NewState :: state()}.
 
@@ -96,7 +85,8 @@ challenge(Details, Ctxt, State) ->
 
                 Extra = #{
                     challenge => encode_hex(Challenge),
-                    channel_binding => undefined %% TODO
+                    %% TODO
+                    channel_binding => undefined
                 },
                 {true, Extra, NewState};
             false ->
@@ -107,17 +97,18 @@ challenge(Details, Ctxt, State) ->
             {error, Reason, State}
     end.
 
-
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    CBState :: state()) ->
+    CBState :: state()
+) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(EncSignature, _, _, #{pubkey := Pub} = State)
-when is_binary(EncSignature) ->
+authenticate(EncSignature, _, _, #{pubkey := Pub} = State) when
+    is_binary(EncSignature)
+->
     try
         Challenge = maps:get(challenge, State),
         Signature = decode_hex(EncSignature),
@@ -126,7 +117,6 @@ when is_binary(EncSignature) ->
         case bondy_cryptosign:verify(Signature, Challenge, Pub) of
             true ->
                 {ok, #{}, State};
-
             false ->
                 %% Challenge does not match the expected
                 {error, invalid_signature, State}
@@ -134,31 +124,25 @@ when is_binary(EncSignature) ->
     catch
         error:badarg ->
             {error, invalid_signature, State};
-
         error:invalid_signature ->
             {error, invalid_signature, State};
-
         throw:invalid_hex_encoding ->
             {error, invalid_signature, State}
     end.
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 decode_hex(HexString) ->
-    try hex_utils:hexstr_to_bin(HexString)
-    % of
-    %     Bin when byte_size(Bin) == 96 ->
-    %         Bin;
-    %     _ ->
-    %         throw(invalid_signature_length)
+    try
+        hex_utils:hexstr_to_bin(HexString)
+        % of
+        %     Bin when byte_size(Bin) == 96 ->
+        %         Bin;
+        %     _ ->
+        %         throw(invalid_signature_length)
     catch
         throw:Reason ->
             throw(Reason);
@@ -166,9 +150,6 @@ decode_hex(HexString) ->
             throw(invalid_hex_encoding)
     end.
 
-
 %% @private
 encode_hex(Bin) when is_binary(Bin) ->
     list_to_binary(hex_utils:bin_to_hexstr(Bin)).
-
-

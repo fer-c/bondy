@@ -73,7 +73,6 @@ with two arguments were the first argument is the default event manager
 -export([delete_handler/2]).
 -export([delete_watched_handler/1]).
 
-
 %% GEN_EVENT CALLBACKS
 -export([init/1]).
 -export([handle_event/2]).
@@ -82,21 +81,16 @@ with two arguments were the first argument is the default event manager
 -export([terminate/2]).
 -export([code_change/3]).
 
-
 %% UNIVERSAL EVENT HANDLER STATE
 -record(state, {
-    callback    :: function() | {M :: module(), F :: atom(), A :: [term()]}
+    callback :: function() | {M :: module(), F :: atom(), A :: [term()]}
 }).
 
-
--type handler()     ::  module() | {module(), Id :: term()}.
-
+-type handler() :: module() | {module(), Id :: term()}.
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Adds a callback function.
@@ -111,23 +105,20 @@ add_callback(Fun) when is_function(Fun, 1) ->
     gen_event:add_handler(?MODULE, Handler, [Fun]),
     {ok, Handler}.
 
-
 -doc """
 Adds a callback function.
 
 The function will be called by prepending the event to the list `Args`.
 """.
--spec add_callback(Fun :: fun((any()) -> any()), Args ::  [term()]) ->
+-spec add_callback(Fun :: fun((any()) -> any()), Args :: [term()]) ->
     {ok, reference()}.
 
 add_callback(Fun, []) ->
     add_callback(Fun);
-
 add_callback(Fun, Args) when is_function(Fun, length(Args) + 1) ->
     Handler = {?MODULE, make_ref()},
     gen_event:add_handler(?MODULE, Handler, {Fun, Args}),
     {ok, Handler}.
-
 
 -doc """
 Adds a callback MFA.
@@ -142,7 +133,6 @@ add_callback(M, F, Args) when is_atom(M), is_atom(F), is_list(Args) ->
     gen_event:add_handler(?MODULE, {?MODULE, Ref}, {M, F, Args}),
     {ok, Ref}.
 
-
 -doc """
 Adds a supervised callback function.
 
@@ -156,7 +146,6 @@ add_sup_callback(Fn) when is_function(Fn, 1) ->
     gen_event:add_sup_handler(?MODULE, {?MODULE, Ref}, Fn),
     {ok, Ref}.
 
-
 -doc """
 Adds an event handler.
 
@@ -165,7 +154,6 @@ Calls `gen_event:add_handler(?MODULE, Handler, Args)`.
 add_handler(Handler, Args) ->
     add_handler(?MODULE, Handler, Args).
 
-
 -doc """
 Adds an event handler.
 
@@ -173,7 +161,6 @@ Calls `gen_event:add_handler(Manager, Handler, Args)`.
 """.
 add_handler(Manager, Handler, Args) ->
     gen_event:add_handler(Manager, Handler, Args).
-
 
 -doc """
 Adds a supervised event handler, but also supervises the connection
@@ -186,7 +173,6 @@ calling process terminates.
 add_sup_handler(Handler, Args) ->
     add_sup_handler(?MODULE, Handler, Args).
 
-
 -doc """
 Adds a supervised event handler, but also supervises the connection
 between the event handler and the calling process.
@@ -197,7 +183,6 @@ calling process terminates.
 """.
 add_sup_handler(Manager, Handler, Args) ->
     gen_event:add_sup_handler(Manager, Handler, Args).
-
 
 -doc """
 Adds a watched event handler.
@@ -212,7 +197,6 @@ will re-install it in the event manager.
 add_watched_handler(Handler, Args) ->
     add_watched_handler(?MODULE, Handler, Args).
 
-
 -doc """
 Adds a supervised event handler.
 
@@ -226,7 +210,6 @@ will re-install it in the event manager.
 add_watched_handler(Manager, Handler, Args) ->
     bondy_event_handler_watcher_sup:start_watcher(Manager, Handler, Args).
 
-
 -doc """
 A util function. Equivalent to calling
 `swap_handler(bondy_event_manager, OldHandler, NewHandler)`.
@@ -234,13 +217,11 @@ A util function. Equivalent to calling
 swap_handler(OldHandler, NewHandler) ->
     swap_handler(?MODULE, OldHandler, NewHandler).
 
-
 -doc """
 A util function. Equivalent to calling `gen_event:swap_handler/3`.
 """.
 swap_handler(Manager, {_, _} = OldHandler, {_, _} = NewHandler) ->
     gen_event:swap_handler(Manager, OldHandler, NewHandler).
-
 
 -doc """
 A util function. Equivalent to calling
@@ -249,13 +230,11 @@ A util function. Equivalent to calling
 swap_sup_handler(OldHandler, NewHandler) ->
     swap_sup_handler(?MODULE, OldHandler, NewHandler).
 
-
 -doc """
 A util function. Equivalent to calling `gen_event:swap_sup_handler/3`.
 """.
 swap_sup_handler(Manager, OldHandler, NewHandler) ->
     gen_event:swap_sup_handler(Manager, OldHandler, NewHandler).
-
 
 -doc """
 A util function. Equivalent to calling
@@ -263,7 +242,6 @@ A util function. Equivalent to calling
 """.
 swap_watched_handler(OldHandler, NewHandler) ->
     swap_watched_handler(?MODULE, OldHandler, NewHandler).
-
 
 -doc """
 Replaces an event handler in event manager `Manager` in the same way as
@@ -280,27 +258,24 @@ swap_watched_handler(Manager, OldHandler, NewHandler) ->
         Manager, {swap, OldHandler, NewHandler}
     ).
 
-
 -spec delete_callback(Ref :: reference(), Args :: term()) ->
     term() | {error, module_not_found} | {'EXIT', Reason :: any()}.
 
 delete_callback(Ref, Args) ->
     delete_handler({?MODULE, Ref}, Args).
 
-
 -spec delete_handler(
-    Handler :: module() | {module(), term()}, Args :: term()) ->
+    Handler :: module() | {module(), term()}, Args :: term()
+) ->
     term() | {error, module_not_found} | {'EXIT', Reason :: any()}.
 
 delete_handler(Handler, Args) ->
     gen_event:delete_handler(?MODULE, Handler, Args).
 
-
 -spec delete_watched_handler(Watcher :: pid()) -> ok | {error, not_found}.
 
 delete_watched_handler(Watcher) ->
     bondy_event_handler_watcher_sup:terminate_watcher(Watcher).
-
 
 -doc """
 A util function. Equivalent to calling
@@ -309,14 +284,12 @@ A util function. Equivalent to calling
 notify(Event) ->
     notify(?MODULE, Event).
 
-
 -doc """
 A util function. Equivalent to calling
 `gen_event:notify(bondy_event_manager, Event)`.
 """.
 notify(Manager, Event) ->
     gen_event:notify(Manager, Event).
-
 
 -doc """
 A util function. Equivalent to calling
@@ -325,7 +298,6 @@ A util function. Equivalent to calling
 sync_notify(Event) ->
     sync_notify(?MODULE, Event).
 
-
 -doc """
 A util function. Equivalent to calling
 `gen_event:sync_notify(bondy_event_manager, Event)`.
@@ -333,18 +305,12 @@ A util function. Equivalent to calling
 sync_notify(Manager, Event) ->
     gen_event:sync_notify(Manager, Event).
 
-
-
-
 %% =============================================================================
 %% GEN_EVENT CALLBACKS
 %% =============================================================================
 
-
-
 init(CB) ->
     {ok, #state{callback = CB}}.
-
 
 handle_event(Event, State) ->
     try
@@ -368,14 +334,11 @@ handle_event(Event, State) ->
     end,
     {ok, State}.
 
-
 handle_call(_Request, State) ->
     {ok, ok, State}.
 
-
 handle_info(_Info, State) ->
     {ok, State}.
-
 
 terminate(_Reason, _State) ->
     ok.

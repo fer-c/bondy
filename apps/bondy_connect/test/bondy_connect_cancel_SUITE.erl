@@ -38,7 +38,6 @@ INTERRUPT. It further asserts the callee connection survives and keeps serving.
 -define(SLOW_MS, 5000).
 -define(RECV_MS, 3000).
 
-
 all() ->
     [
         cancel_skip,
@@ -47,7 +46,6 @@ all() ->
         cancel_specific_among_many,
         cancel_unknown_token
     ].
-
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -58,18 +56,16 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
 
-
-
 %% skip: caller errored immediately, no INTERRUPT to the callee.
 cancel_skip(_) ->
     Callee = connect(),
-    {ok, _} = bondy_connect:register(Callee, <<"com.example.cancel.skip">>, slow()),
+    {ok, _} = bondy_connect:register(
+        Callee, <<"com.example.cancel.skip">>, slow()
+    ),
 
     Caller = connect(),
     {ok, Token} = bondy_connect:call_async(
@@ -80,7 +76,6 @@ cancel_skip(_) ->
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
-
 
 %% killnowait: caller errored immediately, INTERRUPT sent to the callee.
 cancel_killnowait(_) ->
@@ -100,7 +95,6 @@ cancel_killnowait(_) ->
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
-
 
 %% kill: the callee is interrupted; the caller hears `canceled` well before the
 %% slow handler would finish, and the callee survives to serve a fresh call.
@@ -129,7 +123,6 @@ cancel_kill_interrupts_callee(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
 %% Cancelling one token among several in-flight async calls must cancel exactly
 %% that call and leave the others in flight — proving the token->ReqId secondary
 %% index (review C1) resolves each token to its own request, not just "some"
@@ -148,7 +141,7 @@ cancel_specific_among_many(_) ->
             ),
             T
         end
-        || _ <- lists:seq(1, 3)
+     || _ <- lists:seq(1, 3)
     ],
 
     %% Cancel only the middle one.
@@ -169,7 +162,6 @@ cancel_specific_among_many(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
 %% Cancelling an unknown token is a clean error, not a crash.
 cancel_unknown_token(_) ->
     Caller = connect(),
@@ -179,18 +171,16 @@ cancel_unknown_token(_) ->
     ),
     ok = bondy_connect:disconnect(Caller).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
 
-
-
 %% @private A handler that sleeps well past the receive window.
 slow() ->
-    fun(_, _, _) -> timer:sleep(?SLOW_MS), {reply, [<<"too_late">>]} end.
-
+    fun(_, _, _) ->
+        timer:sleep(?SLOW_MS),
+        {reply, [<<"too_late">>]}
+    end.
 
 %% @private Assert the async caller received a terminating `canceled` error.
 assert_canceled(Token) ->
@@ -200,7 +190,6 @@ assert_canceled(Token) ->
     after ?RECV_MS ->
         ct:fail(no_cancel_reply)
     end.
-
 
 %% @private
 connect() ->
@@ -212,7 +201,6 @@ connect() ->
         serializers => [json]
     }),
     Conn.
-
 
 %% @private
 add_anon_realm(RealmUri) ->

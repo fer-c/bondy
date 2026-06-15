@@ -12,17 +12,16 @@ cleaning up expired tokens and truncating to a maximum size.
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
--type t()   ::  #{
-                    type := ?MODULE,
-                    data := data(),
-                    index := index(),
-                    size := non_neg_integer()
-                }.
--type data()    ::  #{bondy_auth_scope:t() => bondy_oauth_token:t()}.
--type index()   ::  #{bondy_oauth_token:token_id() => bondy_auth_scope:t()}.
+-type t() :: #{
+    type := ?MODULE,
+    data := data(),
+    index := index(),
+    size := non_neg_integer()
+}.
+-type data() :: #{bondy_auth_scope:t() => bondy_oauth_token:t()}.
+-type index() :: #{bondy_oauth_token:token_id() => bondy_auth_scope:t()}.
 
 -export_type([t/0]).
-
 
 -export([add/2]).
 -export([cleanup/1]).
@@ -41,20 +40,15 @@ cleaning up expired tokens and truncating to a maximum size.
 -export([to_list/1]).
 -export([truncate/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Create a new empty token store".
 -spec new() -> t().
 
 new() ->
     #{type => ?MODULE, data => #{}, index => #{}, size => 0}.
-
 
 -doc "Add/replace a token to/in the store according to its `authscope`.".
 -spec add(t(), bondy_oauth_token:t()) -> t().
@@ -67,7 +61,6 @@ add(#{type := ?MODULE, data := Data0, index := Index0} = T, Token) ->
         case maps:take(Scope, Data0) of
             {#{id := OldTokenId}, NewData} ->
                 {maps:remove(OldTokenId, Index0), NewData};
-
             error ->
                 {Index0, Data0}
         end,
@@ -78,33 +71,31 @@ add(#{type := ?MODULE, data := Data0, index := Index0} = T, Token) ->
     Size = maps:size(Index),
     T#{data => Data, index => Index, size => Size}.
 
-
 -doc "Removes a token from the store".
 -spec remove(t(), bondy_auth_scope:t()) -> t().
 
-remove(#{type := ?MODULE, data := Data0, index := Index0} = T, Scope)
-when is_map(Scope) ->
+remove(#{type := ?MODULE, data := Data0, index := Index0} = T, Scope) when
+    is_map(Scope)
+->
     case maps:take(Scope, Data0) of
         {#{id := TokenId}, Data} ->
             Index = maps:remove(TokenId, Index0),
             Size = maps:size(Data),
             Size = maps:size(Index),
             T#{data => Data, index => Index, size => Size};
-
         error ->
             T
     end.
 
-
 -doc "Removes a token from the store".
 -spec remove(t(), bondy_auth_scope:t(), binary()) -> t().
 
-remove(#{type := ?MODULE} = T0, Scope, TokenId)
-when is_map(Scope) andalso is_binary(TokenId) ->
+remove(#{type := ?MODULE} = T0, Scope, TokenId) when
+    is_map(Scope) andalso is_binary(TokenId)
+->
     case take(T0, Scope, TokenId) of
         {ok, {_, T}} ->
             T;
-
         {error, not_found} ->
             T0
     end.
@@ -113,8 +104,9 @@ when is_map(Scope) andalso is_binary(TokenId) ->
 -spec take(t(), bondy_auth_scope:t()) ->
     {ok, {bondy_oauth_token:t(), t()}} | {error, not_found}.
 
-take(#{type := ?MODULE, data := Data0, index := Index0} = T0, Scope)
-when is_map(Scope) ->
+take(#{type := ?MODULE, data := Data0, index := Index0} = T0, Scope) when
+    is_map(Scope)
+->
     case maps:find(Scope, Data0) of
         {ok, #{id := TokenId} = Token} ->
             Data = maps:remove(Scope, Data0),
@@ -123,29 +115,25 @@ when is_map(Scope) ->
             Size = maps:size(Index),
             T1 = T0#{data => Data, index => Index, size => Size},
             {ok, {Token, T1}};
-
         error ->
             {error, not_found}
     end.
-
 
 -doc "Removes a token from the store and returns it".
 -spec take(t(), bondy_auth_scope:t(), binary()) ->
     {ok, {bondy_oauth_token:t(), t()}} | {error, not_found}.
 
-take(#{type := ?MODULE, index := Index0} = T, Scope, TokenId)
-when is_map(Scope) andalso is_binary(TokenId) ->
+take(#{type := ?MODULE, index := Index0} = T, Scope, TokenId) when
+    is_map(Scope) andalso is_binary(TokenId)
+->
     case maps:find(TokenId, Index0) of
         {ok, S} when S == Scope ->
             take(T, Scope);
-
         {ok, _} ->
             {error, not_found};
-
         error ->
             {error, not_found}
     end.
-
 
 -doc "Merge two token stores".
 -spec merge(t(), t()) -> t().
@@ -163,7 +151,6 @@ merge(#{type := ?MODULE} = T1, #{type := ?MODULE} = T2) ->
     ),
     T1#{data => D, index => I, size => maps:size(D)}.
 
-
 -doc "Remove all expired tokens from the store".
 -spec cleanup(t()) ->
     {[bondy_oauth_token:t()], t()}.
@@ -171,13 +158,11 @@ merge(#{type := ?MODULE} = T1, #{type := ?MODULE} = T2) ->
 cleanup(T) ->
     cleanup(T, erlang:system_time(second)).
 
-
 -doc "Remove all expired tokens from the store".
 -spec cleanup(t(), Now :: non_neg_integer()) ->
     {[bondy_oauth_token:t()], t()}.
 
 cleanup(#{type := ?MODULE, data := Data0, index := Index0} = T, Now) ->
-
     {Expired, Data, Index} =
         maps:fold(
             fun(Key, Token, {ExpAcc, DataAcc, IndexAcc}) ->
@@ -189,7 +174,6 @@ cleanup(#{type := ?MODULE, data := Data0, index := Index0} = T, Now) ->
                             maps:remove(Key, DataAcc),
                             maps:remove(TokenId, IndexAcc)
                         };
-
                     false ->
                         {ExpAcc, DataAcc, IndexAcc}
                 end
@@ -200,7 +184,6 @@ cleanup(#{type := ?MODULE, data := Data0, index := Index0} = T, Now) ->
 
     {Expired, T#{data => Data, index => Index, size => maps:size(Data)}}.
 
-
 -doc """
 Keeps the most recent `MaxSize` tokens on the set, returning those removed
 if any.
@@ -208,10 +191,10 @@ if any.
 -spec truncate(t(), MaxSize :: non_neg_integer()) ->
     {[bondy_oauth_token:t()], t()}.
 
-truncate(#{type := ?MODULE, size := Size} = T, MaxSize)
-when Size =< MaxSize ->
+truncate(#{type := ?MODULE, size := Size} = T, MaxSize) when
+    Size =< MaxSize
+->
     {[], T};
-
 truncate(#{type := ?MODULE, size := Size} = T0, MaxSize) ->
     Truncated = lists:sublist(to_list(T0), MaxSize + 1, Size),
     T = lists:foldl(
@@ -223,7 +206,6 @@ truncate(#{type := ?MODULE, size := Size} = T0, MaxSize) ->
     ),
     {Truncated, T}.
 
-
 -doc """
 Util function.
 """.
@@ -233,19 +215,18 @@ Util function.
 cleanup_and_truncate(#{type := ?MODULE} = T, MaxSize) ->
     cleanup_and_truncate(T, MaxSize, erlang:system_time(second)).
 
-
 -doc """
 Util function.
 """.
 -spec cleanup_and_truncate(
-    t(), MaxSize :: non_neg_integer(), Now :: non_neg_integer()) ->
+    t(), MaxSize :: non_neg_integer(), Now :: non_neg_integer()
+) ->
     {[bondy_oauth_token:t()], t()}.
 
 cleanup_and_truncate(#{type := ?MODULE} = T0, MaxSize, Now) ->
     {Removed, T1} = cleanup(T0, Now),
     {Truncated, T} = truncate(T1, MaxSize),
     {Removed ++ Truncated, T}.
-
 
 -doc "Find a token based on scope or TokenId".
 -spec find(t(), bondy_auth_scope:t() | bondy_oauth_token:token_id()) ->
@@ -255,45 +236,38 @@ find(#{type := ?MODULE, data := Data}, Scope) when is_map(Scope) ->
     case maps:find(Scope, Data) of
         {ok, _} = OK ->
             OK;
-
         error ->
             {error, not_found}
     end;
-
 find(#{type := ?MODULE, index := Index} = T, TokenId) when is_binary(TokenId) ->
     case maps:find(TokenId, Index) of
         {ok, Scope} ->
             find(T, Scope);
-
         error ->
             {error, not_found}
     end.
-
 
 -doc "Find a token based on scope and TokenId".
 -spec find(t(), bondy_auth_scope:t(), binary()) ->
     {ok, bondy_oauth_token:t()} | {error, not_found}.
 
-find(#{type := ?MODULE, index := Index} = T, Scope, TokenId)
-when is_map(Scope) andalso is_binary(TokenId) ->
+find(#{type := ?MODULE, index := Index} = T, Scope, TokenId) when
+    is_map(Scope) andalso is_binary(TokenId)
+->
     case maps:find(TokenId, Index) of
         {ok, S} when S == Scope ->
             find(T, Scope);
-
         {ok, _} ->
             {error, not_found};
-
         error ->
             {error, not_found}
     end.
-
 
 -doc "Returns the number of tokens".
 -spec size(t()) -> non_neg_integer().
 
 size(#{type := ?MODULE, size := Size}) ->
     Size.
-
 
 -doc "Convert set to a flat list sorted by `refreshed_at`".
 -spec to_list(t()) -> [bondy_oauth_token:t()].
@@ -306,18 +280,13 @@ to_list(#{type := ?MODULE, data := Data}) ->
         maps:values(Data)
     ).
 
-
-
-
 %% =============================================================================
 %% TEST
 %% =============================================================================
 
-
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
-
 
 %% =============================================================================
 %% TEST FIXTURES
@@ -395,7 +364,9 @@ add_single_token_test() ->
     TokenSet1 = bondy_oauth_token_set:add(TokenSet0, Token),
 
     ?assertEqual(1, bondy_oauth_token_set:size(TokenSet1)),
-    ?assertEqual({ok, Token}, bondy_oauth_token_set:find(TokenSet1, Scope, <<"token1">>)),
+    ?assertEqual(
+        {ok, Token}, bondy_oauth_token_set:find(TokenSet1, Scope, <<"token1">>)
+    ),
 
     %% Check that index is updated
     Index = maps:get(index, TokenSet1),
@@ -412,8 +383,14 @@ add_multiple_tokens_different_scopes_test() ->
     TokenSet2 = bondy_oauth_token_set:add(TokenSet1, Token2),
 
     ?assertEqual(2, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({ok, Token1}, bondy_oauth_token_set:find(TokenSet2, Scope1, <<"token1">>)),
-    ?assertEqual({ok, Token2}, bondy_oauth_token_set:find(TokenSet2, Scope2, <<"token2">>)),
+    ?assertEqual(
+        {ok, Token1},
+        bondy_oauth_token_set:find(TokenSet2, Scope1, <<"token1">>)
+    ),
+    ?assertEqual(
+        {ok, Token2},
+        bondy_oauth_token_set:find(TokenSet2, Scope2, <<"token2">>)
+    ),
 
     %% Check index integrity
     Index = maps:get(index, TokenSet2),
@@ -431,8 +408,13 @@ add_replace_token_same_scope_test() ->
 
     %% Size should remain 1 as token was replaced
     ?assertEqual(1, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)),
-    ?assertEqual({ok, Token2}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token2">>)),
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)
+    ),
+    ?assertEqual(
+        {ok, Token2}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token2">>)
+    ),
 
     %% Check index is properly updated
     Index = maps:get(index, TokenSet2),
@@ -452,7 +434,10 @@ remove_existing_scope_test() ->
     TokenSet2 = bondy_oauth_token_set:remove(TokenSet1, Scope),
 
     ?assertEqual(0, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)),
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)
+    ),
 
     %% Check index is cleaned up
     Index = maps:get(index, TokenSet2),
@@ -469,7 +454,9 @@ remove_non_existing_scope_test() ->
 
     %% Should remain unchanged
     ?assertEqual(1, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({ok, Token}, bondy_oauth_token_set:find(TokenSet2, Scope1, <<"token1">>)).
+    ?assertEqual(
+        {ok, Token}, bondy_oauth_token_set:find(TokenSet2, Scope1, <<"token1">>)
+    ).
 
 %% -----------------------------------------------------------------------------
 %% remove/3 tests
@@ -484,7 +471,10 @@ remove_with_matching_token_id_test() ->
     TokenSet2 = bondy_oauth_token_set:remove(TokenSet1, Scope, <<"token1">>),
 
     ?assertEqual(0, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)).
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)
+    ).
 
 remove_with_non_matching_token_id_test() ->
     TokenSet0 = bondy_oauth_token_set:new(),
@@ -492,11 +482,15 @@ remove_with_non_matching_token_id_test() ->
     Token = mock_token(<<"token1">>, Scope, 3600),
 
     TokenSet1 = bondy_oauth_token_set:add(TokenSet0, Token),
-    TokenSet2 = bondy_oauth_token_set:remove(TokenSet1, Scope, <<"wrong_token">>),
+    TokenSet2 = bondy_oauth_token_set:remove(
+        TokenSet1, Scope, <<"wrong_token">>
+    ),
 
     %% Should remain unchanged
     ?assertEqual(1, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({ok, Token}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)).
+    ?assertEqual(
+        {ok, Token}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)
+    ).
 
 %% -----------------------------------------------------------------------------
 %% take/3 tests
@@ -514,7 +508,10 @@ take_existing_token_test() ->
     {ok, {ReturnedToken, TokenSet2}} = Result,
     ?assertEqual(Token, ReturnedToken),
     ?assertEqual(0, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)),
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)
+    ),
 
     %% Check index is cleaned up
     Index = maps:get(index, TokenSet2),
@@ -555,8 +552,12 @@ merge_non_overlapping_sets_test() ->
     Merged = bondy_oauth_token_set:merge(TokenSet1Updated, TokenSet2Updated),
 
     ?assertEqual(2, bondy_oauth_token_set:size(Merged)),
-    ?assertEqual({ok, Token1}, bondy_oauth_token_set:find(Merged, Scope1, <<"token1">>)),
-    ?assertEqual({ok, Token2}, bondy_oauth_token_set:find(Merged, Scope2, <<"token2">>)),
+    ?assertEqual(
+        {ok, Token1}, bondy_oauth_token_set:find(Merged, Scope1, <<"token1">>)
+    ),
+    ?assertEqual(
+        {ok, Token2}, bondy_oauth_token_set:find(Merged, Scope2, <<"token2">>)
+    ),
 
     %% Check index integrity
     Index = maps:get(index, Merged),
@@ -576,7 +577,9 @@ merge_overlapping_sets_test() ->
 
     %% Token2 should overwrite Token1 due to maps:merge behavior
     ?assertEqual(1, bondy_oauth_token_set:size(Merged)),
-    ?assertEqual({ok, Token2}, bondy_oauth_token_set:find(Merged, Scope, <<"token2">>)),
+    ?assertEqual(
+        {ok, Token2}, bondy_oauth_token_set:find(Merged, Scope, <<"token2">>)
+    ),
 
     %% Check index shows the correct mapping
     Index = maps:get(index, Merged),
@@ -605,11 +608,15 @@ cleanup_no_expired_tokens_test() ->
     Token = mock_token(<<"token1">>, Scope, 3600),
 
     TokenSet1 = bondy_oauth_token_set:add(TokenSet0, Token),
-    {Expired, TokenSet2} = bondy_oauth_token_set:cleanup(TokenSet1, erlang:system_time(second)),
+    {Expired, TokenSet2} = bondy_oauth_token_set:cleanup(
+        TokenSet1, erlang:system_time(second)
+    ),
 
     ?assertEqual([], Expired),
     ?assertEqual(1, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({ok, Token}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)).
+    ?assertEqual(
+        {ok, Token}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)
+    ).
 
 cleanup_expired_tokens_test() ->
     TokenSet0 = bondy_oauth_token_set:new(),
@@ -618,11 +625,16 @@ cleanup_expired_tokens_test() ->
     Token = mock_token(<<"token1">>, Scope, 0),
 
     TokenSet1 = bondy_oauth_token_set:add(TokenSet0, Token),
-    {Expired, TokenSet2} = bondy_oauth_token_set:cleanup(TokenSet1, erlang:system_time(second)),
+    {Expired, TokenSet2} = bondy_oauth_token_set:cleanup(
+        TokenSet1, erlang:system_time(second)
+    ),
 
     ?assertEqual([Token], Expired),
     ?assertEqual(0, bondy_oauth_token_set:size(TokenSet2)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)).
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token_set:find(TokenSet2, Scope, <<"token1">>)
+    ).
 
 cleanup_mixed_tokens_test() ->
     TokenSet0 = bondy_oauth_token_set:new(),
@@ -634,12 +646,20 @@ cleanup_mixed_tokens_test() ->
 
     TokenSet1 = bondy_oauth_token_set:add(TokenSet0, ExpiredToken),
     TokenSet2 = bondy_oauth_token_set:add(TokenSet1, ValidToken),
-    {Expired, TokenSet3} = bondy_oauth_token_set:cleanup(TokenSet2, erlang:system_time(second)),
+    {Expired, TokenSet3} = bondy_oauth_token_set:cleanup(
+        TokenSet2, erlang:system_time(second)
+    ),
 
     ?assertEqual([ExpiredToken], Expired),
     ?assertEqual(1, bondy_oauth_token_set:size(TokenSet3)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet3, Scope1, <<"expired">>)),
-    ?assertEqual({ok, ValidToken}, bondy_oauth_token_set:find(TokenSet3, Scope2, <<"valid">>)).
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token_set:find(TokenSet3, Scope1, <<"expired">>)
+    ),
+    ?assertEqual(
+        {ok, ValidToken},
+        bondy_oauth_token_set:find(TokenSet3, Scope2, <<"valid">>)
+    ).
 
 %% -----------------------------------------------------------------------------
 %% truncate/2 tests
@@ -707,7 +727,9 @@ cleanup_and_truncate_two_args_test() ->
     TokenSet3 = bondy_oauth_token_set:add(TokenSet2, ValidToken2),
 
     %% Cleanup and keep only 1 token
-    {Removed, TokenSet4} = bondy_oauth_token_set:cleanup_and_truncate(TokenSet3, 1),
+    {Removed, TokenSet4} = bondy_oauth_token_set:cleanup_and_truncate(
+        TokenSet3, 1
+    ),
 
     %% Should remove expired token + 1 valid token due to truncation
     ?assertEqual(2, length(Removed)),
@@ -728,12 +750,17 @@ cleanup_and_truncate_three_args_test() ->
     TokenSet1 = bondy_oauth_token_set:add(TokenSet0, ExpiredToken),
     TokenSet2 = bondy_oauth_token_set:add(TokenSet1, ValidToken),
 
-    {Removed, TokenSet3} = bondy_oauth_token_set:cleanup_and_truncate(TokenSet2, 1, erlang:system_time(second)),
+    {Removed, TokenSet3} = bondy_oauth_token_set:cleanup_and_truncate(
+        TokenSet2, 1, erlang:system_time(second)
+    ),
 
     %% Should remove only the expired token
     ?assertEqual([ExpiredToken], Removed),
     ?assertEqual(1, bondy_oauth_token_set:size(TokenSet3)),
-    ?assertEqual({ok, ValidToken}, bondy_oauth_token_set:find(TokenSet3, Scope2, <<"valid">>)).
+    ?assertEqual(
+        {ok, ValidToken},
+        bondy_oauth_token_set:find(TokenSet3, Scope2, <<"valid">>)
+    ).
 
 %% -----------------------------------------------------------------------------
 %% find/2 tests (new function)
@@ -951,11 +978,17 @@ full_lifecycle_test() ->
     ?assertEqual(3, bondy_oauth_token_set:size(TokenSet3)),
 
     %% Verify we can find tokens by ID and scope
-    ?assertEqual({ok, ExpiredToken}, bondy_oauth_token_set:find(TokenSet3, <<"expired">>)),
-    ?assertEqual({ok, ValidToken1}, bondy_oauth_token_set:find(TokenSet3, Scope2)),
+    ?assertEqual(
+        {ok, ExpiredToken}, bondy_oauth_token_set:find(TokenSet3, <<"expired">>)
+    ),
+    ?assertEqual(
+        {ok, ValidToken1}, bondy_oauth_token_set:find(TokenSet3, Scope2)
+    ),
 
     %% Cleanup expired tokens
-    {Expired, TokenSet4} = bondy_oauth_token_set:cleanup(TokenSet3, erlang:system_time(second)),
+    {Expired, TokenSet4} = bondy_oauth_token_set:cleanup(
+        TokenSet3, erlang:system_time(second)
+    ),
     ?assertEqual([ExpiredToken], Expired),
     ?assertEqual(2, bondy_oauth_token_set:size(TokenSet4)),
 
@@ -978,11 +1011,16 @@ combined_cleanup_and_truncate_test() ->
 
     %% Create 5 tokens: 2 expired, 3 valid
     Tokens = [
-        mock_token(<<"exp1">>, mock_scope(<<"s1">>), 0),  %% Expired
-        mock_token(<<"exp2">>, mock_scope(<<"s2">>), 0),  %% Expired
-        mock_token(<<"val1">>, mock_scope(<<"s3">>), 1800),  %% Valid
-        mock_token(<<"val2">>, mock_scope(<<"s4">>), 3600),  %% Valid
-        mock_token(<<"val3">>, mock_scope(<<"s5">>), 7200)   %% Valid
+        %% Expired
+        mock_token(<<"exp1">>, mock_scope(<<"s1">>), 0),
+        %% Expired
+        mock_token(<<"exp2">>, mock_scope(<<"s2">>), 0),
+        %% Valid
+        mock_token(<<"val1">>, mock_scope(<<"s3">>), 1800),
+        %% Valid
+        mock_token(<<"val2">>, mock_scope(<<"s4">>), 3600),
+        %% Valid
+        mock_token(<<"val3">>, mock_scope(<<"s5">>), 7200)
     ],
 
     %% Add all tokens
@@ -997,7 +1035,9 @@ combined_cleanup_and_truncate_test() ->
     ?assertEqual(5, bondy_oauth_token_set:size(TokenSet)),
 
     %% Cleanup and truncate to keep 2 tokens
-    {Removed, FinalSet} = bondy_oauth_token_set:cleanup_and_truncate(TokenSet, 2, erlang:system_time(second)),
+    {Removed, FinalSet} = bondy_oauth_token_set:cleanup_and_truncate(
+        TokenSet, 2, erlang:system_time(second)
+    ),
 
     %% Should remove 2 expired + 1 valid token (3 total)
     ?assertEqual(3, length(Removed)),
@@ -1072,7 +1112,9 @@ index_and_data_consistency_test() ->
     VerifyConsistency(TokenSet2),
 
     %% Replace token (same scope, different token)
-    Token3 = mock_token(<<"token3">>, Scope1, erlang:system_time(second) + 7200),
+    Token3 = mock_token(
+        <<"token3">>, Scope1, erlang:system_time(second) + 7200
+    ),
     TokenSet3 = bondy_oauth_token_set:add(TokenSet2, Token3),
     VerifyConsistency(TokenSet3),
 
@@ -1081,7 +1123,9 @@ index_and_data_consistency_test() ->
     VerifyConsistency(TokenSet4),
 
     %% Take remaining token
-    {ok, {_TakenToken, TokenSet5}} = bondy_oauth_token_set:take(TokenSet4, Scope2, <<"token2">>),
+    {ok, {_TakenToken, TokenSet5}} = bondy_oauth_token_set:take(
+        TokenSet4, Scope2, <<"token2">>
+    ),
     VerifyConsistency(TokenSet5),
 
     %% Should be empty now
@@ -1097,10 +1141,13 @@ performance_simulation_test() ->
             Scope = mock_scope(list_to_binary("scope_" ++ integer_to_list(N))),
             TokenId = list_to_binary("token_" ++ integer_to_list(N)),
             %% Mix of expired and valid tokens
-            ExpiresAt = case N rem 3 of
-                0 -> 0;  %% Expired
-                _ -> 3600   %% Valid
-            end,
+            ExpiresAt =
+                case N rem 3 of
+                    %% Expired
+                    0 -> 0;
+                    %% Valid
+                    _ -> 3600
+                end,
             Token = mock_token(TokenId, Scope, ExpiresAt),
             bondy_oauth_token_set:add(Acc, Token)
         end,
@@ -1111,9 +1158,12 @@ performance_simulation_test() ->
     ?assertEqual(100, bondy_oauth_token_set:size(TokenSet1)),
 
     %% Cleanup expired tokens (should remove ~33 tokens)
-    {Expired, TokenSet2} = bondy_oauth_token_set:cleanup(TokenSet1, erlang:system_time(second)),
+    {Expired, TokenSet2} = bondy_oauth_token_set:cleanup(
+        TokenSet1, erlang:system_time(second)
+    ),
     ExpiredCount = length(Expired),
-    ?assert(ExpiredCount >= 30 andalso ExpiredCount =< 40),  %% Approximately 1/3
+    %% Approximately 1/3
+    ?assert(ExpiredCount >= 30 andalso ExpiredCount =< 40),
 
     %% Truncate to 20 tokens
     {_Truncated, TokenSet3} = bondy_oauth_token_set:truncate(TokenSet2, 20),
@@ -1155,7 +1205,9 @@ edge_cases_test() ->
     ?assertEqual(TokenSet0, TokenSet2),
 
     %% Cleanup and truncate empty set
-    {Removed1, TokenSet3} = bondy_oauth_token_set:cleanup_and_truncate(TokenSet0, 5),
+    {Removed1, TokenSet3} = bondy_oauth_token_set:cleanup_and_truncate(
+        TokenSet0, 5
+    ),
     ?assertEqual([], Removed1),
     ?assertEqual(TokenSet0, TokenSet3),
 
@@ -1169,9 +1221,16 @@ edge_cases_test() ->
     ?assertEqual({error, not_found}, Result),
 
     %% Find in empty set
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet0, Scope)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet0, <<"token1">>)),
-    ?assertEqual({error, not_found}, bondy_oauth_token_set:find(TokenSet0, Scope, <<"token1">>)).
+    ?assertEqual(
+        {error, not_found}, bondy_oauth_token_set:find(TokenSet0, Scope)
+    ),
+    ?assertEqual(
+        {error, not_found}, bondy_oauth_token_set:find(TokenSet0, <<"token1">>)
+    ),
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token_set:find(TokenSet0, Scope, <<"token1">>)
+    ).
 
 %% -----------------------------------------------------------------------------
 %% Property-based testing helpers
@@ -1218,6 +1277,3 @@ size_consistency_property_test() ->
     CheckSizeConsistency(TokenSet4).
 
 -endif.
-
-
-

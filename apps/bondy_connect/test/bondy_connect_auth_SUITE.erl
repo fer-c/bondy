@@ -32,7 +32,6 @@ The cryptographic round-trips themselves are unit-tested at the protocol layer
 -define(USER, <<"alice">>).
 -define(PASSWORD, <<"secret-password-123">>).
 
-
 all() ->
     [
         anonymous_establishes,
@@ -40,7 +39,6 @@ all() ->
         cryptosign_establishes,
         ticket_establishes
     ].
-
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -57,13 +55,9 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 anonymous_establishes(_) ->
     {ok, Conn} = bondy_connect:connect(#{
@@ -75,7 +69,6 @@ anonymous_establishes(_) ->
     }),
     ?assertEqual(established, bondy_connect:status(Conn)),
     ok = bondy_connect:disconnect(Conn).
-
 
 wampcra_establishes(_) ->
     {ok, Conn} = bondy_connect:connect(#{
@@ -91,7 +84,6 @@ wampcra_establishes(_) ->
     }),
     ?assertEqual(established, bondy_connect:status(Conn)),
     ok = bondy_connect:disconnect(Conn).
-
 
 cryptosign_establishes(Config) ->
     #{secret := Secret} = ?config(keypair, Config),
@@ -109,7 +101,6 @@ cryptosign_establishes(Config) ->
     }),
     ?assertEqual(established, bondy_connect:status(Conn)),
     ok = bondy_connect:disconnect(Conn).
-
 
 ticket_establishes(_) ->
     %% Issue a real ticket from a (simulated) wampcra-authenticated session, then
@@ -131,13 +122,9 @@ ticket_establishes(_) ->
     ?assertEqual(established, bondy_connect:status(Conn)),
     ok = bondy_connect:disconnect(Conn).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 add_anon_realm(RealmUri) ->
@@ -149,7 +136,6 @@ add_anon_realm(RealmUri) ->
         sources => [source([<<"anonymous">>], ?WAMP_ANON_AUTH)]
     }).
 
-
 %% @private
 add_cra_realm(RealmUri) ->
     create(#{
@@ -158,11 +144,15 @@ add_cra_realm(RealmUri) ->
         security_enabled => true,
         grants => [grant([<<"wamp.call">>], <<"all">>)],
         users => [
-            #{username => ?USER, password => ?PASSWORD, groups => [], meta => #{}}
+            #{
+                username => ?USER,
+                password => ?PASSWORD,
+                groups => [],
+                meta => #{}
+            }
         ],
         sources => [source([?USER], ?WAMP_CRA_AUTH)]
     }).
-
 
 %% @private
 add_cryptosign_realm(RealmUri, #{public := PubKey}) ->
@@ -182,7 +172,6 @@ add_cryptosign_realm(RealmUri, #{public := PubKey}) ->
         sources => [source([?USER], ?WAMP_CRYPTOSIGN_AUTH)]
     }).
 
-
 %% @private Ticket auth: the user authenticates with wampcra to *issue* a ticket
 %% and with ticket to *use* it.
 add_ticket_realm(RealmUri) ->
@@ -200,20 +189,27 @@ add_ticket_realm(RealmUri) ->
             #{
                 permissions => [<<"bondy.issue">>],
                 resources => [
-                    #{uri => <<"bondy.ticket.scope.local">>, match => <<"exact">>}
+                    #{
+                        uri => <<"bondy.ticket.scope.local">>,
+                        match => <<"exact">>
+                    }
                 ],
                 roles => <<"all">>
             }
         ],
         users => [
-            #{username => ?USER, password => ?PASSWORD, groups => [], meta => #{}}
+            #{
+                username => ?USER,
+                password => ?PASSWORD,
+                groups => [],
+                meta => #{}
+            }
         ],
         sources => [
             source([?USER], ?WAMP_CRA_AUTH),
             source([?USER], ?WAMP_TICKET_AUTH)
         ]
     }).
-
 
 %% @private
 grant(Permissions, Roles) ->
@@ -224,7 +220,6 @@ grant(Permissions, Roles) ->
         roles => Roles
     }.
 
-
 %% @private
 source(Usernames, AuthMethod) ->
     #{
@@ -233,12 +228,10 @@ source(Usernames, AuthMethod) ->
         cidr => <<"0.0.0.0/0">>
     }.
 
-
 %% @private
 create(Cfg) ->
     _ = bondy_realm:create(Cfg),
     ok.
-
 
 %% @private Build and register a session row so `bondy_ticket:issue/2` can read
 %% it (mirrors `bondy_auth_ticket_SUITE`).

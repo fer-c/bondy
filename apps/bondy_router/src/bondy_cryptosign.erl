@@ -13,7 +13,7 @@ source of truth shared with the WAMP client. New code should call
 `bondy_wamp_cryptosign` directly.
 """.
 
--type key_pair()        ::  bondy_wamp_cryptosign:key_pair().
+-type key_pair() :: bondy_wamp_cryptosign:key_pair().
 
 -export_type([key_pair/0]).
 
@@ -25,19 +25,14 @@ source of truth shared with the WAMP client. New code should call
 -export([strong_rand_bytes/1]).
 -export([verify/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec generate_key() -> KeyPair :: key_pair().
 
 generate_key() ->
     bondy_wamp_cryptosign:generate_key().
-
 
 -doc "Calls `strong_rand_bytes/1` with the default length value `32`.".
 -spec strong_rand_bytes() -> binary().
@@ -45,12 +40,10 @@ generate_key() ->
 strong_rand_bytes() ->
     bondy_wamp_cryptosign:strong_rand_bytes().
 
-
 -spec strong_rand_bytes(non_neg_integer()) -> binary().
 
 strong_rand_bytes(Length) ->
     bondy_wamp_cryptosign:strong_rand_bytes(Length).
-
 
 -spec sign(Challenge :: binary(), KeyPair :: key_pair()) ->
     Signature :: binary().
@@ -58,14 +51,13 @@ strong_rand_bytes(Length) ->
 sign(Challenge, KeyPair) ->
     bondy_wamp_cryptosign:sign(Challenge, KeyPair).
 
-
 -spec verify(
-    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()) ->
+    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()
+) ->
     boolean() | no_return().
 
 verify(Signature, Challenge, PublicKey) ->
     bondy_wamp_cryptosign:verify(Signature, Challenge, PublicKey).
-
 
 -doc """
 As the cryptosign spec is not formal some clients e.g. Python return

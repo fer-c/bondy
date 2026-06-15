@@ -33,8 +33,8 @@ isolated, load-regulated worker processes; a crashing handler never affects the
 connection.
 """.
 
--opaque conn()  ::  {bondy_connect, pid() | atom()}.
--type handler() ::  bondy_connect_handler_spec:handler().
+-opaque conn() :: {bondy_connect, pid() | atom()}.
+-type handler() :: bondy_connect_handler_spec:handler().
 
 -export_type([conn/0]).
 -export_type([handler/0]).
@@ -68,19 +68,14 @@ connection.
 -export([publish/4]).
 -export([publish/5]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Open an (unnamed) connection and wait for the session to establish.".
 -spec connect(Spec :: map()) -> {ok, conn()} | {error, term()}.
 connect(Spec) ->
     connect(undefined, Spec).
-
 
 -doc "Open a named connection and wait for the session to establish.".
 -spec connect(Name :: atom() | undefined, Spec :: map()) ->
@@ -88,7 +83,9 @@ connect(Spec) ->
 connect(Name, Spec) ->
     case bondy_connect_manager:connect(Name, Spec) of
         {ok, Pid} ->
-            case bondy_connect_connection:await_ready(Pid, ?AWAIT_READY_TIMEOUT) of
+            case
+                bondy_connect_connection:await_ready(Pid, ?AWAIT_READY_TIMEOUT)
+            of
                 ok ->
                     {ok, {bondy_connect, Pid}};
                 {error, Reason} ->
@@ -99,7 +96,6 @@ connect(Name, Spec) ->
             Error
     end.
 
-
 -doc """
 A handle for a previously **named** connection (the `Name` passed to
 `connect/2`), so it can be referenced from a process that does not hold the
@@ -109,12 +105,10 @@ original handle. Resolution to a live connection happens lazily on each call.
 named(Name) when is_atom(Name) ->
     {bondy_connect, Name}.
 
-
 -doc "Close a connection.".
 -spec disconnect(conn()) -> ok.
 disconnect({bondy_connect, PidOrName}) ->
     bondy_connect_manager:disconnect(PidOrName).
-
 
 -doc "The connection's status.".
 -spec status(conn()) ->
@@ -125,25 +119,21 @@ status(Conn) ->
         Pid -> bondy_connect_connection:status(Pid)
     end.
 
-
 -doc "Call a procedure with no arguments.".
 -spec call(conn(), binary()) -> {ok, map()} | {error, term()}.
 call(Conn, Uri) ->
     call(Conn, Uri, [], #{}, #{}).
-
 
 -doc "Call a procedure with positional arguments.".
 -spec call(conn(), binary(), Args :: list()) -> {ok, map()} | {error, term()}.
 call(Conn, Uri, Args) ->
     call(Conn, Uri, Args, #{}, #{}).
 
-
 -doc "Call a procedure with positional + keyword arguments.".
 -spec call(conn(), binary(), Args :: list(), KWArgs :: map()) ->
     {ok, map()} | {error, term()}.
 call(Conn, Uri, Args, KWArgs) ->
     call(Conn, Uri, Args, KWArgs, #{}).
-
 
 -doc """
 Call a procedure. `Opts` may carry `timeout` (ms). Returns
@@ -157,20 +147,17 @@ call(Conn, Uri, Args, KWArgs, Opts) ->
         bondy_connect_connection:call(Pid, Uri, Args, KWArgs, Opts)
     end).
 
-
 -doc "Asynchronous call with positional arguments. See `call_async/5`.".
 -spec call_async(conn(), binary(), list()) ->
     {ok, reference()} | {error, term()}.
 call_async(Conn, Uri, Args) ->
     call_async(Conn, Uri, Args, #{}, #{}).
 
-
 -doc "Asynchronous call with positional + keyword arguments. See `call_async/5`.".
 -spec call_async(conn(), binary(), list(), map()) ->
     {ok, reference()} | {error, term()}.
 call_async(Conn, Uri, Args, KWArgs) ->
     call_async(Conn, Uri, Args, KWArgs, #{}).
-
 
 -doc """
 Issue a call without blocking. Returns `{ok, Token}`; the reply is later sent to
@@ -183,12 +170,10 @@ call_async(Conn, Uri, Args, KWArgs, Opts) ->
         bondy_connect_connection:call_async(Pid, Uri, Args, KWArgs, Opts)
     end).
 
-
 -doc "Cancel an in-flight async call (mode `killnowait`). See `cancel/3`.".
 -spec cancel(conn(), reference()) -> ok | {error, term()}.
 cancel(Conn, Token) ->
     cancel(Conn, Token, killnowait).
-
 
 -doc """
 Cancel an in-flight async call identified by the `Token` returned from
@@ -202,13 +187,11 @@ cancel(Conn, Token, Mode) ->
         bondy_connect_connection:cancel(Pid, Token, Mode)
     end).
 
-
 -doc "Register a procedure. See `register/4`.".
 -spec register(conn(), binary(), handler()) ->
     {ok, pos_integer()} | {error, term()}.
 register(Conn, Uri, Handler) ->
     register(Conn, Uri, Handler, #{}).
-
 
 -doc """
 Register `Uri` as a procedure served by `Handler`. The handler runs in an
@@ -222,7 +205,6 @@ register(Conn, Uri, Handler, Opts) ->
         bondy_connect_connection:register(Pid, Uri, Handler, Opts)
     end).
 
-
 -doc "Unregister a procedure by its registration id or URI.".
 -spec unregister(conn(), pos_integer() | binary()) -> ok | {error, term()}.
 unregister(Conn, RegRef) ->
@@ -230,13 +212,11 @@ unregister(Conn, RegRef) ->
         bondy_connect_connection:unregister(Pid, RegRef)
     end).
 
-
 -doc "Subscribe to a topic. See `subscribe/4`.".
 -spec subscribe(conn(), binary(), handler()) ->
     {ok, pos_integer()} | {error, term()}.
 subscribe(Conn, Topic, Handler) ->
     subscribe(Conn, Topic, Handler, #{}).
-
 
 -doc """
 Subscribe to `Topic`; `Handler` is invoked per event. Events are delivered
@@ -250,7 +230,6 @@ subscribe(Conn, Topic, Handler, Opts) ->
         bondy_connect_connection:subscribe(Pid, Topic, Handler, Opts)
     end).
 
-
 -doc "Unsubscribe from a topic by its subscription id or URI.".
 -spec unsubscribe(conn(), pos_integer() | binary()) -> ok | {error, term()}.
 unsubscribe(Conn, SubRef) ->
@@ -258,19 +237,17 @@ unsubscribe(Conn, SubRef) ->
         bondy_connect_connection:unsubscribe(Pid, SubRef)
     end).
 
-
 -doc "Publish to a topic with positional arguments. See `publish/5`.".
--spec publish(conn(), binary(), list()) -> ok | {ok, pos_integer()} | {error, term()}.
+-spec publish(conn(), binary(), list()) ->
+    ok | {ok, pos_integer()} | {error, term()}.
 publish(Conn, Topic, Args) ->
     publish(Conn, Topic, Args, #{}, #{}).
-
 
 -doc "Publish to a topic with positional + keyword arguments. See `publish/5`.".
 -spec publish(conn(), binary(), list(), map()) ->
     ok | {ok, pos_integer()} | {error, term()}.
 publish(Conn, Topic, Args, KWArgs) ->
     publish(Conn, Topic, Args, KWArgs, #{}).
-
 
 -doc """
 Publish to `Topic`. By default fire-and-forget (`ok`); with `Opts`
@@ -284,13 +261,9 @@ publish(Conn, Topic, Args, KWArgs, Opts) ->
         bondy_connect_connection:publish(Pid, Topic, Args, KWArgs, Opts)
     end).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 with_conn(Conn, Fun) ->
@@ -298,8 +271,6 @@ with_conn(Conn, Fun) ->
         undefined -> {error, not_connected};
         Pid -> Fun(Pid)
     end.
-
-
 
 %% @private Resolve an opaque handle to a live connection pid (or `undefined`).
 resolve({bondy_connect, Pid}) when is_pid(Pid) ->

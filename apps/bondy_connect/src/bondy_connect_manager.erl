@@ -19,15 +19,15 @@ blocks on a network handshake.
 -behaviour(gen_server).
 
 -record(state, {
-    conns = #{}     ::  #{pid() => entry()},
-    names = #{}     ::  #{atom() => pid()}
+    conns = #{} :: #{pid() => entry()},
+    names = #{} :: #{atom() => pid()}
 }).
 
--type entry()       ::  #{
-                            conn_sup := pid(),
-                            name := atom() | undefined,
-                            ref := reference()
-                        }.
+-type entry() :: #{
+    conn_sup := pid(),
+    name := atom() | undefined,
+    ref := reference()
+}.
 
 -export([start_link/0]).
 -export([connect/2]).
@@ -41,18 +41,13 @@ blocks on a network handshake.
 
 -define(SERVER, ?MODULE).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
-
 
 -doc """
 Validate `Spec`, start a supervised connection, and return the connection pid.
@@ -63,7 +58,6 @@ The returned connection is not yet established — the caller awaits readiness.
     {ok, pid()} | {error, term()}.
 connect(Name, Spec) ->
     gen_server:call(?SERVER, {connect, Name, Spec}).
-
 
 -doc "Stop a connection (by pid or registered name).".
 -spec disconnect(pid() | atom()) -> ok.
@@ -81,28 +75,22 @@ disconnect(Conn) ->
         exit:{{shutdown, _}, _} -> ok
     end.
 
-
 -doc "Resolve a registered name to a connection pid.".
 -spec whereis_name(atom()) -> pid() | undefined.
 whereis_name(Name) when is_atom(Name) ->
     gen_server:call(?SERVER, {whereis, Name}).
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     {ok, #state{}}.
 
-
-handle_call({connect, Name, _Spec}, _From, State)
-when Name =/= undefined, is_map_key(Name, State#state.names) ->
+handle_call({connect, Name, _Spec}, _From, State) when
+    Name =/= undefined, is_map_key(Name, State#state.names)
+->
     {reply, {error, {already_started, Name}}, State};
-
 handle_call({connect, Name, Spec}, _From, State) ->
     case bondy_connect_config:validate(Spec) of
         {ok, Config} ->
@@ -110,34 +98,24 @@ handle_call({connect, Name, Spec}, _From, State) ->
         {error, _} = Error ->
             {reply, Error, State}
     end;
-
 handle_call({disconnect, Conn}, _From, State) ->
     {reply, ok, do_disconnect(Conn, State)};
-
 handle_call({whereis, Name}, _From, State) ->
     {reply, maps:get(Name, State#state.names, undefined), State};
-
 handle_call(_Request, _From, State) ->
     {reply, {error, badcall}, State}.
-
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-
 handle_info({'DOWN', Ref, process, Pid, _Reason}, State) ->
     {noreply, forget(Pid, Ref, State)};
-
 handle_info(_Info, State) ->
     {noreply, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 do_connect(Name, Config, State) ->
@@ -159,35 +137,32 @@ do_connect(Name, Config, State) ->
             {reply, Error, State}
     end.
 
-
 %% @private
 do_disconnect(Conn, State) ->
     case resolve(Conn, State) of
         undefined ->
             State;
         ConnPid ->
-            _ = case maps:find(ConnPid, State#state.conns) of
-                {ok, #{conn_sup := ConnSup}} ->
-                    bondy_connect_connections_sup:stop_connection(ConnSup);
-                error ->
-                    ok
-            end,
+            _ =
+                case maps:find(ConnPid, State#state.conns) of
+                    {ok, #{conn_sup := ConnSup}} ->
+                        bondy_connect_connections_sup:stop_connection(ConnSup);
+                    error ->
+                        ok
+                end,
             %% The 'DOWN' from the monitored connection performs the cleanup.
             State
     end.
 
-
 %% @private
 maybe_register(undefined, _Pid, Names) -> Names;
 maybe_register(Name, Pid, Names) -> maps:put(Name, Pid, Names).
-
 
 %% @private
 resolve(Pid, _State) when is_pid(Pid) ->
     Pid;
 resolve(Name, State) when is_atom(Name) ->
     maps:get(Name, State#state.names, undefined).
-
 
 %% @private
 forget(Pid, Ref, State) ->
@@ -205,7 +180,6 @@ forget(Pid, Ref, State) ->
         _ ->
             State
     end.
-
 
 %% @private
 drop_name(undefined, Names) -> Names;

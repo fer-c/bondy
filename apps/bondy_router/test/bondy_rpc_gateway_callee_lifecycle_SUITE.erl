@@ -24,7 +24,6 @@ and silently fail to register procedures.
 -define(REALM_URI, <<"com.example.test.callee_lifecycle">>).
 -define(WAIT_MS, 5_000).
 
-
 all() ->
     [
         callee_opens_session,
@@ -34,23 +33,17 @@ all() ->
         session_open_failure_stops_callee
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     ok = ensure_realm(?REALM_URI),
     [{realm_uri, ?REALM_URI} | Config].
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
-
 
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 callee_opens_session(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -60,7 +53,6 @@ callee_opens_session(Config) ->
     ?assertMatch({ok, _}, bondy_session:lookup(SessionId)),
     stop_callee(Pid).
 
-
 callee_registers_procedure(Config) ->
     RealmUri = ?config(realm_uri, Config),
     ProcUri = <<"com.example.test.proc.registers">>,
@@ -68,7 +60,6 @@ callee_registers_procedure(Config) ->
     Entries = bondy_registry:match(registration, RealmUri, ProcUri),
     ?assertMatch([_ | _], Entries),
     stop_callee(Pid).
-
 
 callee_death_cleans_registry(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -95,7 +86,6 @@ callee_death_cleans_registry(Config) ->
         ?WAIT_MS,
         "registration was not cleaned after callee death"
     ).
-
 
 callee_restart_can_re_register(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -125,7 +115,6 @@ callee_restart_can_re_register(Config) ->
     ),
     stop_callee(Pid2).
 
-
 session_open_failure_stops_callee(_Config) ->
     %% A non-existent realm makes bondy_session:new/3 raise inside
     %% bondy_session_manager:open/3. The callee init catches it and stops
@@ -138,15 +127,14 @@ session_open_failure_stops_callee(_Config) ->
     ),
     ?assertMatch({error, {shutdown, {session_open_failed, _}}}, Result),
     %% Drain any propagated EXIT for cleanliness
-    receive {'EXIT', _, _} -> ok after 100 -> ok end.
-
-
+    receive
+        {'EXIT', _, _} -> ok
+    after 100 -> ok
+    end.
 
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 ensure_realm(RealmUri) ->
     case bondy_realm:lookup(RealmUri) of
@@ -157,11 +145,9 @@ ensure_realm(RealmUri) ->
                 security_enabled => false
             }),
             ok;
-
         {ok, _} ->
             ok
     end.
-
 
 make_service(RealmUri, ProcUri) ->
     #{
@@ -178,7 +164,6 @@ make_service(RealmUri, ProcUri) ->
             }
         }
     }.
-
 
 start_callee(RealmUri, ProcUri) ->
     Service = make_service(RealmUri, ProcUri),
@@ -200,10 +185,8 @@ start_callee(RealmUri, ProcUri) ->
     ),
     Pid.
 
-
 stop_callee(Pid) when is_pid(Pid) ->
     kill_and_wait(Pid).
-
 
 kill_and_wait(Pid) ->
     MonRef = monitor(process, Pid),
@@ -214,7 +197,6 @@ kill_and_wait(Pid) ->
         ct:fail({timeout_waiting_for_exit, Pid})
     end.
 
-
 session_id_for_proc(RealmUri, ProcUri) ->
     case bondy_registry:match(registration, RealmUri, ProcUri) of
         [Entry | _] ->
@@ -223,10 +205,8 @@ session_id_for_proc(RealmUri, ProcUri) ->
             ct:fail({no_registration, ProcUri})
     end.
 
-
 wait_until(Pred, Deadline, Msg) when Deadline =< 0 ->
     ct:fail({timeout, Msg, Pred});
-
 wait_until(Pred, Deadline, Msg) ->
     case Pred() of
         true ->

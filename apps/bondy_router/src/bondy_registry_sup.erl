@@ -17,28 +17,19 @@ partition workers (one per partition, managed through a `gproc_pool`) and the
 %% API
 -export([start_link/0]).
 
-
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     SupFlags = #{
@@ -46,26 +37,25 @@ init([]) ->
         %% We can only use one_for_one when each partition can rebuild the its
         %% trie from plum_db on init
         strategy => one_for_all,
-        intensity => 20, % max restarts
-        period => 60, % seconds
+        % max restarts
+        intensity => 20,
+        % seconds
+        period => 60,
         auto_shutdown => never
     },
 
     %% Start partitions first
-    Children = partitions() ++ [
-        ?WORKER(bondy_registry, [], permanent, 5000)
-    ],
+    Children =
+        partitions() ++
+            [
+                ?WORKER(bondy_registry, [], permanent, 5000)
+            ],
 
     {ok, {SupFlags, Children}}.
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 partitions() ->
@@ -82,7 +72,7 @@ partitions() ->
             _ = catch gproc_pool:add_worker(?REGISTRY_POOL, WorkerName, Index),
             Index
         end
-        || Index <- lists:seq(1, N)
+     || Index <- lists:seq(1, N)
     ],
 
     [
@@ -94,8 +84,5 @@ partitions() ->
             type => worker,
             modules => [WorkerMod]
         }
-        || Index <- Indices
+     || Index <- Indices
     ].
-
-
-

@@ -22,7 +22,6 @@ against `invocations` + `queues` after every settled step.
 
 -compile([nowarn_export_all, export_all]).
 
-
 init_per_suite(Config) ->
     %% The dispatch helper builds real WAMP error/yield messages, whose URI
     %% validation reads `bondy_wamp` app config — start the message library
@@ -32,7 +31,6 @@ init_per_suite(Config) ->
 
 end_per_suite(_) ->
     ok.
-
 
 all() ->
     [
@@ -50,13 +48,9 @@ all() ->
         kill_all_then_reset
     ].
 
-
-
 %% =============================================================================
 %% INVOCATION TESTS
 %% =============================================================================
-
-
 
 %% admit -> spawn -> worker_started(ok) records the monitor + charges load;
 %% handler_done yields the worker's reply and releases the load token.
@@ -79,7 +73,6 @@ invocation_admit_spawn_yield(_) ->
     ?assertEqual(0, load_in_flight(D2)),
     invariant_check(D2).
 
-
 %% When the in-flight cap is hit, a further INVOCATION is answered with
 %% ERROR(unavailable) and nothing is spawned or charged.
 invocation_overloaded(_) ->
@@ -98,7 +91,6 @@ invocation_overloaded(_) ->
     ?assertEqual(1, load_in_flight(D2)),
     invariant_check(D2).
 
-
 %% Pitfall 1: admit charges the load token; a failed worker spawn must release it
 %% (and answer the router) or the in-flight cap leaks a slot forever.
 invocation_worker_start_fail_releases_load(_) ->
@@ -108,13 +100,15 @@ invocation_worker_start_fail_releases_load(_) ->
         fail_spawn()
     ),
     ?assertMatch(
-        [{spawned, invocation, 7, _}, {send, #error{error_uri = ?BONDY_CONNECT_INTERNAL_ERROR}}],
+        [
+            {spawned, invocation, 7, _},
+            {send, #error{error_uri = ?BONDY_CONNECT_INTERNAL_ERROR}}
+        ],
         Trace
     ),
     ?assertEqual(0, bondy_connect_dispatch:in_flight(D1)),
     ?assertEqual(0, load_in_flight(D1)),
     invariant_check(D1).
-
 
 %% A monitored invocation worker dying before replying yields a synthetic ERROR
 %% and releases the load; a stale second DOWN for the same monitor is a no-op.
@@ -126,7 +120,9 @@ invocation_worker_down_errors_and_releases(_) ->
     Mon = invocation_mon(5, D1),
 
     {D2, Trace} = settle(bondy_connect_dispatch:worker_down(Mon, killed, D1)),
-    ?assertMatch([{send, #error{error_uri = ?BONDY_CONNECT_INTERNAL_ERROR}}], Trace),
+    ?assertMatch(
+        [{send, #error{error_uri = ?BONDY_CONNECT_INTERNAL_ERROR}}], Trace
+    ),
     ?assertEqual(0, bondy_connect_dispatch:in_flight(D2)),
     ?assertEqual(0, load_in_flight(D2)),
     invariant_check(D2),
@@ -134,7 +130,6 @@ invocation_worker_down_errors_and_releases(_) ->
     {D3, Trace2} = settle(bondy_connect_dispatch:worker_down(Mon, killed, D2)),
     ?assertEqual([], Trace2),
     invariant_check(D3).
-
 
 %% INTERRUPT kills the servicing worker (kill effect), answers the INTERRUPT with
 %% ERROR(canceled) and releases the load; an unknown invocation is a no-op.
@@ -156,24 +151,21 @@ interrupt_kills_and_releases(_) ->
     {_D3, Trace2} = settle(bondy_connect_dispatch:interrupt(404, #{}, D2)),
     ?assertEqual([], Trace2).
 
-
-
 %% =============================================================================
 %% SUBSCRIBER (EVENT) TESTS
 %% =============================================================================
 
-
-
 %% Unordered events fire-and-forget: no queue entry, no monitor, no load.
 event_unordered_fire_and_forget(_) ->
     D0 = new(),
-    {D1, Effects} = bondy_connect_dispatch:dispatch_event(1, false, ev_job(1), D0),
+    {D1, Effects} = bondy_connect_dispatch:dispatch_event(
+        1, false, ev_job(1), D0
+    ),
     ?assertEqual([{spawn_nomon, ev_job(1)}], Effects),
     #{queues := Q} = bondy_connect_dispatch:inspect(D1),
     ?assertEqual(0, maps:size(Q)),
     ?assertEqual(0, load_in_flight(D1)),
     invariant_check(D1).
-
 
 %% Invariant 1: per-subscription FIFO. Three events on one sub run strictly in
 %% order; queuing while busy, draining on event_done, going idle when empty.
@@ -206,7 +198,6 @@ event_fifo_order(_) ->
     ?assertEqual(0, maps:size(Q)),
     invariant_check(D6).
 
-
 %% Pitfall 2: a clean event_done demonitors-with-flush; a later (stale) DOWN for
 %% that same monitor must be a no-op (must NOT double-spawn the next event).
 event_done_then_stale_down_is_noop(_) ->
@@ -228,7 +219,6 @@ event_done_then_stale_down_is_noop(_) ->
     ?assertEqual(event_mon(Sub, D3), event_mon(Sub, D4)),
     invariant_check(D4).
 
-
 %% Pitfall 2: a DOWN for the *live* busy worker advances the FIFO by exactly one
 %% spawn (the DOWN consumed the monitor, so this path never demonitors).
 event_live_down_spawns_exactly_one(_) ->
@@ -241,7 +231,6 @@ event_live_down_spawns_exactly_one(_) ->
     {D3, T3} = settle(bondy_connect_dispatch:worker_down(LiveMon, crash, D2)),
     ?assertEqual([{spawned, event, Sub, ev_job(2)}], T3),
     invariant_check(D3).
-
 
 %% Pitfall 3: unsubscribe clears the sub — queue and monitor dropped, NO respawn,
 %% and a later DOWN for the cleared monitor is a no-op.
@@ -265,7 +254,6 @@ clear_subscription_does_not_respawn(_) ->
     #{queues := Q2} = bondy_connect_dispatch:inspect(D4),
     ?assertEqual(0, maps:size(Q2)).
 
-
 %% A queued event whose worker fails to start is dropped and the FIFO still
 %% drains the rest (a stuck busy flag would wedge the subscription).
 event_worker_start_fail_advances_fifo(_) ->
@@ -285,13 +273,16 @@ event_worker_start_fail_advances_fifo(_) ->
     ?assertEqual(0, maps:size(Q)),
     invariant_check(D3).
 
-
 %% Teardown: kill_all emits a {kill, Pid} per in-flight invocation (and
 %% demonitors event workers); reset then clears every map and zeroes the load.
 kill_all_then_reset(_) ->
     D0 = new(),
-    {D1, _} = settle(bondy_connect_dispatch:admit_invocation(1, inv_job(1), D0)),
-    {D2, _} = settle(bondy_connect_dispatch:admit_invocation(2, inv_job(2), D1)),
+    {D1, _} = settle(
+        bondy_connect_dispatch:admit_invocation(1, inv_job(1), D0)
+    ),
+    {D2, _} = settle(
+        bondy_connect_dispatch:admit_invocation(2, inv_job(2), D1)
+    ),
     {D3, _} = settle(dispatch_ev(900, 1, D2)),
 
     {D4, Kills} = bondy_connect_dispatch:kill_all(D3),
@@ -308,13 +299,9 @@ kill_all_then_reset(_) ->
     ?assertEqual(0, load_in_flight(D5)),
     invariant_check(D5).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 new() ->
     new(#{}).
@@ -322,22 +309,17 @@ new() ->
 new(LoadOpts) ->
     bondy_connect_dispatch:new(bondy_connect_load:new(LoadOpts)).
 
-
 inv_job(N) ->
     #{kind => invocation, req_id => N, handler => fun() -> ok end}.
-
 
 ev_job(N) ->
     #{kind => event, n => N}.
 
-
 dispatch_ev(Sub, N, D) ->
     bondy_connect_dispatch:dispatch_event(Sub, true, ev_job(N), D).
 
-
 load_in_flight(D) ->
     maps:get(load_in_flight, bondy_connect_dispatch:inspect(D)).
-
 
 %% @private The live monitor of in-flight invocation `ReqId`.
 invocation_mon(ReqId, D) ->
@@ -345,17 +327,14 @@ invocation_mon(ReqId, D) ->
     {_Pid, Mon} = maps:get(ReqId, Inv),
     Mon.
 
-
 %% @private The live monitor of busy subscription `SubId`.
 event_mon(SubId, D) ->
     #{queues := Q} = bondy_connect_dispatch:inspect(D),
     maps:get(mon, maps:get(SubId, Q)).
 
-
 %% @private Interpret a `{Dispatch, [Effect]}` step, spawning successfully.
 settle(Step) ->
     settle(Step, ok_spawn()).
-
 
 %% @private Interpret a `{Dispatch, [Effect]}` step. `SpawnFun(Tag, Key, Job)`
 %% returns the stub spawn result. The returned `Trace` is the flat, ordered list
@@ -371,7 +350,6 @@ settle({D, Effects}, SpawnFun) ->
         Effects
     ).
 
-
 apply_eff({spawn, Tag, Key, Job}, SpawnFun, D0, Trace) ->
     Res = SpawnFun(Tag, Key, Job),
     {D1, Effects} = bondy_connect_dispatch:worker_started(Tag, Key, Res, D0),
@@ -380,21 +358,17 @@ apply_eff({spawn, Tag, Key, Job}, SpawnFun, D0, Trace) ->
         {D1, Trace ++ [{spawned, Tag, Key, Job}]},
         Effects
     );
-
 apply_eff(Other, _SpawnFun, D, Trace) ->
     {D, Trace ++ [Other]}.
-
 
 %% @private Every spawn succeeds with a fresh fake worker (the pid is never used
 %% by the module; the monitor reference is what matters).
 ok_spawn() ->
     fun(_Tag, _Key, _Job) -> {ok, {self(), make_ref()}} end.
 
-
 %% @private Every spawn fails (drives the start-failure paths).
 fail_spawn() ->
     fun(_Tag, _Key, _Job) -> {error, max_children} end.
-
 
 %% @private The mons reverse-index must be in exact lockstep with invocations and
 %% the (real-ref) busy subscription monitors.
@@ -411,8 +385,10 @@ invariant_check(D) ->
     maps:foreach(
         fun(SubId, #{mon := Mon}) ->
             case is_reference(Mon) of
-                true -> ?assertEqual({event, SubId}, maps:get(Mon, Mons, missing));
-                false -> ok
+                true ->
+                    ?assertEqual({event, SubId}, maps:get(Mon, Mons, missing));
+                false ->
+                    ok
             end
         end,
         Q
@@ -423,7 +399,9 @@ invariant_check(D) ->
             (Mon, {invocation, ReqId}) ->
                 ?assertMatch({_, Mon}, maps:get(ReqId, Inv, missing));
             (Mon, {event, SubId}) ->
-                ?assertEqual(Mon, maps:get(mon, maps:get(SubId, Q, #{}), missing))
+                ?assertEqual(
+                    Mon, maps:get(mon, maps:get(SubId, Q, #{}), missing)
+                )
         end,
         Mons
     ).

@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_auth_wamp_cra).
 -moduledoc """
 Implements the WAMP Challenge-Response Authentication (WAMP-CRA) method as a
@@ -14,9 +13,8 @@ signature against the user's CRA password.
 
 -include("bondy_security.hrl").
 
--type state()           ::  map().
--type challenge_error() ::  missing_pubkey | no_matching_pubkey.
-
+-type state() :: map().
+-type challenge_error() :: missing_pubkey | no_matching_pubkey.
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
@@ -24,43 +22,32 @@ signature against the user's CRA password.
 -export([challenge/3]).
 -export([authenticate/4]).
 
-
-
-
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
-
-
 
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
 init(Ctxt) ->
     try
-
         User = bondy_auth:user(Ctxt),
 
-        User =/= undefined
-            orelse throw({no_such_user, bondy_auth:user_id(Ctxt)}),
+        User =/= undefined orelse
+            throw({no_such_user, bondy_auth:user_id(Ctxt)}),
 
         PWD = bondy_rbac_user:password(User),
 
-        PWD =/= undefined
-        andalso cra =:= bondy_password:protocol(PWD)
-        andalso pbkdf2 =:= maps:get(kdf, bondy_password:params(PWD))
-        orelse throw(invalid_context),
+        PWD =/= undefined andalso
+            cra =:= bondy_password:protocol(PWD) andalso
+            pbkdf2 =:= maps:get(kdf, bondy_password:params(PWD)) orelse
+            throw(invalid_context),
 
         {ok, #{password => PWD}}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec requirements() -> map().
 
@@ -71,10 +58,9 @@ requirements() ->
         authorized_keys => false
     }.
 
-
-
 -spec challenge(
-    DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
+    DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()
+) ->
     {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: challenge_error(), NewState :: state()}.
 
@@ -127,24 +113,21 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
         },
 
         {true, ChallengeExtra, NewState}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
 
-
-
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    CBState :: state()) ->
+    CBState :: state()
+) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
 authenticate(Signature, _, _, #{signature := Signature} = State) ->
     {ok, #{}, State};
-
 authenticate(_, _, _, State) ->
     {error, bad_signature, State}.

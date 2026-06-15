@@ -105,33 +105,33 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
 ]).
 
 -define(DEFAULT_STATUS_CODES, #{
-    ?BONDY_ERROR_ALREADY_EXISTS =>              ?HTTP_BAD_REQUEST,
-    ?BONDY_ERROR_NOT_FOUND =>                   ?HTTP_NOT_FOUND,
-    ?BONDY_ERROR_BAD_GATEWAY =>                 ?HTTP_SERVICE_UNAVAILABLE,
-    ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR =>    ?HTTP_INTERNAL_SERVER_ERROR,
-    ?BONDY_ERROR_TIMEOUT =>                     ?HTTP_GATEWAY_TIMEOUT,
+    ?BONDY_ERROR_ALREADY_EXISTS => ?HTTP_BAD_REQUEST,
+    ?BONDY_ERROR_NOT_FOUND => ?HTTP_NOT_FOUND,
+    ?BONDY_ERROR_BAD_GATEWAY => ?HTTP_SERVICE_UNAVAILABLE,
+    ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR => ?HTTP_INTERNAL_SERVER_ERROR,
+    ?BONDY_ERROR_TIMEOUT => ?HTTP_GATEWAY_TIMEOUT,
     %% REVIEW
-    ?WAMP_AUTHORIZATION_FAILED =>               ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_CANCELLED =>                          ?HTTP_BAD_REQUEST,
-    ?WAMP_CLOSE_REALM =>                        ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_DISCLOSE_ME_NOT_ALLOWED =>            ?HTTP_BAD_REQUEST,
-    ?WAMP_GOODBYE_AND_OUT =>                    ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_INVALID_ARGUMENT =>                   ?HTTP_BAD_REQUEST,
-    ?WAMP_INVALID_URI =>                        ?HTTP_BAD_REQUEST,
-    ?WAMP_NET_FAILURE =>                        ?HTTP_BAD_GATEWAY,
+    ?WAMP_AUTHORIZATION_FAILED => ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_CANCELLED => ?HTTP_BAD_REQUEST,
+    ?WAMP_CLOSE_REALM => ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_DISCLOSE_ME_NOT_ALLOWED => ?HTTP_BAD_REQUEST,
+    ?WAMP_GOODBYE_AND_OUT => ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_INVALID_ARGUMENT => ?HTTP_BAD_REQUEST,
+    ?WAMP_INVALID_URI => ?HTTP_BAD_REQUEST,
+    ?WAMP_NET_FAILURE => ?HTTP_BAD_GATEWAY,
     %% REVIEW
-    ?WAMP_NOT_AUTHORIZED =>                     ?HTTP_FORBIDDEN,
-    ?WAMP_NO_ELIGIBLE_CALLE =>                  ?HTTP_BAD_GATEWAY,
-    ?WAMP_NO_SUCH_PROCEDURE =>                  ?HTTP_NOT_IMPLEMENTED,
-    ?WAMP_NO_SUCH_REALM =>                      ?HTTP_BAD_GATEWAY,
-    ?WAMP_NO_SUCH_REGISTRATION =>               ?HTTP_BAD_GATEWAY,
-    ?WAMP_NO_SUCH_ROLE =>                       ?HTTP_BAD_REQUEST,
-    ?WAMP_NO_SUCH_SESSION =>                    ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_NO_SUCH_SUBSCRIPTION =>               ?HTTP_BAD_GATEWAY,
-    ?WAMP_OPTION_DISALLOWED_DISCLOSE_ME =>      ?HTTP_BAD_REQUEST,
-    ?WAMP_OPTION_NOT_ALLOWED =>                 ?HTTP_BAD_REQUEST,
-    ?WAMP_PROCEDURE_ALREADY_EXISTS =>           ?HTTP_BAD_REQUEST,
-    ?WAMP_SYSTEM_SHUTDOWN =>                    ?HTTP_INTERNAL_SERVER_ERROR
+    ?WAMP_NOT_AUTHORIZED => ?HTTP_FORBIDDEN,
+    ?WAMP_NO_ELIGIBLE_CALLE => ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_PROCEDURE => ?HTTP_NOT_IMPLEMENTED,
+    ?WAMP_NO_SUCH_REALM => ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_REGISTRATION => ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_ROLE => ?HTTP_BAD_REQUEST,
+    ?WAMP_NO_SUCH_SESSION => ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_NO_SUCH_SUBSCRIPTION => ?HTTP_BAD_GATEWAY,
+    ?WAMP_OPTION_DISALLOWED_DISCLOSE_ME => ?HTTP_BAD_REQUEST,
+    ?WAMP_OPTION_NOT_ALLOWED => ?HTTP_BAD_REQUEST,
+    ?WAMP_PROCEDURE_ALREADY_EXISTS => ?HTTP_BAD_REQUEST,
+    ?WAMP_SYSTEM_SHUTDOWN => ?HTTP_INTERNAL_SERVER_ERROR
 }).
 
 -define(MOPS_PROXY_FUN_TYPE, tuple).
@@ -157,7 +157,8 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         allow_null => false,
         datatype => binary,
         validator => fun
-            (<<"_">>) -> {ok, '_'}; % Cowboy needs an atom
+            % Cowboy needs an atom
+            (<<"_">>) -> {ok, '_'};
             (Val) -> {ok, Val}
         end
     },
@@ -245,12 +246,14 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
                 alias => title,
                 required => true,
                 allow_null => true,
-                datatype => binary},
+                datatype => binary
+            },
             <<"description">> => #{
                 alias => description,
                 required => true,
                 allow_null => true,
-                datatype => binary}
+                datatype => binary
+            }
         }
     },
     ?VARS_KEY => #{
@@ -319,19 +322,22 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         alias => body_max_bytes,
         required => true,
         datatype => pos_integer,
-        default => 25000000 %% 25MB
+        %% 25MB
+        default => 25000000
     },
     <<"body_read_bytes">> => #{
         alias => body_read_bytes,
         required => true,
         datatype => pos_integer,
-        default => 8000000 %% 8MB is Cowboy 2 default
+        %% 8MB is Cowboy 2 default
+        default => 8000000
     },
     <<"body_read_seconds">> => #{
         alias => body_read_seconds,
         required => true,
         datatype => pos_integer,
-        default => 15000 %% 15 secs is Cowboy 2 default
+        %% 15 secs is Cowboy 2 default
+        default => 15000
     },
     <<"timeout">> => #{
         alias => timeout,
@@ -454,12 +460,13 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         alias => flow,
         required => true,
         default => null,
-        datatype => {in, [
-            <<"authorization_code">>,
-            <<"implicit">>,
-            <<"resource_owner_password_credentials">>,
-            <<"client_credentials">>
-        ]}
+        datatype =>
+            {in, [
+                <<"authorization_code">>,
+                <<"implicit">>,
+                <<"resource_owner_password_credentials">>,
+                <<"client_credentials">>
+            ]}
     },
     <<"token_path">> => #{
         alias => token_path,
@@ -553,37 +560,44 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
     <<"delete">> => #{
         alias => delete,
         required => false,
-        datatype => [binary, map] % To support mop expressions
+        % To support mop expressions
+        datatype => [binary, map]
     },
     <<"get">> => #{
         alias => get,
         required => false,
-        datatype => [binary, map] % To support mop expressions
+        % To support mop expressions
+        datatype => [binary, map]
     },
     <<"head">> => #{
         alias => head,
         required => false,
-        datatype => [binary, map] % To support mop expressions
+        % To support mop expressions
+        datatype => [binary, map]
     },
     <<"options">> => #{
         alias => options,
         required => false,
-        datatype => [binary, map] % To support mop expressions
+        % To support mop expressions
+        datatype => [binary, map]
     },
     <<"patch">> => #{
         alias => patch,
         required => false,
-        datatype => [binary, map] % To support mop expressions
+        % To support mop expressions
+        datatype => [binary, map]
     },
     <<"post">> => #{
         alias => post,
         required => false,
-        datatype => [binary, map] % To support mop expressions
+        % To support mop expressions
+        datatype => [binary, map]
     },
     <<"put">> => #{
         alias => put,
         required => false,
-        datatype => [binary, map] % To support mop expressions
+        % To support mop expressions
+        datatype => [binary, map]
     },
     <<"summary">> => #{
         alias => summary,
@@ -613,19 +627,22 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         alias => body_max_bytes,
         required => true,
         datatype => pos_integer,
-        default => 25000000 %% 25MB
+        %% 25MB
+        default => 25000000
     },
     <<"body_read_bytes">> => #{
         alias => body_read_bytes,
         required => true,
         datatype => pos_integer,
-        default => 8000000 %% 8MB is Cowboy 2 default
+        %% 8MB is Cowboy 2 default
+        default => 8000000
     },
     <<"body_read_seconds">> => #{
         alias => body_read_seconds,
         required => true,
         datatype => pos_integer,
-        default => 15000 %% 15 secs is Cowboy 2 default
+        %% 15 secs is Cowboy 2 default
+        default => 15000
     },
     <<"timeout">> => #{
         alias => timeout,
@@ -726,10 +743,8 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
 
             (#{<<"type">> := <<"static">>} = V) ->
                 {ok, maps_utils:validate(V, ?STATIC_ACTION_SPEC)};
-
             (#{<<"type">> := <<"forward">>} = V) ->
                 {ok, maps_utils:validate(V, ?FWD_ACTION_SPEC)};
-
             (V) ->
                 #{} =:= V
         end
@@ -739,7 +754,6 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         required => true,
         allow_null => false
     }
-
 }).
 
 -define(BODY_ALL_DATATYPES, [
@@ -798,10 +812,16 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         alias => host,
         required => false,
         allow_null => false,
-        datatype => {in, [
-            <<"delete">>, <<"get">>, <<"head">>, <<"options">>,
-            <<"patch">>, <<"post">>, <<"put">>
-        ]}
+        datatype =>
+            {in, [
+                <<"delete">>,
+                <<"get">>,
+                <<"head">>,
+                <<"options">>,
+                <<"patch">>,
+                <<"post">>,
+                <<"put">>
+            ]}
     },
     <<"host">> => #{
         alias => host,
@@ -870,18 +890,18 @@ end).
     <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
 }).
 
-
 -define(WAMP_RPC_ACTION_SPEC, #{
     <<"type">> => #{
         alias => type,
         required => true,
         allow_null => false,
-        datatype => {in, [
-            <<"wamp_call">>
-            %% ,
-            %% <<"wamp_register">>,
-            %% <<"wamp_unregister">>
-        ]}
+        datatype =>
+            {in, [
+                <<"wamp_call">>
+                %% ,
+                %% <<"wamp_register">>,
+                %% <<"wamp_unregister">>
+            ]}
     },
     <<"timeout">> => #{
         alias => timeout,
@@ -934,12 +954,13 @@ end).
         alias => type,
         required => true,
         allow_null => false,
-        datatype => {in, [
-            <<"wamp_publish">>
-            %% ,
-            %% <<"wamp_subscribe">>,
-            %% <<"wamp_unsubscribe">>
-        ]}
+        datatype =>
+            {in, [
+                <<"wamp_publish">>
+                %% ,
+                %% <<"wamp_subscribe">>,
+                %% <<"wamp_unsubscribe">>
+            ]}
     },
     <<"timeout">> => #{
         alias => timeout,
@@ -1054,50 +1075,40 @@ end).
 
 -define(VAR(Term), {var, Term}).
 
--define(SCHEME_HEAD,
-    {
-        ?VAR(scheme),
-        ?VAR(host),
-        ?VAR(realm),
-        ?VAR(path),
-        ?VAR(mod),
-        ?VAR(state)
-    }
-).
+-define(SCHEME_HEAD, {
+    ?VAR(scheme),
+    ?VAR(host),
+    ?VAR(realm),
+    ?VAR(path),
+    ?VAR(mod),
+    ?VAR(state)
+}).
 
-
--type scheme_rule()     ::  {
-                                Scheme :: binary(),
-                                Host :: route_match(),
-                                Realm :: binary(),
-                                Path :: route_match(),
-                                Handler :: module(),
-                                Opts :: any()
-                            }.
+-type scheme_rule() :: {
+    Scheme :: binary(),
+    Host :: route_match(),
+    Realm :: binary(),
+    Path :: route_match(),
+    Handler :: module(),
+    Opts :: any()
+}.
 %% Cowboy types
--type route_path()      ::  {
-                                Path :: route_match(),
-                                Handler :: module(),
-                                Opts :: any()
-                            }.
--type route_rule()      ::  {Host :: route_match(), Paths :: [route_path()]}.
--type route_match()     ::  '_' | iodata().
-
+-type route_path() :: {
+    Path :: route_match(),
+    Handler :: module(),
+    Opts :: any()
+}.
+-type route_rule() :: {Host :: route_match(), Paths :: [route_path()]}.
+-type route_match() :: '_' | iodata().
 
 -export([from_file/1]).
 -export([parse/1]).
 -export([dispatch_table/1]).
 -export([dispatch_table/2]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-
 
 -doc """
 Reads a JSON API spec from `Filename` and parses it.
@@ -1115,13 +1126,13 @@ from_file(Filename) ->
             {error, invalid_specification_format};
         {error, Reason} ->
             ?LOG_WARNING(#{
-                description => "Error while parsing API Gateway Specification file",
+                description =>
+                    "Error while parsing API Gateway Specification file",
                 filename => Filename,
                 reason => Reason
             }),
             {error, invalid_json_format}
     end.
-
 
 -doc """
 Parses a JSON API spec map into the internal representation.
@@ -1142,10 +1153,8 @@ if the argument is not a map.
 
 parse(Spec) when is_map(Spec) ->
     parse(Spec, get_context_proxy());
-
 parse(_) ->
     {error, invalid_specification_format}.
-
 
 -doc """
 Generates a Cowboy dispatch table from one or more parsed API specs.
@@ -1162,10 +1171,8 @@ Equivalent to `dispatch_table(Specs, [])` (no additional base routes).
 
 dispatch_table(API) when is_map(API) ->
     dispatch_table([API], []);
-
 dispatch_table(Specs) when is_list(Specs) ->
     dispatch_table(Specs, []).
-
 
 -doc """
 Generates a Cowboy dispatch table, merging in additional base routes.
@@ -1184,7 +1191,6 @@ listener environment.
 
 dispatch_table(API, RulesToAdd) when is_map(API) ->
     dispatch_table([API], RulesToAdd);
-
 dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
     SchemeRules = lists:flatten([do_dispatch_table(X) || X <- L]),
     R0 = leap_relation:relation(?SCHEME_HEAD, SchemeRules),
@@ -1196,10 +1202,10 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
     %% We add the additional rules
     Schemes = leap_relation:tuples(leap_relation:project(R0, [{var, scheme}])),
     A0 = leap_relation:relation(?SCHEME_HEAD, [
-        {S, H, undefined, P, M, O} ||
-            {H, HRules} <- RulesToAdd,
-            {P, M, O} <- HRules,
-            {S} <- Schemes
+        {S, H, undefined, P, M, O}
+     || {H, HRules} <- RulesToAdd,
+        {P, M, O} <- HRules,
+        {S} <- Schemes
     ]),
     R1 = leap_relation:union(R0, A0),
 
@@ -1214,25 +1220,18 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
     SHP = leap_relation:summarize(R2, Proj2, #{}),
     leap_relation:tuples(SHP).
 
-
-
-
 %% =============================================================================
 %% PRIVATE: PARSING THE API SPECIFICATION
 %% =============================================================================
 
-
-
 %% @private
 -spec parse(Spec :: map(), Ctxt :: map()) ->
-    NewSpec :: map() |  {error, invalid_specification_format} | no_return().
+    NewSpec :: map() | {error, invalid_specification_format} | no_return().
 
 parse(Spec, Ctxt) when is_map(Spec) ->
     parse_host(maps_utils:validate(Spec, ?API_HOST), Ctxt);
-
 parse(_, _) ->
     {error, invalid_specification_format}.
-
 
 %% @private
 -spec parse_host(map(), map()) -> map().
@@ -1253,7 +1252,6 @@ parse_host(Host0, Ctxt0) ->
     Vs1 = maps:map(Fun, Vs0),
     Host4 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], Host3),
     maps:update(<<"versions">>, Vs1, Host4).
-
 
 %% @private
 -spec parse_version(map(), map()) -> map().
@@ -1277,14 +1275,15 @@ parse_version(V0, Ctxt0) ->
             error:{badkey, Key} ->
                 error({
                     badarg,
-                    <<"The key '", Key/binary, "' does not exist in path '", Uri/binary, "'.">>
+                    <<"The key '", Key/binary, "' does not exist in path '",
+                        Uri/binary, "'.">>
                 })
         end
     end,
     V5 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], V4),
     maps:update(
-        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V5)), V5).
-
+        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V5)), V5
+    ).
 
 %% @private
 parse_path(P0, Ctxt0) ->
@@ -1292,7 +1291,7 @@ parse_path(P0, Ctxt0) ->
     %% otherwise this will fail with an error
     L = allowed_methods(P0),
     %% We merge path spec with gateway default spec
-    P1  = maps:merge(?DEFAULT_PATH, P0),
+    P1 = maps:merge(?DEFAULT_PATH, P0),
     %% We merge path's variables and defaults into context
     {P2, Ctxt1} = merge_eval_vars(P1, eval_vars(Ctxt0)),
     %% Ctxt1 = eval(Ctxt0),
@@ -1321,11 +1320,15 @@ parse_path(P0, Ctxt0) ->
             maps:update(Method, Sec2, IPath)
         catch
             error:{badkey, Key} ->
-                error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
+                error(
+                    {badarg,
+                        <<"The key '", Key/binary,
+                            "' does not exist in path method section '",
+                            Method/binary, $'>>}
+                )
         end
     end,
     lists:foldl(PFun, P7, L).
-
 
 %% @private
 parse_path_elements(Path, Ctxt) ->
@@ -1337,36 +1340,33 @@ parse_path_elements(Path, Ctxt) ->
     ],
     parse_path_elements(L, Path, Ctxt).
 
-
 %% @private
-parse_path_elements([H|T], P0, Ctxt) ->
-    P1 = case maps:is_key(H, P0) of
-        true ->
-            P0;
-        false ->
-            %% We assign a default and fail if none exists
-            case maps:find(H, maps:get(?DEFAULTS_KEY, Ctxt)) of
-                {ok, Val} ->
-                    maps:put(H, Val, P0);
-                error ->
-                    error({
-                        badarg,
-                        <<"The key ", H/binary, " does not exist in path.">>
-                    })
-            end
-    end,
+parse_path_elements([H | T], P0, Ctxt) ->
+    P1 =
+        case maps:is_key(H, P0) of
+            true ->
+                P0;
+            false ->
+                %% We assign a default and fail if none exists
+                case maps:find(H, maps:get(?DEFAULTS_KEY, Ctxt)) of
+                    {ok, Val} ->
+                        maps:put(H, Val, P0);
+                    error ->
+                        error({
+                            badarg,
+                            <<"The key ", H/binary, " does not exist in path.">>
+                        })
+                end
+        end,
     Eval = fun(V) -> mops_eval(V, Ctxt) end,
     P2 = maps:update_with(H, Eval, P1),
     parse_path_elements(T, P2, Ctxt);
-
 parse_path_elements([], Path, _) ->
     Path.
-
 
 %% @private
 parse_request_method(Method, Spec, Ctxt) when is_binary(Spec) ->
     parse_request_method(Method, mops_eval(Spec, Ctxt), Ctxt);
-
 %% parse_request_method(<<"options">>, Spec, Ctxt) ->
 %%     #{<<"response">> := Resp} = Spec,
 %%     Spec#{
@@ -1390,7 +1390,6 @@ parse_request_method(Method, Spec0, Ctxt) ->
         <<"body_read_seconds">> => mops_eval(SL, Ctxt)
     }.
 
-
 %% @private
 -doc """
 Parses a path action section definition. Before applying validations
@@ -1407,35 +1406,27 @@ parse_action(_, #{<<"type">> := <<"wamp_call">>} = Spec, Ctxt) ->
         mops_eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
         ?WAMP_RPC_ACTION_SPEC
     );
-
 parse_action(_, #{<<"type">> := <<"wamp_publish">>} = Spec, Ctxt) ->
     maps_utils:validate(
         mops_eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
         ?WAMP_PUBSUB_ACTION_SPEC
     );
-
 parse_action(_, #{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
     maps_utils:validate(
         mops_eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt),
         ?FWD_ACTION_SPEC
     );
-
 parse_action(_, #{<<"type">> := <<"static">>} = Spec, Ctxt) ->
     maps_utils:validate(
         mops_eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt),
         ?STATIC_ACTION_SPEC
     );
-
 parse_action(_, #{<<"type">> := Type}, _) ->
     error({unsupported_action_type, Type});
-
 parse_action(<<"options">>, Spec, _) ->
     Spec;
-
 parse_action(_, _, _) ->
     error(action_type_missing).
-
-
 
 parse_response(_, Spec0, Ctxt) ->
     OR0 = maps:get(<<"on_result">>, Spec0, ?DEFAULT_RESPONSE),
@@ -1444,16 +1435,13 @@ parse_response(_, Spec0, Ctxt) ->
         maps_utils:validate(
             mops_eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt),
             ?RESPONSE_SPEC
-        ) || X <- [OR0, OE0]
+        )
+     || X <- [OR0, OE0]
     ],
     #{
         <<"on_result">> => OR1,
         <<"on_error">> => OE1
     }.
-
-
-
-
 
 %% @private
 -doc "Lower level variables and defaults override previous ones.".
@@ -1471,11 +1459,9 @@ merge_eval_vars(Spec0, Ctxt0) ->
     Ctxt2 = maps:update(?DEFAULTS_KEY, MDefs, Ctxt1),
     eval_vars(Spec1, Ctxt2).
 
-
 %% @private
 eval_vars(Ctxt) ->
     element(1, eval_vars(Ctxt, Ctxt)).
-
 
 %% @private
 -doc """
@@ -1515,7 +1501,8 @@ eval_vars(S0, Ctxt0) ->
     %% amongst them
     VFun = fun(Var, Val, ICtxt) ->
         IVars1 = maps:update(
-            Var, mops_eval(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
+            Var, mops_eval(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)
+        ),
         maps:update(?VARS_KEY, IVars1, ICtxt)
     end,
     Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
@@ -1523,77 +1510,64 @@ eval_vars(S0, Ctxt0) ->
     %% We evaluate defaults
     DFun = fun(Var, Val, ICtxt) ->
         IDefs1 = maps:update(
-            Var, mops_eval(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
+            Var, mops_eval(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)
+        ),
         maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
     end,
     Ctxt2 = maps:fold(DFun, Ctxt1, Defs),
     S1 = S0#{
         ?VARS_KEY => maps:with(maps:keys(Vars), maps:get(?VARS_KEY, Ctxt2)),
-        ?DEFAULTS_KEY => maps:with(maps:keys(Defs), maps:get(?DEFAULTS_KEY, Ctxt2))
+        ?DEFAULTS_KEY => maps:with(
+            maps:keys(Defs), maps:get(?DEFAULTS_KEY, Ctxt2)
+        )
     },
     {S1, Ctxt2}.
-
-
 
 %% @private
 validate(Key, Map, Spec) ->
     maps:update(
-        Key, maps_utils:validate(maps:get(Key, Map), Spec), Map).
-
-
+        Key, maps_utils:validate(maps:get(Key, Map), Spec), Map
+    ).
 
 %% @private
 to_uppercase(L) when is_list(L) ->
     [to_uppercase(M) || M <- L];
-
 to_uppercase(<<"delete">>) ->
     <<"DELETE">>;
-
 to_uppercase(<<"get">>) ->
     <<"GET">>;
-
 to_uppercase(<<"head">>) ->
     <<"HEAD">>;
-
 to_uppercase(<<"options">>) ->
     <<"OPTIONS">>;
-
 to_uppercase(<<"patch">>) ->
     <<"PATCH">>;
-
 to_uppercase(<<"post">>) ->
     <<"POST">>;
-
 to_uppercase(<<"put">>) ->
     <<"PUT">>.
-
-
 
 %% @private
 allowed_methods(Path) ->
     L = sets:to_list(
         sets:intersection(
             sets:from_list(?HTTP_METHODS),
-            sets:from_list(maps:keys(Path)
-            )
+            sets:from_list(maps:keys(Path))
         )
     ),
     case L of
         [] ->
             error(
                 {missing_required_key,
-            <<"At least one request method should be specified">>});
+                    <<"At least one request method should be specified">>}
+            );
         _ ->
             L
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE: GENERATING DISPATCH TABLE
 %% =============================================================================
-
-
 
 -spec do_dispatch_table(map()) -> [scheme_rule()].
 
@@ -1605,16 +1579,15 @@ do_dispatch_table(API) ->
     } = API,
 
     lists:append([
-        dispatch_table_version(Host, Realm, V) || V <- maps:to_list(Vers)
+        dispatch_table_version(Host, Realm, V)
+     || V <- maps:to_list(Vers)
     ]).
-
 
 -spec dispatch_table_version(binary(), binary(), tuple()) ->
     [scheme_rule()] | no_return().
 
 dispatch_table_version(_, _, {_, #{<<"is_active">> := false}}) ->
     [];
-
 dispatch_table_version(Host, Realm, {_Name, Version}) ->
     #{
         <<"base_path">> := BasePath,
@@ -1623,16 +1596,17 @@ dispatch_table_version(Host, Realm, {_Name, Version}) ->
     } = Version,
     [
         dispatch_table_path(Host, BasePath, Deprecated, Realm, P, Version)
-        || P <- maps:to_list(Paths)
+     || P <- maps:to_list(Paths)
     ].
 
-
 -spec dispatch_table_path(
-    binary(), binary(), boolean(), binary(), tuple(), map()) ->
+    binary(), binary(), boolean(), binary(), tuple(), map()
+) ->
     [scheme_rule()] | no_return().
 
 dispatch_table_path(
-    Host, BasePath, Deprecated, Realm, {Path, Spec0}, Version) ->
+    Host, BasePath, Deprecated, Realm, {Path, Spec0}, Version
+) ->
     AbsPath = <<BasePath/binary, Path/binary>>,
     {Accepts, Spec1} = maps:take(<<"accepts">>, Spec0),
     {Provides, Spec2} = maps:take(<<"provides">>, Spec1),
@@ -1657,21 +1631,24 @@ dispatch_table_path(
         [
             {S, Host, Realm, AbsPath, Mod, Args},
             security_scheme_rules(S, Host, BasePath, Realm, Sec)
-        ] || S <- Schemes
+        ]
+     || S <- Schemes
     ]).
-
 
 %% @private
 %% The OAUTH2 spec requires the scheme to be HTTPS but we
 %% will enable it anyway as we assume BONDY would be behind
 %% an HTTPS load balancer
 security_scheme_rules(
-    S, Host, BasePath, Realm,
+    S,
+    Host,
+    BasePath,
+    Realm,
     #{
         <<"type">> := <<"oauth2">>,
         <<"flow">> := _Any
-    } = Sec) ->
-
+    } = Sec
+) ->
     Token = get_token_path(Sec),
     Revoke = get_revoke_path(Sec),
 
@@ -1689,11 +1666,13 @@ security_scheme_rules(
         %% Json Web Key Set path, in which we publish the public
         {S, Host, Realm, <<BasePath/binary, "/oauth/jwks">>, Mod, St}
     ];
-
 security_scheme_rules(
-    S, Host, BasePath, Realm,
-    #{<<"type">> := <<"oidc">>, <<"provider">> := Provider}) ->
-
+    S,
+    Host,
+    BasePath,
+    Realm,
+    #{<<"type">> := <<"oidc">>, <<"provider">> := Provider}
+) ->
     St = #{
         realm_uri => Realm,
         provider => Provider,
@@ -1702,45 +1681,37 @@ security_scheme_rules(
 
     Mod = bondy_oidc_handler,
     [
+        {S, Host, Realm, <<BasePath/binary, "/oidc/login">>, Mod, St#{
+            action => login
+        }},
         {S, Host, Realm,
-            <<BasePath/binary, "/oidc/login">>,
-            Mod, St#{action => login}},
-        {S, Host, Realm,
-            <<BasePath/binary, "/oidc/", Provider/binary, "/callback">>,
-            Mod, St#{action => callback}},
-        {S, Host, Realm,
-            <<BasePath/binary, "/oidc/logout">>,
-            Mod, St#{action => logout}}
+            <<BasePath/binary, "/oidc/", Provider/binary, "/callback">>, Mod,
+            St#{action => callback}},
+        {S, Host, Realm, <<BasePath/binary, "/oidc/logout">>, Mod, St#{
+            action => logout
+        }}
     ];
-
 security_scheme_rules(_, _, _, _, _) ->
     %% TODO for other types
     [].
 
-
 %% @private
 get_token_path(#{<<"token_path">> := Token}) ->
     validate_rel_path(Token);
-
 get_token_path(_) ->
     <<"/oauth/token">>.
-
 
 %% @private
 get_revoke_path(#{<<"revoke_token">> := Token}) ->
     validate_rel_path(Token);
-
 get_revoke_path(_) ->
     <<"/oauth/revoke">>.
-
 
 %% @private
 validate_rel_path(<<$/, _Rest/binary>> = Val) ->
     remove_trailing_slash(Val);
-
 validate_rel_path(Val) ->
     error({invalid_path, Val}).
-
 
 %% @private
 remove_trailing_slash(Bin) ->
@@ -1748,7 +1719,6 @@ remove_trailing_slash(Bin) ->
         $/ -> binary:part(Bin, 0, byte_size(Bin) - 1);
         _ -> Bin
     end.
-
 
 %% @private
 -doc """
@@ -1764,49 +1734,39 @@ get_context_proxy() ->
         <<"security">> => mops:proxy()
     }.
 
-
-
 %% @private
 content_types_accepted(L) when is_list(L) ->
     [content_types_accepted(T) || T <- L];
-
 content_types_accepted(<<"application/json; charset=utf-8">>) ->
     {
         {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
         from_json
     };
-
 content_types_accepted(<<"application/json">>) ->
     % {<<"application/json">>, from_json};
     {
         {<<"application">>, <<"json">>, '*'},
         from_json
     };
-
 content_types_accepted(<<"application/msgpack; charset=utf-8">>) ->
     {
         {<<"application">>, <<"msgpack">>, [{<<"charset">>, <<"utf-8">>}]},
         from_msgpack
     };
-
 content_types_accepted(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, from_msgpack}.
     {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack};
-
 content_types_accepted(<<"application/x-www-form-urlencoded">>) ->
     {
         {<<"application">>, <<"x-www-form-urlencoded">>, '*'},
         from_form_urlencoded
     };
-
 content_types_accepted(Bin) ->
     {Bin, accept}.
-
 
 %% @private
 content_types_provided(L) when is_list(L) ->
     [X || {_, X} <- lists:ukeysort(1, [content_types_provided(T) || T <- L])];
-
 content_types_provided(<<"application/json">>) ->
     % {<<"application/json">>, to_json};
     T = {
@@ -1816,7 +1776,6 @@ content_types_provided(<<"application/json">>) ->
     %% We force JSON to have the priority as Cowboy chooses based on the order
     %% when no content-type was requested by the user
     {1, T};
-
 content_types_provided(<<"application/json; charset=utf-8">>) ->
     T = {
         {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
@@ -1825,26 +1784,24 @@ content_types_provided(<<"application/json; charset=utf-8">>) ->
     %% We force JSON to have the priority as Cowboy chooses based on the order
     %% when no content-type was requested by the user
     {1, T};
-
 content_types_provided(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, to_msgpack};
     T = {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack},
     {2, T};
-
 content_types_provided(<<"application/msgpack; charset=utf-8">>) ->
-    T = {{<<"application">>, <<"msgpack">>, [{<<"charset">>, <<"utf-8">>}]}, to_msgpack},
+    T = {
+        {<<"application">>, <<"msgpack">>, [{<<"charset">>, <<"utf-8">>}]},
+        to_msgpack
+    },
     {2, T};
-
 content_types_provided(Bin) ->
     {3, {Bin, provide}}.
-
 
 % @TODO Avoid doing this and require the user to setup the environment first!
 check_realm_exists(Uri) ->
     case bondy_realm:lookup(Uri) of
         {ok, _} ->
             ok;
-
         {error, not_found} ->
             Reason = {
                 badarg,
@@ -1852,7 +1809,6 @@ check_realm_exists(Uri) ->
             },
             error(Reason)
     end.
-
 
 mops_eval(Expr, Ctxt) ->
     try
@@ -1868,18 +1824,25 @@ mops_eval(Expr, Ctxt) ->
                     io_lib:format("~p", [Term]),
                     "'"
                 ]),
-                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+                <<"description">> =>
+                    <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
         error:{badkey, Key} ->
             throw(#{
                 <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
-                <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
-                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+                <<"message">> =>
+                    <<"There is no value for key '", Key/binary,
+                        "' in the HTTP Request context.">>,
+                <<"description">> =>
+                    <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
         error:{badkeypath, Path} ->
             throw(#{
                 <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
-                <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
-                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+                <<"message">> =>
+                    <<"There is no value for path '", Path/binary,
+                        "' in the HTTP Request context.">>,
+                <<"description">> =>
+                    <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             })
     end.

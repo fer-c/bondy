@@ -53,7 +53,6 @@ all() ->
         context_method_set_after_challenge
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.cra_auth">>,
@@ -62,7 +61,6 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 add_realm(RealmUri) ->
     Config = #{
@@ -128,13 +126,9 @@ add_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 compute_signature(Password, ChallengeExtra) ->
@@ -153,13 +147,9 @@ compute_signature(Password, ChallengeExtra) ->
     }),
     base64:encode(crypto:mac(hmac, sha256, SPass, Challenge)).
 
-
-
 %% =============================================================================
 %% ORIGINAL TEST (PRESERVED)
 %% =============================================================================
-
-
 
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -232,13 +222,9 @@ test_1(Config) ->
         bondy_auth:authenticate(?WAMP_CRA_AUTH, ?P1, undefined, Ctxt2)
     ).
 
-
-
 %% =============================================================================
 %% FULL CHALLENGE-RESPONSE FLOW
 %% =============================================================================
-
-
 
 full_cra_flow(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -262,7 +248,6 @@ full_cra_flow(Config) ->
 
     %% Method is set in context
     ?assertEqual(?WAMP_CRA_AUTH, bondy_auth:method(Ctxt2)).
-
 
 challenge_extra_has_required_keys(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -289,13 +274,9 @@ challenge_extra_has_required_keys(Config) ->
     ?assert(is_integer(maps:get(iterations, Extra))),
     ?assert(maps:get(iterations, Extra) > 0).
 
-
-
 %% =============================================================================
 %% WRONG SIGNATURES
 %% =============================================================================
-
-
 
 wrong_signature_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -313,7 +294,6 @@ wrong_signature_fails(Config) ->
         bondy_auth:authenticate(?WAMP_CRA_AUTH, WrongSig, undefined, Ctxt1)
     ).
 
-
 empty_signature_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -327,7 +307,6 @@ empty_signature_fails(Config) ->
         {error, bad_signature},
         bondy_auth:authenticate(?WAMP_CRA_AUTH, <<>>, undefined, Ctxt1)
     ).
-
 
 random_binary_signature_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -345,13 +324,9 @@ random_binary_signature_fails(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% SOURCE / CIDR
 %% =============================================================================
-
-
 
 user1_allowed_from_any_ip(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -372,7 +347,6 @@ user1_allowed_from_any_ip(Config) ->
         IPs
     ).
 
-
 user2_rejected_outside_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -383,7 +357,6 @@ user2_rejected_outside_cidr(Config) ->
     ?assertNot(
         lists:member(?WAMP_CRA_AUTH, bondy_auth:available_methods(Ctxt))
     ).
-
 
 user2_allowed_within_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -404,13 +377,9 @@ user2_allowed_within_cidr(Config) ->
         bondy_auth:authenticate(?WAMP_CRA_AUTH, Signature, undefined, Ctxt1)
     ).
 
-
-
 %% =============================================================================
 %% METHOD SELECTION
 %% =============================================================================
-
-
 
 method_mismatch_after_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -428,7 +397,6 @@ method_mismatch_after_challenge(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ).
 
-
 password_auth_not_in_cra_only_realm(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -441,7 +409,6 @@ password_auth_not_in_cra_only_realm(Config) ->
     ?assertNot(
         lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))
     ).
-
 
 invalid_method_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -457,13 +424,9 @@ invalid_method_rejected(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% USER WITHOUT PASSWORD
 %% =============================================================================
-
-
 
 user_without_password_excluded(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -477,13 +440,9 @@ user_without_password_excluded(Config) ->
         lists:member(?WAMP_CRA_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% ERROR CASES
 %% =============================================================================
-
-
 
 nonexistent_user_error(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -493,7 +452,6 @@ nonexistent_user_error(Config) ->
         {error, {no_such_user, <<"ghost">>}},
         bondy_auth:init(SessionId, RealmUri, <<"ghost">>, [], {127, 0, 0, 1})
     ).
-
 
 nonexistent_realm_error(_Config) ->
     SessionId = bondy_session_id:new(),
@@ -509,13 +467,9 @@ nonexistent_realm_error(_Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% CONTEXT AFTER CHALLENGE
 %% =============================================================================
-
-
 
 context_method_set_after_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),

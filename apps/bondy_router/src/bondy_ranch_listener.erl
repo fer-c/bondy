@@ -18,20 +18,17 @@ by all other modules to setup and manage TCP and TLS listeners.
 -export([suspend/1]).
 -export([transport_opts/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Conditionally starts a listener with reference `Ref`.
 References for each listener is defined by the bondy.schema file.
 """.
 -spec start(
-    Ref :: ranch:ranch_ref(), Protocol :: module(), ProtocolOpts :: any()) ->
+    Ref :: ranch:ranch_ref(), Protocol :: module(), ProtocolOpts :: any()
+) ->
     ok | {error, any()}.
 
 start(Ref, Protocol, ProtocolOpts) ->
@@ -47,7 +44,7 @@ start(Ref, Protocol, ProtocolOpts) ->
                 ProtocolOpts
             ),
             resulto:then(Result, fun(_OK) ->
-                 ?LOG_NOTICE(#{
+                ?LOG_NOTICE(#{
                     description => "Started TCP listener",
                     listener => Ref,
                     transport => Transport,
@@ -56,11 +53,9 @@ start(Ref, Protocol, ProtocolOpts) ->
                 }),
                 ok
             end);
-
         false ->
             ok
     end.
-
 
 -spec stop(Ref :: ranch:ranch_ref()) -> ok.
 
@@ -68,13 +63,11 @@ stop(Ref) ->
     catch ranch:stop_listener(Ref),
     ok.
 
-
 -spec suspend(Ref :: ranch:ranch_ref()) -> ok.
 
 suspend(Ref) ->
     catch ranch:suspend_listener(Ref),
     ok.
-
 
 -spec resume(Ref :: ranch:ranch_ref()) -> ok.
 
@@ -82,13 +75,8 @@ resume(Ref) ->
     catch ranch:resume_listener(Ref),
     ok.
 
-
-
 connections(Ref) ->
     ranch:procs(Ref, connections).
-
-
-
 
 -doc """
 Returns the transport and transport options to be used with listener `Ref`.
@@ -116,13 +104,9 @@ The definition of the listeners in bondy.schema MUST match this structure.
 transport_opts(Ref) ->
     bondy_config:listener_transport_opts(Ref).
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
-
 
 %% @private
 %% These MUST match the listener names defined in bondy.schema
@@ -130,5 +114,3 @@ ref_to_transport(bridge_relay_tcp) -> ranch_tcp;
 ref_to_transport(bridge_relay_tls) -> ranch_ssl;
 ref_to_transport(wamp_tcp) -> ranch_tcp;
 ref_to_transport(wamp_tls) -> ranch_ssl.
-
-

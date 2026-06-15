@@ -11,7 +11,6 @@ endpoints and realm URIs.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
-
 -type endpoint() :: {
     Host :: inet:ip_address() | inet:hostname(),
     PortNumber :: N :: inet:port_number()
@@ -38,15 +37,11 @@ endpoints and realm URIs.
 -export([username/1]).
 -export([usernames/1]).
 
-
 -on_load(on_load/0).
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec cidr(Term :: binary() | tuple()) ->
     {ok, bondy_cidr:t()} | boolean().
@@ -59,11 +54,8 @@ cidr(Bin) when is_binary(Bin) ->
         error:badarg ->
             false
     end;
-
-cidr(Term)  ->
+cidr(Term) ->
     bondy_cidr:is_type(Term).
-
-
 
 -doc "Does not allow reserved names.".
 -spec strict_username(Term :: binary()) -> {ok, term()} | boolean().
@@ -76,12 +68,10 @@ strict_username(<<"on">>) -> false;
 strict_username(<<"to">>) -> false;
 strict_username(Term) -> username(Term).
 
-
 -doc "Does not allow reserved names.".
 -spec aliases(List :: [binary()]) -> {ok, [term()]} | boolean().
 
 aliases(L) when is_list(L) ->
-
     try
         Valid = lists:foldl(
             fun(Term, Acc) ->
@@ -102,7 +92,6 @@ aliases(L) when is_list(L) ->
         throw:abort ->
             {error, <<"One or more values are not valid aliases.">>}
     end;
-
 aliases(_) ->
     false.
 
@@ -121,10 +110,8 @@ username(Term) when is_binary(Term) ->
         false ->
             {error, <<"Value is too big (max. is 254 bytes).">>}
     end;
-
 username(_) ->
     false.
-
 
 -doc """
 Allows reserved names like `"all"`, `"anonymous"`, etc.
@@ -133,10 +120,8 @@ Allows reserved names like `"all"`, `"anonymous"`, etc.
 
 usernames(all) ->
     true;
-
 usernames(<<"all">>) ->
     {ok, all};
-
 usernames(L) when is_list(L) ->
     try
         Valid = lists:foldl(
@@ -158,10 +143,8 @@ usernames(L) when is_list(L) ->
         throw:abort ->
             {error, <<"One or more values are not valid usernames.">>}
     end;
-
 usernames(_) ->
     false.
-
 
 -doc """
 Allows reserved names like `"all"`, `"anonymous"`, etc.
@@ -174,7 +157,7 @@ tls_versions(L) when is_list(L) ->
             fun
                 ('tlsv1.2' = Term, Acc) ->
                     [Term | Acc];
-                ('tlsv1.3'  = Term, Acc) ->
+                ('tlsv1.3' = Term, Acc) ->
                     [Term | Acc];
                 (<<"tlsv1.2">>, Acc) ->
                     ['tlsv1.2' | Acc];
@@ -195,16 +178,13 @@ tls_versions(L) when is_list(L) ->
         throw:abort ->
             {error, <<"One or more values are not valid tls version.">>}
     end;
-
 tls_versions(_) ->
     false.
-
 
 -spec groupname(Bin :: binary()) -> boolean().
 
 groupname(Bin) ->
     rolename(Bin).
-
 
 -doc """
 Allows reserved names like `"all"`, `"anonymous"`, etc.
@@ -242,7 +222,6 @@ groupnames(L) when is_list(L) ->
             false
     end.
 
-
 -spec strict_groupname(Bin :: binary()) -> boolean().
 
 strict_groupname(<<"all">>) -> false;
@@ -253,29 +232,22 @@ strict_groupname(<<"on">>) -> false;
 strict_groupname(<<"to">>) -> false;
 strict_groupname(Bin) -> groupname(Bin).
 
-
 -spec rolename(Bin :: binary()) -> {ok, binary() | all | anonymous} | boolean().
 
 rolename(all) ->
     true;
-
 rolename(anonymous) ->
     true;
-
 rolename(<<"all">>) ->
     {ok, all};
-
 rolename(<<"anonymous">>) ->
     {ok, anonymous};
-
 rolename(Bin0) when is_binary(Bin0) ->
     Bin = string:casefold(Bin0),
     Regex = persistent_term:get({?MODULE, illegal_rolename_regex}),
     nomatch =:= re:run(Bin, Regex) andalso {ok, Bin};
-
 rolename(_) ->
     false.
-
 
 -doc """
 Allows reserved names like `"all"`, `"anonymous"`, etc.
@@ -284,16 +256,15 @@ Allows reserved names like `"all"`, `"anonymous"`, etc.
 
 rolenames(all) ->
     {ok, all};
-
 rolenames(<<"all">>) ->
     {ok, all};
-
 rolenames(L) when is_list(L) ->
     try
         Valid = lists:foldl(
             fun
-                (Keyword, _)
-                when Keyword == all orelse Keyword == <<"all">> ->
+                (Keyword, _) when
+                    Keyword == all orelse Keyword == <<"all">>
+                ->
                     %% "all" is not a role so it cannot be mixed in a roles list
                     throw(abort);
                 (Term, Acc) ->
@@ -314,7 +285,6 @@ rolenames(L) when is_list(L) ->
         throw:abort ->
             false
     end;
-
 rolenames(_) ->
     false.
 
@@ -328,16 +298,12 @@ password(Bin) when is_binary(Bin) ->
         error:_ ->
             false
     end;
-
 password(Term) when is_map(Term) ->
     bondy_password:is_type(Term);
-
 password(Future) when is_function(Future, 1) ->
     Future;
-
 password(_) ->
     false.
-
 
 -spec authorized_key(Term :: binary()) -> {ok, binary()} | boolean().
 
@@ -349,10 +315,8 @@ authorized_key(Term) when is_binary(Term) ->
             %% Not in hex format
             true
     end;
-
 authorized_key(_) ->
     false.
-
 
 -spec existing_atom(Term :: binary() | atom()) -> {ok, term()} | boolean().
 
@@ -363,13 +327,10 @@ existing_atom(Term) when is_binary(Term) ->
         error:_ ->
             false
     end;
-
 existing_atom(Term) when is_atom(Term) ->
     true;
-
 existing_atom(_) ->
     false.
-
 
 -spec realm_uri(Term :: binary()) -> boolean().
 
@@ -385,16 +346,13 @@ realm_uri(Term) ->
 
 ip_address({_, _, _, _} = IP) ->
     inet:is_ipv4_address(IP);
-
 ip_address({_, _, _, _, _, _, _, _} = IP) ->
     inet:is_ipv6_address(IP);
-
 ip_address(Term) ->
     case inet:ntoa(Term) of
         {error, einval} -> false;
         _ -> true
     end.
-
 
 -spec inet_host(inet:ip_address() | inet:hostname()) -> boolean().
 
@@ -411,33 +369,28 @@ inet_host(Term) ->
             end
     end.
 
-
 -doc "Is valid only if `N` is in the inclusive range 0 to 65535.".
 -spec port_number(N :: inet:port_number()) -> boolean().
 
 port_number(N) ->
     (((N) band bnot 16#ffff) =:= 0).
 
-
 -spec endpoint(endpoint() | binary() | list()) -> {ok, endpoint()} | boolean().
 
 endpoint({Host, PortNumber}) ->
     inet_host(Host) andalso port_number(PortNumber);
-
 endpoint(Endpoint) when is_binary(Endpoint) ->
     endpoint(binary_to_list(Endpoint));
-
 endpoint(Endpoint) when is_list(Endpoint) ->
     case string:split(Endpoint, [$:]) of
         [Host, PortStr] ->
             try
                 Port = list_to_integer(PortStr),
-                inet_host(Host)
-                    andalso port_number(Port)
-                    orelse throw(invalid),
+                inet_host(Host) andalso
+                    port_number(Port) orelse
+                    throw(invalid),
 
                 {ok, {Host, Port}}
-
             catch
                 error:badarg ->
                     %% PortStr is not an integer
@@ -448,25 +401,19 @@ endpoint(Endpoint) when is_list(Endpoint) ->
         _ ->
             false
     end;
-
 endpoint(_) ->
     false.
-
-
 
 -spec peer({inet:ip_address(), inet:port_number()}) -> boolean().
 
 peer({A, B}) ->
     ip_address(A) andalso port_number(B);
-
 peer(_) ->
     false.
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 on_load() ->
     %% We persist the rolename regex
@@ -480,4 +427,3 @@ on_load() ->
     ),
     ok = persistent_term:put({?MODULE, illegal_rolename_regex}, Regex),
     ok.
-

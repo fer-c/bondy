@@ -16,7 +16,6 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 -module(bondy_auth_wamp_scram).
 -moduledoc """
 Implements the WAMP SCRAM authentication method as a `bondy_auth` callback
@@ -35,35 +34,28 @@ client proof against the user's stored SCRAM password.
 -export([challenge/3]).
 -export([authenticate/4]).
 
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
-
 
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
 init(Ctxt) ->
     try
-
         %% TODO Fix this we should carry on with the challenge
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
 
         PWD = bondy_rbac_user:password(User),
-        User =/= undefined andalso bondy_password:protocol(PWD) == scram
-        orelse throw(invalid_context),
+        User =/= undefined andalso bondy_password:protocol(PWD) == scram orelse
+            throw(invalid_context),
 
         {ok, maps:new()}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec requirements() -> map().
 
@@ -74,9 +66,9 @@ requirements() ->
         authorized_keys => false
     }.
 
-
 -spec challenge(
-    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()
+) ->
     {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
@@ -108,13 +100,12 @@ challenge(Details, Ctxt, State0) ->
             {error, Reason, State0}
     end.
 
-
-
 -spec authenticate(
     Signature :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    CBState :: state()) ->
+    CBState :: state()
+) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
@@ -139,13 +130,9 @@ authenticate(Signature, Extra, Ctxt, State) ->
             {error, Reason, State}
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 base64_decode(Nonce) ->
@@ -156,7 +143,6 @@ base64_decode(Nonce) ->
             throw(invalid_base64_format)
     end.
 
-
 %% @private
 parse_details(#{authextra := Map}) ->
     Nonce = maps:get(<<"nonce">>, Map, undefined),
@@ -164,11 +150,8 @@ parse_details(#{authextra := Map}) ->
 
     CBindType = maps:get(<<"channel_binding">>, Map, undefined),
     {Nonce, CBindType};
-
 parse_details(_) ->
     throw(missing_nonce).
-
-
 
 %% @private
 do_challenge(#{channel_binding := undefined} = State) ->
@@ -200,10 +183,8 @@ do_challenge(#{channel_binding := undefined} = State) ->
     NewState = State#{server_nonce => ServerNonce},
 
     {true, ChallengeExtra, NewState};
-
 do_challenge(#{channel_binding := _} = State) ->
     {error, unsupported_channel_binding_type, State}.
-
 
 %% @private
 do_authenticate(ClientProof, Ctxt, State) ->
@@ -213,7 +194,6 @@ do_authenticate(ClientProof, Ctxt, State) ->
         server_nonce := ServerNonce,
         channel_binding := CBindType
     } = State,
-
 
     #{
         data := #{
@@ -227,7 +207,8 @@ do_authenticate(ClientProof, Ctxt, State) ->
     } = Password,
 
     AuthId = bondy_auth:user_id(Ctxt),
-    CBindData = undefined, % We do not support channel binding yet
+    % We do not support channel binding yet
+    CBindData = undefined,
 
     AuthMessage = bondy_password_scram:auth_message(
         AuthId, ClientNonce, ServerNonce, Salt, Iterations, CBindType, CBindData
@@ -252,7 +233,6 @@ do_authenticate(ClientProof, Ctxt, State) ->
         _ ->
             {error, authentication_failed, State}
     end.
-
 
 %% TODO
 %% if the authentication fails, the server SHALL respond with an ABORT message.

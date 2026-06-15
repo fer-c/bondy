@@ -16,40 +16,33 @@ backups via `m:bondy_backup`.
 
 -export([handle_call/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -spec handle_call(
-    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()
+) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
-
 
 handle_call(?BONDY_BACKUP_CREATE, #call{} = M, Ctxt) ->
     [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_backup:backup(Info), M),
     {reply, E};
-
 handle_call(?BONDY_BACKUP_STATUS, #call{} = M, Ctxt) ->
     [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_backup:status(Info), M),
     {reply, E};
-
 handle_call(?BONDY_BACKUP_RESTORE, #call{} = M, Ctxt) ->
     [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_backup:restore(Info), M),
     {reply, E};
-
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.

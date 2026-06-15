@@ -13,7 +13,7 @@ password using the `cra` or `scram` protocols.
 
 -define(VALID_PROTOCOLS, [cra, scram]).
 
--type state()   ::  undefined.
+-type state() :: undefined.
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
@@ -21,36 +21,28 @@ password using the `cra` or `scram` protocols.
 -export([requirements/0]).
 -export([authenticate/4]).
 
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
-
-
 
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
 init(Ctxt) ->
     try
-
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
 
         PWD = bondy_rbac_user:password(User),
-        User =/= undefined
-        andalso lists:member(bondy_password:protocol(PWD), ?VALID_PROTOCOLS)
-        orelse throw(invalid_context),
+        User =/= undefined andalso
+            lists:member(bondy_password:protocol(PWD), ?VALID_PROTOCOLS) orelse
+            throw(invalid_context),
 
         {ok, #{password => PWD}}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec requirements() -> bondy_auth:requirements().
 
@@ -61,21 +53,21 @@ requirements() ->
         authorized_keys => false
     }.
 
-
 -spec challenge(
-    DataIn :: map(), Ctxt :: bondy_auth:context(), State :: state()) ->
+    DataIn :: map(), Ctxt :: bondy_auth:context(), State :: state()
+) ->
     {false, NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(_, _, State) ->
     {true, #{}, State}.
 
-
 -spec authenticate(
     String :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    State :: state()) ->
+    State :: state()
+) ->
     {ok, map(), NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
@@ -86,4 +78,3 @@ authenticate(String, _, _, #{password := PWD} = State) ->
         false ->
             {error, bad_signature, State}
     end.
-

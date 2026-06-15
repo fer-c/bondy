@@ -13,15 +13,14 @@ proxy or load balancer, inspecting the `Forwarded`, `X-Real-IP` and
 -include("bondy.hrl").
 
 -type t() :: #{
-                enabled := boolean(),
-                mode := strict | relaxed,
-                proxy_info => #{
-                    local_address := inet:ip_address(),
-                    src_address := inet:ip_address() | undefined
-                },
-                error => any() | undefined
-            }.
-
+    enabled := boolean(),
+    mode := strict | relaxed,
+    proxy_info => #{
+        local_address := inet:ip_address(),
+        src_address := inet:ip_address() | undefined
+    },
+    error => any() | undefined
+}.
 
 -export([init/1]).
 -export([enabled/1]).
@@ -31,14 +30,9 @@ proxy or load balancer, inspecting the `Forwarded`, `X-Real-IP` and
 -export([proxy_info/1]).
 -export([source_ip/1]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec init(cowboy_req:req()) -> t().
 
@@ -56,70 +50,52 @@ init(#{ref := Ref} = Req) ->
                             src_address => SourceIP
                         }
                     };
-
                 {error, Reason} ->
                     Opts#{
                         proxy_info => #{local_address => LocalIP},
                         error => Reason
                     }
             end;
-
         false ->
             Opts#{
                 proxy_info => #{local_address => LocalIP}
             }
     end.
 
-
-
 enabled(#{enabled := Val}) ->
     Val.
-
 
 mode(#{mode := Val}) ->
     Val.
 
-
 proxy_info(#{proxy_info := Val}) ->
     Val;
-
 proxy_info(_) ->
     undefined.
 
-
 error(#{error := Val}) ->
     Val;
-
 error(_) ->
     undefined.
-
 
 has_error(#{error := _}) -> true;
 has_error(#{}) -> false.
 
-
 source_ip(#{enabled := true, mode := strict, error := Reason}) ->
     {error, {protocol_error, Reason}};
-
 source_ip(#{enabled := true, mode := Mode, proxy_info := Info}) ->
     case Info of
         #{src_address := SourceIP} ->
             {ok, SourceIP};
-
         #{local_address := LocalIP} when Mode == relaxed ->
             {ok, LocalIP}
     end;
-
 source_ip(#{enabled := false, proxy_info := #{local_address := LocalIP}}) ->
     {ok, LocalIP}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 find_src_address(Req) ->
@@ -129,7 +105,6 @@ find_src_address(Req) ->
         fun forwarded_for/1
     ],
     find_src_address(Req, Funs, not_found, undefined).
-
 
 %% @private
 find_src_address(Req, [H | T], Acc, Fallback) ->
@@ -143,17 +118,13 @@ find_src_address(Req, [H | T], Acc, Fallback) ->
                     %% Keep as fallback and continue w/next header
                     find_src_address(Req, T, Acc, IP)
             end;
-
         {error, Reason} ->
             find_src_address(Req, T, Reason, Fallback)
     end;
-
 find_src_address(_, [], Reason, undefined) ->
     {error, Reason};
-
 find_src_address(_, [], _, Fallback) ->
     {ok, Fallback}.
-
 
 %% @private
 -spec real_ip(cowboy_req:req()) ->
@@ -161,26 +132,21 @@ find_src_address(_, [], _, Fallback) ->
 
 real_ip(Req) ->
     try
-
         case cowboy_req:header(<<"x-real-ip">>, Req, not_found) of
             not_found ->
                 {error, not_found};
-
             Val ->
                 case inet:parse_address(binary_to_list(Val)) of
                     {ok, Addr} ->
                         {ok, Addr};
-
                     {error, _} = Error ->
                         Error
                 end
         end
-
     catch
-        _ : {request_error, {header, _}, Reason} ->
+        _:{request_error, {header, _}, Reason} ->
             {error, Reason}
     end.
-
 
 %% @private
 -spec forwarded_for(cowboy_req:req()) ->
@@ -191,10 +157,9 @@ forwarded_for(Req) ->
         L = cowboy_req:parse_header(<<"x-forwarded-for">>, Req, []),
         first_valid_address(L, undefined)
     catch
-        _ : {request_error, {header, _}, Reason} ->
+        _:{request_error, {header, _}, Reason} ->
             {error, Reason}
     end.
-
 
 %% @private
 -spec forwarded(cowboy_req:req()) ->
@@ -210,10 +175,9 @@ forwarded(Req) ->
                 first_valid_address(L, undefined)
         end
     catch
-        _ : {request_error, {header, _}, Reason} ->
+        _:{request_error, {header, _}, Reason} ->
             {error, Reason}
     end.
-
 
 %% @private
 first_valid_address([H | T], Fallback) ->
@@ -222,48 +186,38 @@ first_valid_address([H | T], Fallback) ->
             case bondy_http_utils:is_public_ip(IPAddr) of
                 true ->
                     {ok, IPAddr};
-
                 false when Fallback == undefined ->
                     first_valid_address(T, IPAddr);
-
                 false ->
                     first_valid_address(T, Fallback)
             end;
-
         {error, _} ->
             first_valid_address(T, Fallback)
     end;
-
 first_valid_address([], undefined) ->
     {error, not_found};
-
 first_valid_address([], IPAddr) ->
     {ok, IPAddr}.
-
 
 parse_forwarded(Bin) ->
     L = [
         parse_forwarded_element(string:trim(X))
-        || X <- string:split(Bin, <<",">>, all)
+     || X <- string:split(Bin, <<",">>, all)
     ],
     lists:flatten(L).
-
 
 parse_forwarded_element(Bin) ->
     [
         parse_forwarded_pair(string:trim(X))
-        || X <- string:split(Bin, <<";">>, all)
+     || X <- string:split(Bin, <<";">>, all)
     ].
-
 
 parse_forwarded_pair(<<"for", _/binary>> = Bin) ->
     [_, Value] = string:split(Bin, <<"=">>, all),
     parse_for(string:trim(Value, both, [$"]));
-
 parse_forwarded_pair(_) ->
     %% We are only interested in the IP address
     [].
-
 
 %% @private
 parse_for(<<"[", Rest/binary>>) ->
@@ -271,11 +225,7 @@ parse_for(<<"[", Rest/binary>>) ->
     %% We remove "]" and any port number e.g. "]:9000"
     [IPAddr, _] = string:split(Rest, <<"]">>),
     IPAddr;
-
 parse_for(Bin) ->
     %% IPv4
     [IPAddr | _] = string:split(Bin, <<":">>),
     IPAddr.
-
-
-

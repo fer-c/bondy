@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_bridge_relay_client_sup).
 -moduledoc """
 A `one_for_one` supervisor for `m:bondy_bridge_relay_client` worker processes,
@@ -30,22 +29,15 @@ children dynamically.
 -export([delete_child/1]).
 -export([terminate_child/1]).
 
-
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-
 
 -spec start_child(bondy_bridge_relay:t()) -> {ok, pid()} | {error, any()}.
 
@@ -59,35 +51,30 @@ start_child(Bridge) ->
     case supervisor:start_child(?MODULE, ChildSpec) of
         {ok, _} = OK ->
             OK;
-
         {error, already_present} ->
             ok = supervisor:delete_child(?MODULE, Id),
             start_child(Bridge);
-
         {error, _} = Error ->
             Error
     end.
 
-
 terminate_child(Name) ->
     supervisor:terminate_child(?MODULE, Name).
 
-
 delete_child(Name) ->
     supervisor:delete_child(?MODULE, Name).
-
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
-        intensity => 20, % max restarts
-        period => 60, % seconds
+        % max restarts
+        intensity => 20,
+        % seconds
+        period => 60,
         auto_shutdown => never
     },
     {ok, {SupFlags, []}}.

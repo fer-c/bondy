@@ -30,26 +30,18 @@ Result protocol back to the connection (`Conn`):
 -export([start_link/1]).
 -export([run/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Start a worker for a single job (called by the `simple_one_for_one` sup).".
 -spec start_link(map()) -> {ok, pid()}.
 start_link(Job) when is_map(Job) ->
     {ok, proc_lib:spawn_link(?MODULE, run, [Job])}.
 
-
-
 %% =============================================================================
 %% INTERNAL (spawned entry point)
 %% =============================================================================
-
-
 
 -doc false.
 -spec run(map()) -> ok.
@@ -58,20 +50,15 @@ run(#{kind := invocation, conn := Conn, req_id := ReqId} = Job) ->
     Reply = invoke_call(H, Args, KWArgs, Details),
     Conn ! {handler_done, ReqId, Reply},
     ok;
-
 run(#{kind := event, conn := Conn, sub_id := SubId} = Job) ->
     #{handler := H, args := Args, kwargs := KWArgs, details := Details} = Job,
     _ = invoke_event(H, Args, KWArgs, Details),
     Conn ! {event_done, SubId, self()},
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 invoke_call(H, Args, KWArgs, Details) ->
@@ -106,7 +93,6 @@ invoke_call(H, Args, KWArgs, Details) ->
             }),
             {error, ?BONDY_CONNECT_INTERNAL_ERROR, undefined, undefined}
     end.
-
 
 %% @private
 invoke_event(H, Args, KWArgs, Details) ->

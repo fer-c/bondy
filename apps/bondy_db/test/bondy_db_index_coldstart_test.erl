@@ -322,7 +322,9 @@ flush_index(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             ok = bondy_oplog_secondary_writer:flush_sync(Pid)
@@ -339,7 +341,9 @@ reset_index(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             ok = bondy_oplog_secondary_writer:reset(Pid)
@@ -355,7 +359,9 @@ untrust_all_shards(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             ok = bondy_oplog_core_registry:index_mark_rebuild(Entry)
         end,
         lists:seq(0, N - 1)

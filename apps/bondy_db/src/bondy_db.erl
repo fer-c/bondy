@@ -471,7 +471,9 @@ open_table_provision(
                 )
             of
                 {ok, InstanceIds, CacheHandles} ->
-                    case provision_indexes(Db, NS, Merged, ShardCount, Backend) of
+                    case
+                        provision_indexes(Db, NS, Merged, ShardCount, Backend)
+                    of
                         {ok, IndexMap} ->
                             %% Cold-start index recovery. For each index, load
                             %% every shard's durable trust marker
@@ -1831,7 +1833,9 @@ provision_indexes_loop(Db, NS, [Spec | Rest], DefaultShardCount, Backend, Acc) -
     case provision_index(Db, NS, Spec, DefaultShardCount, Backend) of
         {ok, Name, Provision} ->
             provision_indexes_loop(
-                Db, NS, Rest, DefaultShardCount, Backend, Acc#{Name => Provision}
+                Db, NS, Rest, DefaultShardCount, Backend, Acc#{
+                    Name => Provision
+                }
             );
         {error, _} = Err ->
             teardown_indexes(NS, Acc),
@@ -1933,7 +1937,9 @@ provision_index_shard(
                         owner => Owner
                     },
                     case
-                        bondy_oplog_core_registry:register(NS, Name, Shard, Config)
+                        bondy_oplog_core_registry:register(
+                            NS, Name, Shard, Config
+                        )
                     of
                         ok ->
                             case
@@ -2248,7 +2254,9 @@ shard_lag(NS, IndexName, Shard) ->
                 true ->
                     infinity;
                 false ->
-                    case bondy_oplog_core_registry:entry_ever_freshened(Entry) of
+                    case
+                        bondy_oplog_core_registry:entry_ever_freshened(Entry)
+                    of
                         false ->
                             infinity;
                         true ->
@@ -2256,7 +2264,9 @@ shard_lag(NS, IndexName, Shard) ->
                             erlang:max(
                                 0,
                                 Now -
-                                    bondy_oplog_core_registry:entry_last_ae(Entry)
+                                    bondy_oplog_core_registry:entry_last_ae(
+                                        Entry
+                                    )
                             )
                     end
             end

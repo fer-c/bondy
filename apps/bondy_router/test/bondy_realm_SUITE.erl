@@ -38,14 +38,11 @@ all() ->
 
         migration,
         strip_private_keys
-
     ].
-
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
-
 
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
@@ -53,7 +50,6 @@ end_per_suite(Config) ->
 
 gen_uri() ->
     string:casefold(bondy_utils:generate_fragment(6)).
-
 
 uri(_) ->
     Uri = gen_uri(),
@@ -85,7 +81,6 @@ uri(_) ->
         "Property is immutable"
     ).
 
-
 reserved(_) ->
     ?assertMatch(
         true,
@@ -102,7 +97,6 @@ reserved(_) ->
         bondy_realm:create(#{uri => <<"com.leapsight.bondy.foo">>})
     ).
 
-
 delete_master_realm(_) ->
     Uri = ?MASTER_REALM_URI,
     R = bondy_realm:fetch(Uri),
@@ -117,8 +111,6 @@ delete_master_realm(_) ->
         bondy_realm:delete(R)
     ).
 
-
-
 invalid_uri(_) ->
     ?assertError(
         #{
@@ -127,17 +119,16 @@ invalid_uri(_) ->
         bondy_realm:create(#{uri => <<"foo\s">>})
     ).
 
-
 invalid_description(_) ->
     TooLong = bondy_utils:generate_fragment(513),
     ?assertError(
         #{
             code := invalid_value,
-            description := <<"The value for 'description' did not pass the validator. Value is too big (max. is 512 bytes).">>
+            description :=
+                <<"The value for 'description' did not pass the validator. Value is too big (max. is 512 bytes).">>
         },
         bondy_realm:create(#{uri => <<"foo">>, description => TooLong})
     ).
-
 
 sso_inconsistency_error(_) ->
     ?assertError(
@@ -150,7 +141,6 @@ sso_inconsistency_error(_) ->
         "An sso realm cannot itself have an sso realm"
     ).
 
-
 sso_uri_not_found_error(_) ->
     ?assertError(
         {badarg, _},
@@ -160,7 +150,6 @@ sso_uri_not_found_error(_) ->
         }),
         "SSO realm should exist"
     ).
-
 
 is_sso_realm(_) ->
     Uri = gen_uri(),
@@ -180,7 +169,6 @@ is_sso_realm(_) ->
         bondy_realm:update(Uri, #{is_sso_realm => false}),
         "Property is immutable"
     ).
-
 
 prototype_inconsistency_error(_) ->
     ?assertError(
@@ -204,7 +192,6 @@ prototype_badarg(_) ->
         "uri and prototype_uri cannot be equal"
     ).
 
-
 prototype_uri_not_found_error(_) ->
     ?assertError(
         {badarg, _},
@@ -214,7 +201,6 @@ prototype_uri_not_found_error(_) ->
         }),
         "Prototype realm should exist"
     ).
-
 
 is_prototype(_) ->
     Uri = gen_uri(),
@@ -237,7 +223,6 @@ is_prototype(_) ->
         bondy_realm:update(Uri, #{is_prototype => false}),
         "Property is immutable"
     ).
-
 
 prototype_uri(_) ->
     ProtoUri = gen_uri(),
@@ -271,7 +256,6 @@ prototype_uri(_) ->
         "Property is immutable"
     ).
 
-
 prototype_inheritance(_) ->
     SSOUri = gen_uri(),
     _SSO = bondy_realm:create(#{
@@ -296,7 +280,6 @@ prototype_inheritance(_) ->
         prototype_uri => ProtoUri
     }),
 
-
     ?assertEqual(false, bondy_realm:allow_connections(P)),
     ?assertEqual(false, bondy_realm:allow_connections(R)),
     ?assertEqual(false, bondy_realm:is_value_inherited(P, allow_connections)),
@@ -317,8 +300,6 @@ prototype_inheritance(_) ->
     ?assertEqual(false, bondy_realm:is_value_inherited(P, is_security_enabled)),
     ?assertEqual(true, bondy_realm:is_value_inherited(R, is_security_enabled)).
 
-
-
 strip_private_keys(_) ->
     Uri = gen_uri(),
     R0 = bondy_realm:create(#{
@@ -335,7 +316,6 @@ strip_private_keys(_) ->
         0,
         length(bondy_realm:private_keys(R1))
     ).
-
 
 migration(_) ->
     Uri = gen_uri(),
@@ -367,20 +347,9 @@ migration(_) ->
     EncKeys = #{},
     Info = #{},
 
-    Old = {realm,
-        Uri,
-        Desc,
-        Authmethods,
-        Sec,
-        IsSSO,
-        AllowConnections,
-        SSOUri,
-        PrivKeys,
-        PubKeys,
-        PassOpts,
-        EncKeys,
-        Info
-    },
+    Old =
+        {realm, Uri, Desc, Authmethods, Sec, IsSSO, AllowConnections, SSOUri,
+            PrivKeys, PubKeys, PassOpts, EncKeys, Info},
     %% We store and olger version realm
     ok = plum_db:put(Prefix, Uri, Old),
 
@@ -514,5 +483,3 @@ test(_) ->
         ]
     },
     _ = bondy_realm:create(Config).
-
-

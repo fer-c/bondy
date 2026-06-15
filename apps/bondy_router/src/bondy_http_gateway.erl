@@ -92,7 +92,6 @@ Listeners are configured with two connection-count alarms:
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
-
 -define(DISPATCH_KEY(Name), {?MODULE, dispatch, Name}).
 -define(PREFIX, {api_gateway, api_specs}).
 -define(HTTP, api_gateway_http).
@@ -102,18 +101,17 @@ Listeners are configured with two connection-count alarms:
 
 -record(state, {
     %% Use for WAMP subscriptions
-    bondy_ref               ::  bondy_ref:t(),
-    exchange_ref            ::  {pid(), reference()} | undefined,
-    updated_specs = []      ::  list(),
-    subscriptions = #{}     ::  #{id() => uri()}
+    bondy_ref :: bondy_ref:t(),
+    exchange_ref :: {pid(), reference()} | undefined,
+    updated_specs = [] :: list(),
+    subscriptions = #{} :: #{id() => uri()}
 }).
 
-
--type listener()    ::  api_gateway_http
-                        | api_gateway_https
-                        | admin_api_http
-                        | admin_api_https.
-
+-type listener() ::
+    api_gateway_http
+    | api_gateway_https
+    | admin_api_http
+    | admin_api_https.
 
 %% API
 -export([delete/1]).
@@ -141,18 +139,13 @@ Listeners are configured with two connection-count alarms:
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -doc "Starts the gen_server and registers it as `bondy_http_gateway`.".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
 
 -doc """
 Starts the public HTTP and HTTPS listeners based on the configuration.
@@ -167,7 +160,6 @@ use `start_admin_listeners/0` for that.
 start_listeners() ->
     gen_server:call(?MODULE, {start_listeners, public}).
 
-
 -doc """
 Suspends the public HTTP and HTTPS listeners.
 
@@ -179,20 +171,17 @@ connections alive.
 suspend_listeners() ->
     gen_server:call(?MODULE, {suspend_listeners, public}).
 
-
 -doc "Resumes the public HTTP and HTTPS listeners after a suspension.".
 -spec resume_listeners() -> ok.
 
 resume_listeners() ->
     gen_server:call(?MODULE, {resume_listeners, public}).
 
-
 -doc "Stops the public HTTP and HTTPS listeners and closes all connections.".
 -spec stop_listeners() -> ok.
 
 stop_listeners() ->
     gen_server:call(?MODULE, {stop_listeners, public}).
-
 
 -doc """
 Starts the admin HTTP and HTTPS listeners.
@@ -208,13 +197,11 @@ the WAMP WebSocket endpoint.
 start_admin_listeners() ->
     gen_server:call(?MODULE, {start_listeners, admin}).
 
-
 -doc "Stops the admin HTTP and HTTPS listeners and closes all connections.".
 -spec stop_admin_listeners() -> ok.
 
 stop_admin_listeners() ->
     gen_server:call(?MODULE, {stop_listeners, admin}).
-
 
 -doc """
 Suspends the admin HTTP and HTTPS listeners.
@@ -227,13 +214,11 @@ connections alive.
 suspend_admin_listeners() ->
     gen_server:call(?MODULE, {suspend_listeners, admin}).
 
-
 -doc "Resumes the admin HTTP and HTTPS listeners after a suspension.".
 -spec resume_admin_listeners() -> ok.
 
 resume_admin_listeners() ->
     gen_server:call(?MODULE, {resume_listeners, admin}).
-
 
 -doc """
 Loads API specs from the configuration file into the metadata store.
@@ -248,7 +233,6 @@ for that.
 
 apply_config() ->
     gen_server:call(?MODULE, apply_config).
-
 
 -doc """
 Parses an API spec, stores it in plum_db, and rebuilds dispatch tables.
@@ -265,7 +249,6 @@ active listeners are rebuilt immediately.
 load(Term) when is_map(Term) orelse is_list(Term) ->
     gen_server:call(?MODULE, {load, Term}).
 
-
 -doc """
 Returns the current Cowboy dispatch table for the given listener.
 
@@ -277,7 +260,6 @@ for `Listener`.
 dispatch_table(Listener) ->
     Map = ranch:get_protocol_options(Listener),
     maps_utils:get_path([env, dispatch], Map).
-
 
 -doc """
 Rebuilds the Cowboy dispatch tables for all active public listeners.
@@ -292,11 +274,10 @@ rebuild_dispatch_tables() ->
         description => "Rebuilding HTTP Gateway dispatch tables"
     }),
     _ = [
-        rebuild_dispatch_table(Scheme, Routes) ||
-        {Scheme, Routes} <- load_dispatch_tables()
+        rebuild_dispatch_table(Scheme, Routes)
+     || {Scheme, Routes} <- load_dispatch_tables()
     ],
     ok.
-
 
 -doc """
 Returns the API specification stored under `Id`, or `{error, not_found}`.
@@ -314,14 +295,11 @@ lookup(Id) ->
             {error, not_found}
     end.
 
-
 -doc "Returns the list of all stored API specification objects.".
 -spec list() -> [ParsedSpec :: map()].
 
 list() ->
     [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
-
-
 
 -doc """
 Deletes the API specification identified by `Id` and rebuilds dispatch tables.
@@ -336,13 +314,9 @@ delete(Id) when is_binary(Id) ->
     ok = rebuild_dispatch_tables(),
     ok.
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     SessionId = bondy_session_id:new(),
@@ -350,37 +324,30 @@ init([]) ->
     State = subscribe(#state{bondy_ref = Ref}),
     {ok, State}.
 
-
 handle_call({start_listeners, Type}, _From, State) ->
     Res = do_start_listeners(Type),
     {reply, Res, State};
-
 handle_call({suspend_listeners, Type}, _From, State) ->
     Res = do_suspend_listeners(Type),
     {reply, Res, State};
-
 handle_call({resume_listeners, Type}, _From, State) ->
     Res = do_resume_listeners(Type),
     {reply, Res, State};
-
 handle_call({stop_listeners, Type}, _From, State) ->
     Res = do_stop_listeners(Type),
     {reply, Res, State};
-
 handle_call(apply_config, _From, State) ->
     Res = do_apply_config(),
     {reply, Res, State};
-
 handle_call({load, Map}, _From, State) ->
     try
         Res = load_spec(Map),
         ok = rebuild_dispatch_tables(),
         {reply, Res, State}
     catch
-       _:Reason ->
+        _:Reason ->
             {reply, {error, Reason}, State}
     end;
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -388,9 +355,6 @@ handle_call(Event, From, State) ->
         from => From
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
-
-
-
 
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
@@ -402,22 +366,18 @@ handle_cast(Event, State) ->
 handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
     Ref = erlang:monitor(process, Pid),
     {noreply, State#state{exchange_ref = {Pid, Ref}}};
-
 handle_info(
     {plum_db_event, exchange_finished, {Pid, _Reason}},
-    #state{exchange_ref = {Pid, Ref}} = State0) ->
-
+    #state{exchange_ref = {Pid, Ref}} = State0
+) ->
     true = erlang:demonitor(Ref, [flush]),
     ok = handle_spec_updates(State0),
     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
     {noreply, State1};
-
 handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
     %% We are receiving the notification after we received a DOWN message
     %% we do nothing
     {noreply, State};
-
-
 handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
@@ -426,7 +386,7 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
         description => "API Specification remote update received",
         key => Key
     }),
-    Specs = [Key|State0#state.updated_specs],
+    Specs = [Key | State0#state.updated_specs],
     State1 = State0#state{updated_specs = Specs},
     Status = {bondy_config:get(status), plum_db_config:get(aae_enabled)},
 
@@ -448,7 +408,6 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
             %% TODO if rebuild disaptch tables fails, we should retry later on
             ok = handle_spec_updates(State1),
             {noreply, State1#state{updated_specs = []}};
-
         {_, false} ->
             %% We are either initialising or shutting down
             {noreply, State1};
@@ -462,27 +421,25 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
             %% after an AAE exchange
             {noreply, State1}
     end;
-
 handle_info({?BONDY_REQ, _, ?MASTER_REALM_URI, #event{} = Event}, State) ->
     %% We informally implement bondy_subscriber
     Id = Event#event.subscription_id,
     Topic = maps:get(Id, State#state.subscriptions, undefined),
-    NewState = case {Topic, Event#event.args} of
-        {undefined, _} ->
-            State;
-        {?BONDY_REALM_DELETED, [Uri]} ->
-            on_realm_deleted(Uri, State)
-    end,
+    NewState =
+        case {Topic, Event#event.args} of
+            {undefined, _} ->
+                State;
+            {?BONDY_REALM_DELETED, [Uri]} ->
+                on_realm_deleted(Uri, State)
+        end,
     {noreply, NewState};
-
 handle_info(
     {'DOWN', Ref, process, Pid, _Reason},
-    #state{exchange_ref = {Pid, Ref}} = State0) ->
-
+    #state{exchange_ref = {Pid, Ref}} = State0
+) ->
     ok = handle_spec_updates(State0),
     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
     {noreply, State1};
-
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -491,35 +448,25 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(normal, State) ->
     _ = unsubscribe(State),
     ok;
-
 terminate(shutdown, State) ->
     _ = unsubscribe(State),
     ok;
-
 terminate({shutdown, _}, State) ->
     _ = unsubscribe(State),
     ok;
-
 terminate(_Reason, State) ->
     _ = unsubscribe(State),
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 subscribe(State) ->
@@ -528,10 +475,14 @@ subscribe(State) ->
     %% recompile them and generate this node's Cowboy dispatch tables
     ok = plum_db_events:subscribe(exchange_started),
     ok = plum_db_events:subscribe(exchange_finished),
-    MS = [{
-        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
-        {{?PREFIX, '_'}, '_', '_'}, [], [true]
-    }],
+    MS = [
+        {
+            %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
+            {{?PREFIX, '_'}, '_', '_'},
+            [],
+            [true]
+        }
+    ],
     ok = plum_db_events:subscribe(object_update, MS),
 
     %% We subscribe to WAMP events
@@ -551,7 +502,6 @@ subscribe(State) ->
         subscriptions = Subs
     }.
 
-
 %% @private
 unsubscribe(State) ->
     _ = plum_db_events:unsubscribe(exchange_started),
@@ -560,11 +510,10 @@ unsubscribe(State) ->
 
     _ = [
         bondy_broker:unsubscribe(Id, ?MASTER_REALM_URI)
-        ||  Id <- maps:keys(State#state.subscriptions)
+     || Id <- maps:keys(State#state.subscriptions)
     ],
 
     State#state{subscriptions = #{}}.
-
 
 %% @private
 do_start_listeners(public) ->
@@ -577,14 +526,13 @@ do_start_listeners(public) ->
     try
         _ = [
             resulto:throw_or(start_listener({Scheme, Routes}))
-            || {Scheme, Routes} <- DTables
+         || {Scheme, Routes} <- DTables
         ],
         ok
     catch
         throw:Reason ->
             {error, Reason}
     end;
-
 do_start_listeners(admin) ->
     ?LOG_NOTICE(#{
         description => "Starting admin HTTP(S) listeners"
@@ -595,14 +543,13 @@ do_start_listeners(admin) ->
     try
         _ = [
             resulto:throw_or(start_admin_listener({Scheme, Routes}))
-            || {Scheme, Routes} <- DTables
+         || {Scheme, Routes} <- DTables
         ],
         ok
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 %% @private
 do_suspend_listeners(public) ->
@@ -612,7 +559,6 @@ do_suspend_listeners(public) ->
     catch ranch:suspend_listener(?HTTP),
     catch ranch:suspend_listener(?HTTPS),
     ok;
-
 do_suspend_listeners(admin) ->
     ?LOG_NOTICE(#{
         description => "Suspending admin HTTP(S) listeners"
@@ -620,7 +566,6 @@ do_suspend_listeners(admin) ->
     catch ranch:suspend_listener(?ADMIN_HTTP),
     catch ranch:suspend_listener(?ADMIN_HTTPS),
     ok.
-
 
 %% @private
 do_resume_listeners(public) ->
@@ -630,7 +575,6 @@ do_resume_listeners(public) ->
     catch ranch:resume_listener(?HTTP),
     catch ranch:resume_listener(?HTTPS),
     ok;
-
 do_resume_listeners(admin) ->
     ?LOG_NOTICE(#{
         description => "Resuming admin HTTP(S) listeners"
@@ -638,7 +582,6 @@ do_resume_listeners(admin) ->
     catch ranch:resume_listener(?ADMIN_HTTP),
     catch ranch:resume_listener(?ADMIN_HTTPS),
     ok.
-
 
 %% @private
 do_stop_listeners(public) ->
@@ -650,7 +593,6 @@ do_stop_listeners(public) ->
     bondy_http_security_headers:cleanup(?HTTP),
     bondy_http_security_headers:cleanup(?HTTPS),
     ok;
-
 do_stop_listeners(admin) ->
     ?LOG_NOTICE(#{
         description => "Stopping admin HTTP(S) listeners"
@@ -661,7 +603,6 @@ do_stop_listeners(admin) ->
     bondy_http_security_headers:cleanup(?ADMIN_HTTPS),
     ok.
 
-
 %% @private
 -spec do_apply_config() -> ok | no_return().
 
@@ -670,7 +611,6 @@ do_apply_config() ->
         undefined -> ok;
         FName -> do_apply_config(FName)
     end.
-
 
 %% @private
 do_apply_config(FName) ->
@@ -714,7 +654,6 @@ do_apply_config(FName) ->
             ok
     end.
 
-
 %% @private
 load_spec(Map) when is_map(Map) ->
     case validate_spec(Map) of
@@ -733,7 +672,6 @@ load_spec(Map) when is_map(Map) ->
             }),
             throw(Reason)
     end;
-
 load_spec(FName) ->
     case bondy_utils:json_consult(FName) of
         {ok, Spec} when is_map(Spec) ->
@@ -750,9 +688,6 @@ load_spec(FName) ->
             throw(invalid_json_format)
     end.
 
-
-
-
 -doc """
 We store the API Spec in the metadata store. Notice that we store the JSON
 and not the parsed spec as the parsed spec might contain mops proxy
@@ -762,29 +697,22 @@ will no longer be valid and will fail with a badfun exception.
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
     plum_db:put(?PREFIX, Id, Spec).
 
-
-
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_listener({~"http", Routes}) ->
     ok = maybe_start_http(Routes, ?HTTP),
     ok;
-
 start_listener({~"https", Routes}) ->
     ok = maybe_start_https(Routes, ?HTTPS),
     ok.
-
-
 
 -spec start_admin_listener({Scheme :: binary(), [tuple()]}) ->
     ok | {error, any()}.
 
 start_admin_listener({~"http", Routes}) ->
     maybe_start_http(Routes, ?ADMIN_HTTP);
-
 start_admin_listener({~"https", Routes}) ->
     maybe_start_https(Routes, ?ADMIN_HTTPS).
-
 
 maybe_start_http(Routes, Name) ->
     case bondy_config:get([Name, enabled], true) of
@@ -793,8 +721,6 @@ maybe_start_http(Routes, Name) ->
         false ->
             ok
     end.
-
-
 
 -spec start_http(list(), atom()) -> ok | {error, any()}.
 
@@ -811,7 +737,6 @@ start_http(Routes, Name) ->
         {ok, _} ->
             ?LOG_NOTICE(LogMeta#{description => "Started HTTP Listener"}),
             ok;
-
         {error, eaddrinuse = Reason} = Error ->
             ?LOG_ERROR(LogMeta#{
                 description =>
@@ -820,7 +745,6 @@ start_http(Routes, Name) ->
                 reason => Reason
             }),
             Error;
-
         {error, Reason} = Error ->
             ?LOG_ERROR(LogMeta#{
                 description => "Failed to start HTTP listener",
@@ -836,7 +760,6 @@ maybe_start_https(Routes, Name) ->
         false ->
             ok
     end.
-
 
 listener_protocol_opts(Routes, Name) ->
     ProtocolOpts0 = bondy_config:listener_protocol_opts(Name),
@@ -868,9 +791,6 @@ listener_protocol_opts(Routes, Name) ->
         protocols => [http]
     }.
 
-
-
-
 -spec start_https(list(), atom()) -> ok | {error, any()}.
 
 start_https(Routes, Name) ->
@@ -886,7 +806,6 @@ start_https(Routes, Name) ->
         {ok, _} ->
             ?LOG_NOTICE(LogMeta#{description => "Started HTTPS Listener"}),
             ok;
-
         {error, eaddrinuse = Reason} = Error ->
             ?LOG_ERROR(LogMeta#{
                 description =>
@@ -895,7 +814,6 @@ start_https(Routes, Name) ->
                 reason => Reason
             }),
             Error;
-
         {error, Reason} = Error ->
             ?LOG_ERROR(LogMeta#{
                 description => "Failed to start HTTP listener",
@@ -903,7 +821,6 @@ start_https(Routes, Name) ->
             }),
             Error
     end.
-
 
 validate_spec(Map) ->
     try
@@ -917,7 +834,6 @@ validate_spec(Map) ->
         _:Reason:_ ->
             {error, Reason}
     end.
-
 
 %% @private
 -doc """
@@ -954,14 +870,14 @@ load_dispatch_tables() ->
                     }),
                     []
             end
-
-        end ||
-        {K, [V]} <- plum_db:to_list(?PREFIX),
+        end
+     || {K, [V]} <- plum_db:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
 
     Result = bondy_http_gateway_api_spec_parser:dispatch_table(
-        [element(3, S) || S <- Specs], base_routes()),
+        [element(3, S) || S <- Specs], base_routes()
+    ),
 
     case Result of
         [] ->
@@ -973,58 +889,47 @@ load_dispatch_tables() ->
             Result
     end.
 
-
 compile_dispatch(Routes, Name) ->
     _ = persistent_term:put(?DISPATCH_KEY(Name), cowboy_router:compile(Routes)),
     ok.
-
 
 %% @private
 -spec rebuild_dispatch_table(atom() | binary(), list()) -> ok.
 
 rebuild_dispatch_table(http, Routes) ->
     rebuild_dispatch_table(~"http", Routes);
-
 rebuild_dispatch_table(https, Routes) ->
     rebuild_dispatch_table(~"https", Routes);
-
 rebuild_dispatch_table(~"http", Routes) ->
     case bondy_config:get([?HTTP, enabled], true) of
         true ->
             compile_dispatch(Routes, ?HTTP);
-
         false ->
             ok
     end;
-    
 rebuild_dispatch_table(~"https", Routes) ->
     case bondy_config:get([?HTTPS, enabled], true) of
         true ->
             compile_dispatch(Routes, ?HTTPS);
-
         false ->
             ok
     end.
 
-
 %% @private
 handle_spec_updates(#state{updated_specs = []}) ->
     ok;
-
 handle_spec_updates(#state{updated_specs = [Key]}) ->
     ?LOG_INFO(#{
         description => "API Spec object_update received",
         key => Key
     }),
     rebuild_dispatch_tables();
-
 handle_spec_updates(#state{updated_specs = L}) ->
     ?LOG_INFO(#{
         description => "Multiple API Spec object_update(s) received",
         count => length(L)
     }),
     rebuild_dispatch_tables().
-
 
 %% @private
 base_routes() ->
@@ -1034,23 +939,25 @@ base_routes() ->
         {'_', [
             {"/ws", bondy_wamp_ws_connection_handler, #{}},
             {"/wamp/sse/open", bondy_http_sse_handler, #{action => open}},
-            {"/wamp/sse/:transport_id/receive",
-                bondy_http_sse_stream_handler, #{}},
-            {"/wamp/sse/:transport_id/send",
-                bondy_http_sse_handler, #{action => send}},
-            {"/wamp/sse/:transport_id/close",
-                bondy_http_sse_handler, #{action => close}},
-            {"/wamp/longpoll/open",
-                bondy_http_longpoll_handler, #{action => open}},
+            {"/wamp/sse/:transport_id/receive", bondy_http_sse_stream_handler,
+                #{}},
+            {"/wamp/sse/:transport_id/send", bondy_http_sse_handler, #{
+                action => send
+            }},
+            {"/wamp/sse/:transport_id/close", bondy_http_sse_handler, #{
+                action => close
+            }},
+            {"/wamp/longpoll/open", bondy_http_longpoll_handler, #{
+                action => open
+            }},
             {"/wamp/longpoll/:transport_id/receive",
                 bondy_http_longpoll_handler, #{action => receive_msgs}},
-            {"/wamp/longpoll/:transport_id/send",
-                bondy_http_longpoll_handler, #{action => send}},
-            {"/wamp/longpoll/:transport_id/close",
-                bondy_http_longpoll_handler, #{action => close}}
+            {"/wamp/longpoll/:transport_id/send", bondy_http_longpoll_handler,
+                #{action => send}},
+            {"/wamp/longpoll/:transport_id/close", bondy_http_longpoll_handler,
+                #{action => close}}
         ]}
     ].
-
 
 %% @private
 admin_base_routes() ->
@@ -1063,7 +970,6 @@ admin_base_routes() ->
         ]}
     ].
 
-
 admin_spec() ->
     Base = bondy_config:get(priv_dir),
     File = filename:join(Base, "specs/bondy_admin_api.json"),
@@ -1072,20 +978,21 @@ admin_spec() ->
             Spec;
         {error, enoent} ->
             ?LOG_ERROR(#{
-                description => "Error processing API Gateway Specification file.",
+                description =>
+                    "Error processing API Gateway Specification file.",
                 filename => File,
                 reason => file:format_error(enoent)
             }),
             exit(enoent);
         {error, Reason} ->
             ?LOG_ERROR(#{
-                description => "Error while parsing API Gateway Specification file",
+                description =>
+                    "Error while parsing API Gateway Specification file",
                 filename => File,
                 reason => Reason
             }),
             exit(invalid_json_format)
     end.
-
 
 %% @private
 parse_specs(Specs, BaseRoutes) ->
@@ -1098,12 +1005,10 @@ parse_specs(Specs, BaseRoutes) ->
         L ->
             _ = [
                 maybe_init_groups(maps:get(~"realm_uri", Spec))
-                || Spec <- L
+             || Spec <- L
             ],
             bondy_http_gateway_api_spec_parser:dispatch_table(L, BaseRoutes)
     end.
-
-
 
 %% @private
 maybe_init_groups(RealmUri) ->
@@ -1111,26 +1016,30 @@ maybe_init_groups(RealmUri) ->
         #{
             ~"name" => <<"resource_owners">>,
             <<"meta">> => #{
-                <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
+                <<"description">> =>
+                    <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
             }
         },
         #{
             ~"name" => <<"api_clients">>,
             <<"meta">> => #{
-                <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway by themselves or on behalf of a Resource Owner.">>
-                }
+                <<"description">> =>
+                    <<"A group of applications making protected resource requests through Bondy API Gateway by themselves or on behalf of a Resource Owner.">>
+            }
         }
     ],
-    _ = [begin
-        case bondy_rbac_group:lookup(RealmUri, maps:get(~"name", G)) of
-            {error, not_found} ->
-                bondy_rbac_group:add(RealmUri, bondy_rbac_group:new(G));
-            _ ->
-                ok
+    _ = [
+        begin
+            case bondy_rbac_group:lookup(RealmUri, maps:get(~"name", G)) of
+                {error, not_found} ->
+                    bondy_rbac_group:add(RealmUri, bondy_rbac_group:new(G));
+                _ ->
+                    ok
+            end
         end
-    end || G <- Gs],
+     || G <- Gs
+    ],
     ok.
-
 
 listener_transport_opts(Name) ->
     Opts0 = bondy_config:listener_transport_opts(Name),
@@ -1180,12 +1089,9 @@ listener_transport_opts(Name) ->
             Opts#{
                 num_listen_sockets => max(Schedulers, trunc(NumAcceptors / 15))
             };
-
         false ->
             Opts
     end.
-
-
 
 %% @private
 -doc "Tear down all APIs for that realm when event occurs.".

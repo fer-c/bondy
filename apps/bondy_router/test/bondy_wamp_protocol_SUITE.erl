@@ -22,7 +22,7 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    [{realm_uri, <<"com.example.test.wamp_protocol">>}|Config].
+    [{realm_uri, <<"com.example.test.wamp_protocol">>} | Config].
 
 end_per_suite(Config) ->
     %% bondy_ct:stop_bondy(),
@@ -35,20 +35,28 @@ end_per_suite(Config) ->
 format_status(_Config) ->
     lists:foreach(
         fun(State) ->
-            ?assertError(function_clause, bondy_wamp_protocol:format_status( State))
+            ?assertError(
+                function_clause, bondy_wamp_protocol:format_status(State)
+            )
         end,
         [S || S <- [{}, {wamp_state}]]
     ),
 
     % No sensitive info at wamp_state level, the reformatting is delegated to other modules.
     lists:foreach(
-        fun({SubProtocol, AuthMethod, AuthClaims, AuthContext, AuthTime, Name, Context, Reason}) ->
-            State = {wamp_state, SubProtocol, AuthMethod, AuthClaims, AuthContext, AuthTime, Name, Context, Reason},
+        fun(
+            {SubProtocol, AuthMethod, AuthClaims, AuthContext, AuthTime, Name,
+                Context, Reason}
+        ) ->
+            State =
+                {wamp_state, SubProtocol, AuthMethod, AuthClaims, AuthContext,
+                    AuthTime, Name, Context, Reason},
             NewState = bondy_wamp_protocol:format_status(State),
             ?assertEqual(State, NewState)
         end,
-        [{SP, AM, ACl, AC, AT, SN, Co, Re} ||
-            SP <- [undefined, {raw, binary, json}],
+        [
+            {SP, AM, ACl, AC, AT, SN, Co, Re}
+         || SP <- [undefined, {raw, binary, json}],
             AM <- [undefined, cryptosign],
             ACl <- [undefined, #{}],
             AC <- [undefined, #{}],
@@ -56,7 +64,8 @@ format_status(_Config) ->
             SN <- [closed, establishing],
             Co <- [undefined, #{}],
             Re <- [normal, logout]
-        ]).
+        ]
+    ).
 
 %% -----------------------------------------------------------------------------
 %% bondy_wamp_protocol:validate_subprotocol
@@ -64,7 +73,18 @@ format_status(_Config) ->
 
 -define(PROTOCOLS, [raw, ws]).
 -define(FRAMES, [binary, text]).
--define(ENCODINGS, [bert, bert_batched, erl, erl_batched, json, json_batched, msgpack, msgpack_batched, cbor, cbor_batched]).
+-define(ENCODINGS, [
+    bert,
+    bert_batched,
+    erl,
+    erl_batched,
+    json,
+    json_batched,
+    msgpack,
+    msgpack_batched,
+    cbor,
+    cbor_batched
+]).
 -define(SUPPORTED_SUB_PROTOCOLS, [
     {raw, binary, bert},
     {raw, binary, erl},
@@ -86,7 +106,8 @@ format_status(_Config) ->
     ?WAMP2_MSGPACK,
     ?WAMP2_CBOR,
     ?WAMP2_BERT,
-    ?WAMP2_ERL, % not supported
+    % not supported
+    ?WAMP2_ERL,
     ?WAMP2_CBOR_BATCHED,
     ?WAMP2_MSGPACK_BATCHED,
     ?WAMP2_JSON_BATCHED,
@@ -97,7 +118,9 @@ format_status(_Config) ->
 validate_subprotocol(_Config) ->
     lists:foreach(
         fun(SubProtocol) ->
-            ValidateResult = bondy_wamp_protocol:validate_subprotocol(SubProtocol),
+            ValidateResult = bondy_wamp_protocol:validate_subprotocol(
+                SubProtocol
+            ),
             case lists:member(SubProtocol, ?SUPPORTED_SUB_PROTOCOLS) of
                 true ->
                     ?assertEqual({ok, SubProtocol}, ValidateResult);
@@ -105,12 +128,15 @@ validate_subprotocol(_Config) ->
                     ?assertEqual({error, invalid_subprotocol}, ValidateResult)
             end
         end,
-        [{P, F, E} || P <- ?PROTOCOLS, F <- ?FRAMES, E <- ?ENCODINGS]),
+        [{P, F, E} || P <- ?PROTOCOLS, F <- ?FRAMES, E <- ?ENCODINGS]
+    ),
 
     lists:foreach(
         fun(SubProtocolBinary) ->
             SubProtocol = bondy_wamp_subprotocol:from_binary(SubProtocolBinary),
-            ValidateResult = bondy_wamp_protocol:validate_subprotocol(SubProtocolBinary),
+            ValidateResult = bondy_wamp_protocol:validate_subprotocol(
+                SubProtocolBinary
+            ),
             case lists:member(SubProtocol, ?SUPPORTED_SUB_PROTOCOLS) of
                 true ->
                     ?assertEqual({ok, SubProtocol}, ValidateResult);
@@ -118,13 +144,16 @@ validate_subprotocol(_Config) ->
                     ?assertEqual({error, invalid_subprotocol}, ValidateResult)
             end
         end,
-        ?WAMP2_ENCODINGS),
-    
+        ?WAMP2_ENCODINGS
+    ),
+
     Error = {error, whatever},
     ?assertEqual(Error, bondy_wamp_protocol:validate_subprotocol(Error)),
 
-    ?assertEqual({error, invalid_subprotocol},
-                 bondy_wamp_protocol:validate_subprotocol(<<"wamp.2.not.supported">>)).
+    ?assertEqual(
+        {error, invalid_subprotocol},
+        bondy_wamp_protocol:validate_subprotocol(<<"wamp.2.not.supported">>)
+    ).
 
 %% -----------------------------------------------------------------------------
 %% bondy_wamp_protocol:init
@@ -132,14 +161,14 @@ validate_subprotocol(_Config) ->
 
 init_error(_Config) ->
     UnsupportedSubProtocol = {ws, binary, erl},
-    Peer = {{127,0,0,1}, 7},
+    Peer = {{127, 0, 0, 1}, 7},
     Options = #{},
     Result = bondy_wamp_protocol:init(UnsupportedSubProtocol, Peer, Options),
     ?assertEqual({error, invalid_subprotocol, undefined}, Result).
 
 init_ok(_Config) ->
     SubProtocol = {raw, binary, erl},
-    Peer = {{127,0,0,1}, 7},
+    Peer = {{127, 0, 0, 1}, 7},
     Options = #{},
     {ok, State} = bondy_wamp_protocol:init(SubProtocol, Peer, Options),
 
@@ -159,12 +188,14 @@ terminate(_Config) ->
     SubProtocol = {raw, binary, erl},
 
     % undefined context
-    StateNoContext = {wamp_state, SubProtocol, cryptosign, undefined, #{}, 123, failed, undefined, normal},
+    StateNoContext =
+        {wamp_state, SubProtocol, cryptosign, undefined, #{}, 123, failed,
+            undefined, normal},
     ?assertEqual(undefined, bondy_wamp_protocol:context(StateNoContext)),
     ?assertEqual(ok, bondy_wamp_protocol:terminate(StateNoContext)),
 
     % no session
-    Peer = {{127,0,0,1}, 7},
+    Peer = {{127, 0, 0, 1}, 7},
     {ok, State} = bondy_wamp_protocol:init(SubProtocol, Peer, #{}),
     Context = bondy_wamp_protocol:context(State),
     ?assertNot(bondy_context:has_session(Context)),
@@ -175,11 +206,13 @@ terminate(_Config) ->
 %% -----------------------------------------------------------------------------
 
 handle_inbound(_Config) ->
-    
     % Unsupported protocol
     EncodingUnsupported = unsupported,
     SubProtocolInvalid = {ws, text, EncodingUnsupported},
-    StateInvalidSP = {wamp_state, SubProtocolInvalid, wampcra, undefined, #{}, 123, establishing, undefined, normal},
+    StateInvalidSP =
+        {wamp_state, SubProtocolInvalid, wampcra, undefined, #{}, 123,
+            establishing, undefined, normal},
     Error = {unsupported_encoding, EncodingUnsupported},
-    ?assertError(Error, bondy_wamp_protocol:handle_inbound(<<>>, StateInvalidSP)).
-
+    ?assertError(
+        Error, bondy_wamp_protocol:handle_inbound(<<>>, StateInvalidSP)
+    ).

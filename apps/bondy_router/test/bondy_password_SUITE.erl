@@ -27,15 +27,13 @@ all() ->
         new_scram_options_argon2id13
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    [{realm_uri, <<"com.myrealm">>}|Config].
+    [{realm_uri, <<"com.myrealm">>} | Config].
 
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
     {save_config, Config}.
-
 
 future_apply_default(_) ->
     Protocol = bondy_config:get([security, password, protocol]),
@@ -47,7 +45,6 @@ future_apply_default(_) ->
     ?assertEqual(true, bondy_password:verify_string(?P1, B)),
     ?assertEqual(false, bondy_password:verify_string(<<"foo">>, B)).
 
-
 new_default(_) ->
     Protocol = bondy_config:get([security, password, protocol]),
 
@@ -57,9 +54,7 @@ new_default(_) ->
     ?assertEqual(true, bondy_password:verify_string(?P1, A)),
     ?assertEqual(false, bondy_password:verify_string(<<"foo">>, A)).
 
-
 new_cra_too_low_iterations(_) ->
-
     ?assertError(
         {invalid_argument, iterations},
         bondy_password:new(?P1, #{
@@ -67,7 +62,6 @@ new_cra_too_low_iterations(_) ->
             params => #{kdf => pbkdf2, iterations => 1000}
         })
     ).
-
 
 new_cra_too_high_iterations(_) ->
     ?assertError(
@@ -78,9 +72,7 @@ new_cra_too_high_iterations(_) ->
         })
     ).
 
-
 new_cra_invalid_kdf(_) ->
-
     ?assertError(
         {invalid_argument, kdf},
         bondy_password:new(?P1, #{
@@ -89,14 +81,11 @@ new_cra_invalid_kdf(_) ->
         })
     ).
 
-
 new_cra_options(_) ->
-
     Opts = #{
         protocol => cra,
         params => #{kdf => pbkdf2, iterations => 5000}
     },
-
 
     A = bondy_password:new(?P1, Opts),
 
@@ -109,12 +98,7 @@ new_cra_options(_) ->
 
     ok.
 
-
-
-
-
 new_scram_too_low_iterations(_) ->
-
     ?assertError(
         {invalid_argument, iterations},
         bondy_password:new(?P1, #{
@@ -132,17 +116,15 @@ new_scram_too_low_iterations(_) ->
         })
     ).
 
-    %% ?assertError(
-    %%     {invalid_argument, iterations},
-    %%     bondy_password:new(?P1, #{
-    %%         protocol => scram,
-    %%         params => #{kdf => argon2id13, iterations => 0}
-    %%     })
-    %% ).
-
+%% ?assertError(
+%%     {invalid_argument, iterations},
+%%     bondy_password:new(?P1, #{
+%%         protocol => scram,
+%%         params => #{kdf => argon2id13, iterations => 0}
+%%     })
+%% ).
 
 new_scram_too_high_iterations(_) ->
-
     ?assertError(
         {invalid_argument, iterations},
         bondy_password:new(?P1, #{
@@ -160,21 +142,19 @@ new_scram_too_high_iterations(_) ->
         })
     ).
 
-    %% ?assertError(
-    %%     {invalid_argument, iterations},
-    %%     bondy_password:new(?P1, #{
-    %%         protocol => scram,
-    %%         params => #{kdf => argon2id13, iterations => 4294967295 + 1}
-    %%     })
-    %% ).
-
+%% ?assertError(
+%%     {invalid_argument, iterations},
+%%     bondy_password:new(?P1, #{
+%%         protocol => scram,
+%%         params => #{kdf => argon2id13, iterations => 4294967295 + 1}
+%%     })
+%% ).
 
 new_scram_options_pbkdf2(_) ->
     Opts = #{
         protocol => scram,
         params => #{kdf => pbkdf2, iterations => 5000}
     },
-
 
     A = bondy_password:new(?P1, Opts),
 
@@ -185,11 +165,9 @@ new_scram_options_pbkdf2(_) ->
     ?assertEqual(true, bondy_password:verify_string(?P1, A)),
     ?assertEqual(false, bondy_password:verify_string(?P2, A)),
 
-
     ok.
 
 new_scram_options_argon2id13(_) ->
-
     Opts = #{
         protocol => scram,
         params => #{kdf => argon2id13}

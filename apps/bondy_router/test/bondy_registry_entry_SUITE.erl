@@ -12,7 +12,6 @@
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
-
 -compile([nowarn_export_all, export_all]).
 
 all() ->
@@ -21,18 +20,13 @@ all() ->
         composite_comparator
     ].
 
-
 init_per_suite(Config) ->
-
     bondy_ct:start_bondy(),
     Config.
-
 
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
     {save_config, Config}.
-
-
 
 mg_comparator(_) ->
     %% All using ?INVOKE_SINGLE by default
@@ -67,7 +61,7 @@ mg_comparator(_) ->
         bondy_registry_entry:new(
             registration, <<"com.foo">>, Ref, Uri, #{match => P}
         )
-        || {Uri, P} <- L
+     || {Uri, P} <- L
     ],
 
     Fun = bondy_registry_entry:mg_comparator(),
@@ -76,13 +70,10 @@ mg_comparator(_) ->
         Expected,
         [
             {bondy_registry_entry:uri(E), bondy_registry_entry:match_policy(E)}
-            || E <- lists:sort(Fun, Entries)
+         || E <- lists:sort(Fun, Entries)
         ]
     ),
     ok.
-
-
-
 
 composite_comparator(_) ->
     L = [
@@ -112,7 +103,7 @@ composite_comparator(_) ->
     Expected = [
         {<<"a1.b2.c3.d4.e55">>, ?EXACT_MATCH, ?INVOKE_SINGLE},
         {<<"a1.b2.c3.d4">>, ?PREFIX_MATCH, ?INVOKE_SINGLE},
-        {<<"a1.b2.c3">>, ? PREFIX_MATCH, ?INVOKE_SINGLE},
+        {<<"a1.b2.c3">>, ?PREFIX_MATCH, ?INVOKE_SINGLE},
         {<<"a1.b2.c33..e5">>, ?WILDCARD_MATCH, ?INVOKE_SINGLE},
         {<<"a1.b2..d4.e5">>, ?WILDCARD_MATCH, ?INVOKE_FIRST},
         {<<"a1.b2..d4.e5">>, ?WILDCARD_MATCH, ?INVOKE_FIRST},
@@ -138,7 +129,7 @@ composite_comparator(_) ->
         bondy_registry_entry:new(
             registration, <<"com.foo">>, Ref, Uri, #{match => P, invoke => I}
         )
-        || {Uri, P, I} <- L
+     || {Uri, P, I} <- L
     ],
 
     Fun = bondy_registry_entry:mg_comparator(),
@@ -151,9 +142,7 @@ composite_comparator(_) ->
                 bondy_registry_entry:match_policy(E),
                 bondy_registry_entry:invocation_policy(E)
             }
-            || E <- lists:sort(Fun, Entries)
+         || E <- lists:sort(Fun, Entries)
         ]
     ),
     ok.
-
-

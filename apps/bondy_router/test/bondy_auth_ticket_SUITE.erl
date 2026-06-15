@@ -43,7 +43,6 @@ all() ->
         nonexistent_user_error
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     KeyPairs = [bondy_cryptosign:generate_key() || _ <- lists:seq(1, 3)],
@@ -54,12 +53,11 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     {save_config, Config}.
 
-
 add_realm(RealmUri, KeyPairs) ->
     %% We use the same keys for both users (not to be done in real life)
     PubKeys = [
         maps:get(public, KeyPair)
-        || KeyPair <- KeyPairs
+     || KeyPair <- KeyPairs
     ],
 
     Config = #{
@@ -89,7 +87,10 @@ add_realm(RealmUri, KeyPairs) ->
                     <<"bondy.issue">>
                 ],
                 resources => [
-                    #{uri => <<"bondy.ticket.scope.local">>, match => <<"exact">>}
+                    #{
+                        uri => <<"bondy.ticket.scope.local">>,
+                        match => <<"exact">>
+                    }
                 ],
                 roles => [?APP]
             },
@@ -148,18 +149,13 @@ add_realm(RealmUri, KeyPairs) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
 
-
-
 %% @private
 make_session(RealmUri, Username, AuthMethod) ->
     make_session(RealmUri, Username, AuthMethod, {127, 0, 0, 1}).
-
 
 %% @private
 make_session(RealmUri, Username, AuthMethod, SourceIP) ->
@@ -180,13 +176,9 @@ make_session(RealmUri, Username, AuthMethod, SourceIP) ->
     ),
     Session.
 
-
-
 %% =============================================================================
 %% ORIGINAL TESTS (PRESERVED)
 %% =============================================================================
-
-
 
 anon_auth_not_allowed(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -205,12 +197,15 @@ anon_auth_not_allowed(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(Session)), Session
+    ),
 
     ?assertMatch(
         {
             error,
-            {not_authorized, <<"The authentication method 'anonymous' you used to establish this session is not in the list of methods allowed to issue tickets (configuration option 'security.ticket.authmethods').">>}
+            {not_authorized,
+                <<"The authentication method 'anonymous' you used to establish this session is not in the list of methods allowed to issue tickets (configuration option 'security.ticket.authmethods').">>}
         },
         bondy_ticket:issue(Session, #{})
     ).
@@ -237,16 +232,24 @@ ticket_auth_not_allowed(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(Session)), Session
+    ),
 
     ?assertMatch(
         {error, {not_authorized, _}},
         bondy_ticket:issue(Session, #{})
     ),
 
-     %% We re-enable authmethods
-     ok = bondy_config:set([security, ticket, authmethods], [
-        <<"cryptosign">>, <<"password">>, <<"ticket">>, <<"tls">>, <<"trust">>,<<"wamp-scram">>, <<"wampcra">>
+    %% We re-enable authmethods
+    ok = bondy_config:set([security, ticket, authmethods], [
+        <<"cryptosign">>,
+        <<"password">>,
+        <<"ticket">>,
+        <<"tls">>,
+        <<"trust">>,
+        <<"wamp-scram">>,
+        <<"wampcra">>
     ]).
 
 local_scope(Config) ->
@@ -266,7 +269,9 @@ local_scope(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(Session)), Session
+    ),
 
     ?assertMatch(
         {error, {not_authorized, _}},
@@ -279,15 +284,19 @@ local_scope(Config) ->
         bondy_rbac:request(#{
             roles => [?U1],
             permissions => [<<"bondy.issue">>],
-            resources => [#{
-                uri => <<"bondy.ticket.scope.local">>,
-                match => <<"exact">>
-            }]
+            resources => [
+                #{
+                    uri => <<"bondy.ticket.scope.local">>,
+                    match => <<"exact">>
+                }
+            ]
         })
     ),
 
     %% Re-insert session so that we cleanup the rbac_ctxt
-    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(Session)), Session
+    ),
 
     %% We issue a local scope ticket
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
@@ -307,10 +316,9 @@ local_scope(Config) ->
     ),
 
     ?assertEqual(
-        {error,{invalid_request,"Nested tickets are not allowed"}},
+        {error, {invalid_request, "Nested tickets are not allowed"}},
         bondy_ticket:issue(Session, #{client_ticket => Ticket})
     ).
-
 
 client_scope_with_ticket(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -357,7 +365,7 @@ client_scope_with_ticket(Config) ->
     ),
 
     ?assertEqual(
-        {error,{invalid_request,"Nested tickets are not allowed"}},
+        {error, {invalid_request, "Nested tickets are not allowed"}},
         bondy_ticket:issue(UserSession, #{
             client_ticket => AppTicket,
             expiry_time_secs => 300
@@ -381,7 +389,9 @@ client_scope_with_id(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:external_id(UserSession)), UserSession),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(UserSession)), UserSession
+    ),
 
     %% We issue a self-issued ticket
     {ok, UserTicket, Details} = bondy_ticket:issue(
@@ -411,13 +421,9 @@ client_scope_with_id(Config) ->
         bondy_auth:authenticate(?WAMP_TICKET_AUTH, UserTicket, undefined, Ctxt1)
     ).
 
-
-
 %% =============================================================================
 %% TICKET AUTH METHOD AVAILABILITY
 %% =============================================================================
-
-
 
 ticket_method_available_for_user(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -431,7 +437,6 @@ ticket_method_available_for_user(Config) ->
         lists:member(?WAMP_TICKET_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
 ticket_method_not_available_outside_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -444,13 +449,9 @@ ticket_method_not_available_outside_cidr(Config) ->
         lists:member(?WAMP_TICKET_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% TICKET ISSUANCE
 %% =============================================================================
-
-
 
 issue_with_custom_expiry(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -470,7 +471,6 @@ issue_with_custom_expiry(Config) ->
     ?assert(ExpiresAt > Now),
     ?assert(ExpiresAt =< Now + 610).
 
-
 issue_returns_ticket_and_details(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Session = make_session(RealmUri, ?U1, ?WAMP_CRA_AUTH),
@@ -484,13 +484,9 @@ issue_returns_ticket_and_details(Config) ->
     ?assertEqual(?U1, maps:get(authid, Details)),
     ?assertEqual(RealmUri, maps:get(authrealm, Details)).
 
-
-
 %% =============================================================================
 %% TICKET AUTHENTICATION FLOW
 %% =============================================================================
-
-
 
 ticket_auth_full_flow(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -515,7 +511,6 @@ ticket_auth_full_flow(Config) ->
     %% Should return extra map (may contain scope info)
     ?assert(is_map(Extra)).
 
-
 wrong_user_ticket_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SourceIP = {127, 0, 0, 1},
@@ -538,13 +533,9 @@ wrong_user_ticket_rejected(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% ERROR CASES
 %% =============================================================================
-
-
 
 invalid_method_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -559,7 +550,6 @@ invalid_method_rejected(Config) ->
             <<"nonexistent">>, <<"data">>, undefined, Ctxt
         )
     ).
-
 
 nonexistent_user_error(Config) ->
     RealmUri = ?config(realm_uri, Config),

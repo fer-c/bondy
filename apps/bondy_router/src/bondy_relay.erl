@@ -73,8 +73,6 @@ and EVENT messages between WAMP clients connected to different Bondy peers
     ref :: bondy_ref:t()
 }).
 
-
-
 %% API
 -export([forward/2]).
 -export([forward/3]).
@@ -88,14 +86,9 @@ and EVENT messages between WAMP clients connected to different Bondy peers
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec start_link() -> {'ok', pid()} | 'ignore' | {'error', term()}.
 
@@ -108,12 +101,10 @@ start_link() ->
     ],
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], SpawnOpts).
 
-
 -spec forward(Node :: node() | [node()], Msg :: any()) -> ok.
 
 forward(Node, Msg) ->
     forward(Node, Msg, #{}).
-
 
 -doc """
 Forwards a wamp message to a peer (cluster node).
@@ -129,28 +120,22 @@ forward(Node, Msg, Opts0) when is_atom(Node) ->
     Channel = bondy_config:get(wamp_peer_channel, undefined),
     Opts = Opts0#{channel => Channel},
     partisan:cast_message(Node, ?MODULE, Msg, Opts);
-
 forward(Nodes, Msg, Opts0) when is_list(Nodes) ->
     Channel = bondy_config:get(wamp_peer_channel, undefined),
     Opts = Opts0#{channel => Channel},
     _ = [
         partisan:cast_message(Node, ?MODULE, Msg, Opts)
-        || Node <- Nodes
+     || Node <- Nodes
     ],
     ok.
-
-
 
 %% =============================================================================
 %% API : GEN_SERVER CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     true = bondy_gproc:register(?MODULE),
     {ok, #state{ref = bondy_ref:new(relay)}}.
-
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -159,7 +144,6 @@ handle_call(Event, From, State) ->
         from => From
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
-
 
 handle_cast({forward, To, Msg, Opts0} = M, State) ->
     %% We are receiving a message from peer
@@ -199,7 +183,6 @@ handle_cast({forward, To, Msg, Opts0} = M, State) ->
         end,
 
         {noreply, State}
-
     catch
         Class:Reason:Stacktrace ->
             %% TODO send back WAMP message
@@ -211,14 +194,12 @@ handle_cast({forward, To, Msg, Opts0} = M, State) ->
             }),
             {noreply, State}
     end;
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
     {noreply, State}.
-
 
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
@@ -227,28 +208,19 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(normal, _State) ->
     ok;
-
 terminate(shutdown, _State) ->
     ok;
-
 terminate({shutdown, _}, _State) ->
     ok;
-
 terminate(_Reason, _State) ->
     %% TODO publish metaevent
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-

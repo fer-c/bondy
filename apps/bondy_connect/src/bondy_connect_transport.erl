@@ -29,12 +29,13 @@ call. A decode failure is surfaced as `{error, {protocol_error, _}}`, never an
 assertion crash.
 """.
 
--type endpoint()    ::  {inet:hostname() | inet:ip_address(), inet:port_number()}
-                        | {local, file:filename_all()}.
--type subprotocol() ::  {raw, binary, bondy_connect_framing:serializer()}.
--type opts()        ::  map().
--type state()       ::  term().
--type inbound()     ::  bondy_connect_codec:inbound().
+-type endpoint() ::
+    {inet:hostname() | inet:ip_address(), inet:port_number()}
+    | {local, file:filename_all()}.
+-type subprotocol() :: {raw, binary, bondy_connect_framing:serializer()}.
+-type opts() :: map().
+-type state() :: term().
+-type inbound() :: bondy_connect_codec:inbound().
 
 -export_type([endpoint/0]).
 -export_type([subprotocol/0]).
@@ -42,13 +43,9 @@ assertion crash.
 -export_type([state/0]).
 -export_type([inbound/0]).
 
-
-
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
-
-
 
 -doc "Establish the transport connection (no WAMP handshake yet).".
 -callback connect(endpoint(), opts()) -> {ok, state()} | {error, term()}.

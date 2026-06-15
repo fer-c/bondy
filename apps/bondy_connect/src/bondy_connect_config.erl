@@ -25,32 +25,41 @@ defaults are secure-by-default (`verify_peer`).
 %% **not** advertised — they are deferred (the router does not yet round-trip
 %% them) and advertising a feature we cannot honour would violate the contract.
 -define(DEFAULT_ROLES, #{
-    caller => #{features => #{
-        call_timeout => true,
-        call_canceling => true,
-        caller_identification => true,
-        call_retries => true
-    }},
-    callee => #{features => #{
-        call_canceling => true,
-        caller_identification => true,
-        pattern_based_registration => true,
-        shared_registration => true,
-        registration_revocation => true
-    }},
-    publisher => #{features => #{
-        publisher_identification => true,
-        publisher_exclusion => true,
-        subscriber_blackwhite_listing => true
-    }},
-    subscriber => #{features => #{
-        pattern_based_subscription => true,
-        publisher_identification => true
-    }}
+    caller => #{
+        features => #{
+            call_timeout => true,
+            call_canceling => true,
+            caller_identification => true,
+            call_retries => true
+        }
+    },
+    callee => #{
+        features => #{
+            call_canceling => true,
+            caller_identification => true,
+            pattern_based_registration => true,
+            shared_registration => true,
+            registration_revocation => true
+        }
+    },
+    publisher => #{
+        features => #{
+            publisher_identification => true,
+            publisher_exclusion => true,
+            subscriber_blackwhite_listing => true
+        }
+    },
+    subscriber => #{
+        features => #{
+            pattern_based_subscription => true,
+            publisher_identification => true
+        }
+    }
 }).
 
 -define(DEFAULT_SERIALIZERS, [json]).
--define(DEFAULT_MAX_MESSAGE_LENGTH, 16777216). %% 16 MB
+%% 16 MB
+-define(DEFAULT_MAX_MESSAGE_LENGTH, 16777216).
 
 %% Resilient by default (Phase 6): a dropped session is re-established with a
 %% bounded, backed-off retry budget. `retry_initial_connect` (default `false`)
@@ -84,13 +93,9 @@ defaults are secure-by-default (`verify_peer`).
 
 -export([validate/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Validate and normalise a connection `Spec`. Returns the normalised config map
@@ -124,17 +129,12 @@ validate(Spec) when is_map(Spec) ->
         throw:Reason ->
             {error, Reason}
     end;
-
 validate(_) ->
     {error, invalid_spec}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 validate_realm(#{realm := Realm}) when is_binary(Realm) ->
@@ -144,21 +144,16 @@ validate_realm(#{realm := Realm}) when is_binary(Realm) ->
         _:_ ->
             throw({invalid_realm, Realm})
     end;
-
 validate_realm(_) ->
     throw(missing_realm).
-
 
 %% @private
 validate_agent(#{agent := Agent}) when is_binary(Agent) ->
     Agent;
-
 validate_agent(#{agent := _}) ->
     throw({invalid_agent, not_a_binary});
-
 validate_agent(_) ->
     ?BONDY_CONNECT_AGENT.
-
 
 %% @private
 %% Default to anonymous when no auth is configured.
@@ -169,16 +164,12 @@ validate_auth(#{auth := #{method := Method} = Auth}) when is_binary(Method) ->
         false ->
             throw({unsupported_authmethod, Method})
     end;
-
 validate_auth(#{auth := #{}}) ->
     throw(missing_authmethod);
-
 validate_auth(#{auth := _}) ->
     throw(invalid_auth);
-
 validate_auth(_) ->
     #{method => ?WAMP_ANON_AUTH}.
-
 
 %% @private
 %% Merge the user's reconnect map over the bounded defaults and validate.
@@ -192,7 +183,6 @@ validate_reconnect(Spec) ->
         end
     end).
 
-
 %% @private
 validate_ping(Spec) ->
     merge_validate(ping, Spec, ?DEFAULT_PING, fun(K, V) ->
@@ -201,7 +191,6 @@ validate_ping(Spec) ->
             _ -> is_pos_int(V) orelse bad(ping, K, V)
         end
     end).
-
 
 %% @private Validate the optional `handler' load-regulation config,
 %% consumed by `bondy_connect_load:new/1'. Recognised keys:
@@ -226,13 +215,10 @@ validate_handler(#{handler := H}) when is_map(H) ->
         H
     ),
     H;
-
 validate_handler(#{handler := Other}) ->
     throw({invalid_option, handler, Other});
-
 validate_handler(_) ->
     #{}.
-
 
 %% @private
 validate_network_timeout(#{network_timeout := T}) when is_integer(T), T > 0 ->
@@ -241,7 +227,6 @@ validate_network_timeout(#{network_timeout := T}) ->
     throw({invalid_network_timeout, T});
 validate_network_timeout(_) ->
     ?DEFAULT_NETWORK_TIMEOUT.
-
 
 %% @private Merge the user-supplied map (if any) over `Default`, validating each
 %% user-supplied value with `ValidateFun`. Unknown keys are rejected so typos
@@ -252,8 +237,11 @@ merge_validate(Key, Spec, Default, ValidateFun) ->
             _ = maps:foreach(
                 fun(K, V) ->
                     case is_map_key(K, Default) of
-                        true -> _ = ValidateFun(K, V), ok;
-                        false -> throw({unknown_option, Key, K})
+                        true ->
+                            _ = ValidateFun(K, V),
+                            ok;
+                        false ->
+                            throw({unknown_option, Key, K})
                     end
                 end,
                 User
@@ -262,7 +250,6 @@ merge_validate(Key, Spec, Default, ValidateFun) ->
         Other ->
             throw({invalid_option, Key, Other})
     end.
-
 
 %% @private
 is_non_neg_int(V) -> is_integer(V) andalso V >= 0.
@@ -273,19 +260,15 @@ is_pos_int(V) -> is_integer(V) andalso V > 0.
 %% @private
 bad(Group, Key, Value) -> throw({invalid_option, Group, Key, Value}).
 
-
 %% @private
 %% Secure-by-default: when TLS options are not supplied, peer verification is
 %% on. Only relevant for tls/wss transports (consumed in later phases).
 validate_tls(#{tls := TLS}) when is_map(TLS) ->
     maps:merge(#{verify => verify_peer}, TLS);
-
 validate_tls(#{tls := _}) ->
     throw(invalid_tls);
-
 validate_tls(_) ->
     #{verify => verify_peer}.
-
 
 %% @private
 methods() ->

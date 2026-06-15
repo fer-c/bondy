@@ -20,24 +20,19 @@ so a user disconnect (normal) stays down while a crash is restarted.
 
 -define(SERVER, ?MODULE).
 
-
-
 -spec start_link() -> supervisor:startlink_ret().
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
-
 
 -doc "Start a per-connection supervisor for a validated config.".
 -spec start_connection(Config :: map()) -> {ok, pid()} | {error, term()}.
 start_connection(Config) ->
     supervisor:start_child(?SERVER, [Config]).
 
-
 -doc "Stop a per-connection supervisor.".
 -spec stop_connection(pid()) -> ok | {error, term()}.
 stop_connection(ConnSupPid) ->
     supervisor:terminate_child(?SERVER, ConnSupPid).
-
 
 -spec init([]) ->
     {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.

@@ -21,7 +21,6 @@ We follow the Prometheus metric and label naming practices described at
     realm_type, node, protocol, transport, frame_type, encoding
 ]).
 
-
 %% API
 -export([report/0]).
 -export([days_duration_buckets/0]).
@@ -31,11 +30,9 @@ We follow the Prometheus metric and label naming practices described at
 -export([milliseconds_duration_buckets/0]).
 -export([microseconds_duration_buckets/0]).
 
-
 %% PROMETHEUS_COLLECTOR CALLBACKS
 -export([deregister_cleanup/1]).
 -export([collect_mf/2]).
-
 
 %% GEN_EVENT CALLBACKS
 -export([init/1]).
@@ -47,16 +44,12 @@ We follow the Prometheus metric and label naming practices described at
 
 -import(prometheus_model_helpers, [create_mf/4]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 report() ->
     prometheus_text_format:format().
-
 
 days_duration_buckets() ->
     [0, 1, 2, 3, 4, 5, 10, 15, 30].
@@ -64,92 +57,119 @@ days_duration_buckets() ->
 hours_duration_buckets() ->
     [0, 1, 2, 3, 4, 5, 10, 12, 24, 48, 72].
 
-
 minutes_duration_buckets() ->
     [0, 1, 2, 3, 4, 5, 10, 15, 30].
-
 
 seconds_duration_buckets() ->
     [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 60, 90, 180, 300, 600, 1800, 3600].
 
-
 milliseconds_duration_buckets() ->
     [
-        0, 1, 2, 5, 10, 15,
-        25, 50, 75, 100, 150, 200, 250, 300, 400,
-        500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000
+        0,
+        1,
+        2,
+        5,
+        10,
+        15,
+        25,
+        50,
+        75,
+        100,
+        150,
+        200,
+        250,
+        300,
+        400,
+        500,
+        750,
+        1000,
+        1500,
+        2000,
+        2500,
+        3000,
+        4000,
+        5000
     ].
 
 microseconds_duration_buckets() ->
     [
-        10, 25, 50, 100, 250, 500,
-        1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000,
-        1000000, 2500000, 5000000, 10000000
+        10,
+        25,
+        50,
+        100,
+        250,
+        500,
+        1000,
+        2500,
+        5000,
+        10000,
+        25000,
+        50000,
+        100000,
+        250000,
+        500000,
+        1000000,
+        2500000,
+        5000000,
+        10000000
     ].
-
-
 
 %% =============================================================================
 %% PROMETHEUS_COLLECTOR CALLBACKS
 %% =============================================================================
 
-
-
 deregister_cleanup(_) ->
     ok.
 
-
 -spec collect_mf(
-    prometheus_registry:registry(), prometheus_collector:callback()) -> ok.
+    prometheus_registry:registry(), prometheus_collector:callback()
+) -> ok.
 
 collect_mf(_Registry, Callback) ->
-  Metrics = collector_metrics(),
-  EnabledMetrics = enabled_metrics(),
-  [add_metric_family(Metric, Callback)
-   || {Name, _, _, _}=Metric <- Metrics, metric_enabled(Name, EnabledMetrics)],
-  ok.
-
-
+    Metrics = collector_metrics(),
+    EnabledMetrics = enabled_metrics(),
+    [
+        add_metric_family(Metric, Callback)
+     || {Name, _, _, _} = Metric <- Metrics,
+        metric_enabled(Name, EnabledMetrics)
+    ],
+    ok.
 
 %% =============================================================================
 %% GEN_EVENT CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     ok = setup(),
     State = #state{},
     {ok, State}.
 
-
 handle_event({[bondy, socket, open], Procotol, Transport, _Peername}, State) ->
     Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_sockets_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sockets_total, Labels),
     {ok, State};
-
-handle_event({[bondy, socket, closed], Procotol, Transport, _Peername, Secs}, State) ->
+handle_event(
+    {[bondy, socket, closed], Procotol, Transport, _Peername, Secs}, State
+) ->
     Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_sockets_closed_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     ok = prometheus_histogram:observe(
-        bondy_socket_duration_seconds, Labels, Secs),
+        bondy_socket_duration_seconds, Labels, Secs
+    ),
     {ok, State};
-
 handle_event({[bondy, socket, error], Procotol, Transport, _Peername}, State) ->
     Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_socket_errors_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     {ok, State};
-
 handle_event({[bondy, session, opened], Session}, State) ->
     RealmUri = bondy_session:realm_uri(Session),
     Labels = get_session_labels(RealmUri),
     ok = prometheus_counter:inc(bondy_sessions_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sessions_total, Labels),
     {ok, State};
-
 handle_event({[bondy, session, closed], Session, DurationSecs}, State) ->
     RealmUri = bondy_session:realm_uri(Session),
     Labels = get_session_labels(RealmUri),
@@ -159,115 +179,95 @@ handle_event({[bondy, session, closed], Session, DurationSecs}, State) ->
         bondy_session_duration_seconds, Labels, DurationSecs
     ),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #abort{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_abort_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #authenticate{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_authenticate_messages_total, M, [], Ctxt),
     {ok, State};
-
-handle_event({[bondy, wamp, message], #call{procedure_uri = Val} = M, Ctxt}, State) ->
+handle_event(
+    {[bondy, wamp, message], #call{procedure_uri = Val} = M, Ctxt}, State
+) ->
     ok = observe_message(bondy_wamp_call_messages_total, M, [Val], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #cancel{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_cancel_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #challenge{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_challenge_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event(
-    {[bondy, wamp, message], #error{error_uri = Val} = M, Ctxt}, State) ->
+    {[bondy, wamp, message], #error{error_uri = Val} = M, Ctxt}, State
+) ->
     ok = observe_message(bondy_wamp_error_messages_total, M, [Val], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #event{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_event_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #goodbye{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_goodbye_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #hello{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_hello_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #interrupt{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_interrupt_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #invocation{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_invocation_messages_total, M, [], Ctxt),
     {ok, State};
-
-handle_event({[bondy, wamp, message], #publish{topic_uri = Val} = M, Ctxt}, State) ->
+handle_event(
+    {[bondy, wamp, message], #publish{topic_uri = Val} = M, Ctxt}, State
+) ->
     ok = observe_message(bondy_wamp_publish_messages_total, M, [Val], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #published{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_published_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event(
-    {[bondy, wamp, message], #register{procedure_uri = Val} = M, Ctxt}, State) ->
+    {[bondy, wamp, message], #register{procedure_uri = Val} = M, Ctxt}, State
+) ->
     ok = observe_message(bondy_wamp_register_messages_total, M, [Val], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #registered{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_registered_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #result{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_result_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event(
-    {[bondy, wamp, message], #subscribe{topic_uri = Val} = M, Ctxt}, State) ->
+    {[bondy, wamp, message], #subscribe{topic_uri = Val} = M, Ctxt}, State
+) ->
     ok = observe_message(bondy_wamp_subscribe_messages_total, M, [Val], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #subscribed{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_subscribed_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #unregister{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unregister_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #unregistered{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unregistered_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #unsubscribe{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unsubscribe_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #unsubscribed{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unsubscribed_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #welcome{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_welcome_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({[bondy, wamp, message], #yield{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_yield_messages_total, M, [], Ctxt),
     {ok, State};
-
 handle_event({send_error, Reason, M, Ctxt}, State) ->
     MessageType = element(1, M),
     Labels = [Reason, MessageType, get_labels_values(Ctxt)],
     ok = prometheus_counter:inc(bondy_send_errors_total, Labels),
     {ok, State};
-
 handle_event(_Event, State) ->
     {ok, State}.
-
 
 handle_call(Event, State) ->
     ?LOG_WARNING(#{
@@ -276,25 +276,18 @@ handle_call(Event, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-
 handle_info(_Info, State) ->
     {ok, State}.
-
 
 terminate(_Reason, _State) ->
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 setup() ->
     ok = declare_metrics(),
@@ -310,30 +303,22 @@ setup() ->
     _ = [prometheus_registry:register_collector(C) || C <- Collectors],
     ok.
 
-
 get_labels(call) ->
     [procedure_uri | ?WAMP_MESSAGE_LABELS];
-
 get_labels(error) ->
     [error_uri | ?WAMP_MESSAGE_LABELS];
-
 get_labels(publish) ->
     [topic_uri | ?WAMP_MESSAGE_LABELS];
-
 get_labels(register) ->
     [procedure_uri | ?WAMP_MESSAGE_LABELS];
-
 get_labels(subscribe) ->
     [topic_uri | ?WAMP_MESSAGE_LABELS];
-
 get_labels(_) ->
-   ?WAMP_MESSAGE_LABELS.
-
+    ?WAMP_MESSAGE_LABELS.
 
 %% @private
 get_session_labels(RealmUri) ->
     [RealmUri, node_name()].
-
 
 %% @private
 get_socket_labels(Protocol, Transport) ->
@@ -355,7 +340,6 @@ get_labels_values(Ctxt) ->
         E
     ].
 
-
 %% @private
 get_realm_type(Ctxt) ->
     try bondy_context:realm_uri(Ctxt) of
@@ -366,7 +350,6 @@ get_realm_type(Ctxt) ->
             undefined
     end.
 
-
 observe_message(Metric, M, LabelsValues, Ctxt) ->
     Size = erts_debug:flat_size(M) * 8,
     Labels = get_labels_values(Ctxt),
@@ -375,12 +358,10 @@ observe_message(Metric, M, LabelsValues, Ctxt) ->
     ok = prometheus_counter:inc(Metric, AllLabels),
     prometheus_histogram:observe(bondy_wamp_message_bytes, Labels, Size).
 
-
 declare_metrics() ->
     _ = prometheus_counter:declare([
         {name, bondy_errors_total},
-        {help,
-            <<"The total number of errors in a bondy node since reset.">>},
+        {help, <<"The total number of errors in a bondy node since reset.">>},
         {labels, [reason | ?WAMP_MESSAGE_LABELS]}
     ]),
     _ = prometheus_counter:declare([
@@ -391,39 +372,33 @@ declare_metrics() ->
     ]),
     ok.
 
-
 declare_net_metrics() ->
     %% Sockets
 
     _ = prometheus_gauge:declare([
         {name, bondy_sockets_total},
-        {help,
-            <<"The number of active sockets on a bondy node.">>},
+        {help, <<"The number of active sockets on a bondy node.">>},
         {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_opened_total},
-        {help,
-            <<"The number of sockets opened on a bondy node since reset.">>},
+        {help, <<"The number of sockets opened on a bondy node since reset.">>},
         {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_closed_total},
-        {help,
-            <<"The number of sockets closed on a bondy node since reset.">>},
+        {help, <<"The number of sockets closed on a bondy node since reset.">>},
         {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_socket_errors_total},
-        {help,
-            <<"The number of socket errors on a bondy node since reset.">>},
+        {help, <<"The number of socket errors on a bondy node since reset.">>},
         {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_histogram:declare([
         {name, bondy_socket_duration_seconds},
         {buckets, seconds_duration_buckets()},
-        {help,
-            <<"A histogram of the duration of a socket.">>},
+        {help, <<"A histogram of the duration of a socket.">>},
         {labels, [node, protocol, transport]}
     ]),
 
@@ -462,7 +437,6 @@ declare_net_metrics() ->
 
     ok.
 
-
 declare_session_metrics() ->
     _ = prometheus_gauge:declare([
         {name, bondy_sessions_total},
@@ -485,8 +459,7 @@ declare_session_metrics() ->
     _ = prometheus_histogram:declare([
         {name, bondy_session_duration_seconds},
         {buckets, seconds_duration_buckets()},
-        {help,
-            <<"A histogram of the duration of sessions.">>},
+        {help, <<"A histogram of the duration of sessions.">>},
         {labels, [realm_type, node]}
     ]),
     ok.
@@ -500,17 +473,20 @@ declare_wamp_metrics() ->
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_abort_messages_total},
-        {help, <<"The total number of abort messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of abort messages routed by a bondy node since reset.">>},
         {labels, get_labels(abort)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_authenticate_messages_total},
-        {help, <<"The total number of authenticate messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of authenticate messages routed by a bondy node since reset.">>},
         {labels, get_labels(authenticate)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_call_messages_total},
-        {help, <<"The total number of call messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of call messages routed by a bondy node since reset.">>},
         {labels, get_labels(call)}
     ]),
     _ = prometheus_histogram:declare([
@@ -527,107 +503,128 @@ declare_wamp_metrics() ->
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_cancel_messages_total},
-        {help, <<"The total number of cancel messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of cancel messages routed by a bondy node since reset.">>},
         {labels, get_labels(cancel)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_challenge_messages_total},
-        {help, <<"The total number of challenge messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of challenge messages routed by a bondy node since reset.">>},
         {labels, get_labels(challenge)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_error_messages_total},
-        {help, <<"The total number of error messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of error messages routed by a bondy node since reset.">>},
         {labels, get_labels(error)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_event_messages_total},
-        {help, <<"The total number of event messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of event messages routed by a bondy node since reset.">>},
         {labels, get_labels(event)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_goodbye_messages_total},
-        {help, <<"The total number of goodbye messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of goodbye messages routed by a bondy node since reset.">>},
         {labels, get_labels(goodbye)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_hello_messages_total},
-        {help, <<"The total number of hello messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of hello messages routed by a bondy node since reset.">>},
         {labels, get_labels(hello)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_interrupt_messages_total},
-        {help, <<"The total number of interrupt messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of interrupt messages routed by a bondy node since reset.">>},
         {labels, get_labels(interrupt)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_invocation_messages_total},
-        {help, <<"The total number of invocation messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of invocation messages routed by a bondy node since reset.">>},
         {labels, get_labels(invocation)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_publish_messages_total},
-        {help, <<"The total number of publish messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of publish messages routed by a bondy node since reset.">>},
         {labels, get_labels(publish)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_published_messages_total},
-        {help, <<"The total number of published messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of published messages routed by a bondy node since reset.">>},
         {labels, get_labels(published)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_register_messages_total},
-        {help, <<"The total number of register messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of register messages routed by a bondy node since reset.">>},
         {labels, get_labels(register)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_registered_messages_total},
-        {help, <<"The total number of registered messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of registered messages routed by a bondy node since reset.">>},
         {labels, get_labels(registered)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_result_messages_total},
-        {help, <<"The total number of result messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of result messages routed by a bondy node since reset.">>},
         {labels, get_labels(result)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_subscribe_messages_total},
-        {help, <<"The total number of subscribe messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of subscribe messages routed by a bondy node since reset.">>},
         {labels, get_labels(subscribe)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_subscribed_messages_total},
-        {help, <<"The total number of subscribed messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of subscribed messages routed by a bondy node since reset.">>},
         {labels, get_labels(subscribed)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unregister_messages_total},
-        {help, <<"The total number of unregister messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of unregister messages routed by a bondy node since reset.">>},
         {labels, get_labels(unregister)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unregistered_messages_total},
-        {help, <<"The total number of unregistered messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of unregistered messages routed by a bondy node since reset.">>},
         {labels, get_labels(unregistered)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unsubscribe_messages_total},
-        {help, <<"The total number of unsubscribe messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of unsubscribe messages routed by a bondy node since reset.">>},
         {labels, get_labels(unsubscribe)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unsubscribed_messages_total},
-        {help, <<"The total number of unsubscribed messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of unsubscribed messages routed by a bondy node since reset.">>},
         {labels, get_labels(unsubscribed)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_welcome_messages_total},
-        {help, <<"The total number of welcome messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of welcome messages routed by a bondy node since reset.">>},
         {labels, get_labels(welcome)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_yield_messages_total},
-        {help, <<"The total number of yield messages routed by a bondy node since reset.">>},
+        {help,
+            <<"The total number of yield messages routed by a bondy node since reset.">>},
         {labels, get_labels(yield)}
     ]),
 
@@ -637,36 +634,39 @@ declare_wamp_metrics() ->
             <<"A summary of the size of the wamp messages received by a bondy node">>},
         {buckets, bytes_bucket()},
         {labels, ?WAMP_MESSAGE_LABELS}
-     ]),
+    ]),
     ok.
-
-
-
 
 node_name() ->
     bondy_config:node().
 
-
 bytes_bucket() ->
     %% 0 to 8 Mbs
-    [0, 1024, 1024*4, 1024*16, 1024*32, 1024*64, 1024*128, 1024*256, 1024*512, 1024*1024, 1024*1024*2, 1024*1024*4, 1024*1024*8].
-
-
-
-
+    [
+        0,
+        1024,
+        1024 * 4,
+        1024 * 16,
+        1024 * 32,
+        1024 * 64,
+        1024 * 128,
+        1024 * 256,
+        1024 * 512,
+        1024 * 1024,
+        1024 * 1024 * 2,
+        1024 * 1024 * 4,
+        1024 * 1024 * 8
+    ].
 
 %% =============================================================================
 %% PRIVATE BONDY COLLECTOR
 %% =============================================================================
-
-
 
 %% @private
 collector_metrics() ->
     lists:append([
         registry_metrics()
     ]).
-
 
 %% @private
 registry_metrics() ->
@@ -683,16 +683,13 @@ registry_metrics() ->
         },
         {
             registry_trie_memory,
-             gauge,
-             "The total a ount of memory use in the in-memory registry trie."
-             "This does not include the memory used by plum_db tables.",
-             Labels,
-             Mem
+            gauge,
+            "The total a ount of memory use in the in-memory registry trie."
+            "This does not include the memory used by plum_db tables.",
+            Labels,
+            Mem
         }
     ].
-
-
-
 
 %% Used by promethues METRIC_NAME macro
 -define(METRIC_NAME_PREFIX, "bondy_").
@@ -705,7 +702,6 @@ add_metric_family({Name, Type, Help, Metrics}, Callback) ->
 %% @private
 enabled_metrics() ->
     application:get_env(prometheus, bondy_prometheus_metrics, all).
-
 
 %% @private
 metric_enabled(Name, Metrics) ->

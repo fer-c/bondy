@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_auth_ticket).
 -moduledoc """
 This module implements the `bondy_auth` behaviour for ticket-based
@@ -14,7 +13,7 @@ via `bondy_ticket`.
 
 -include("bondy_security.hrl").
 
--type state()       :: map().
+-type state() :: map().
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
@@ -22,21 +21,15 @@ via `bondy_ticket`.
 -export([challenge/3]).
 -export([authenticate/4]).
 
-
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
-
 
 -spec init(bondy_auth:context()) ->
     {ok, State :: state()} | {error, Reason :: any()}.
 
 init(Ctxt) ->
     try
-
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
         {ok, maps:new()}
@@ -44,7 +37,6 @@ init(Ctxt) ->
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec requirements() -> bondy_auth:requirements().
 
@@ -57,10 +49,9 @@ requirements() ->
         }
     }.
 
-
-
 -spec challenge(
-    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()
+) ->
     {false, NewState :: state()}
     | {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
@@ -69,12 +60,12 @@ challenge(_, _, State) ->
     %% The client will respond to the challenge by sending the Ticket
     {true, #{}, State}.
 
-
 -spec authenticate(
     Ticket :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    CBState :: state()) ->
+    CBState :: state()
+) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
@@ -83,11 +74,13 @@ authenticate(Ticket, _, Ctxt, State) ->
     UserId = bondy_auth:user_id(Ctxt),
 
     case bondy_ticket:verify(Ticket) of
-        {ok, #{
-            authid := UserId,
-            scope := #{realm := Uri}
-        } = Claims}
-        when Uri == undefined orelse Uri == RealmUri ->
+        {ok,
+            #{
+                authid := UserId,
+                scope := #{realm := Uri}
+            } = Claims} when
+            Uri == undefined orelse Uri == RealmUri
+        ->
             Extra = #{
                 authmethod_details => #{
                     id => maps:get(id, Claims),
@@ -101,6 +94,3 @@ authenticate(Ticket, _, Ctxt, State) ->
         {error, Reason} ->
             {error, Reason, State}
     end.
-
-
-

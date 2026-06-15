@@ -173,7 +173,9 @@ secondary_shards_registered({_Db, Table, _Sup, _Dir}) ->
     %% — here `per_entity` is durable, so the index projection is leveled too.
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, by_status, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, by_status, Shard
+            ),
             ?assertEqual(
                 bondy_oplog_crdt_index_entry,
                 bondy_oplog_core_registry:entry_crdt_module(Entry)

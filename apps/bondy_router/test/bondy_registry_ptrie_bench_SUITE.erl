@@ -31,7 +31,6 @@ captured in `_design/PATTERN_MATCHING_DESIGN_v2.md`.
 
 -compile([nowarn_export_all, export_all]).
 
-
 %% =============================================================================
 %% CONSTANTS
 %% =============================================================================
@@ -41,11 +40,9 @@ captured in `_design/PATTERN_MATCHING_DESIGN_v2.md`.
 -define(MATCH_OPS, 50000).
 -define(LATENCY_SAMPLE, 5000).
 
-
 %% =============================================================================
 %% CT CALLBACKS
 %% =============================================================================
-
 
 all() ->
     [
@@ -56,29 +53,23 @@ all() ->
         bench_e_match_scaling
     ].
 
-
 init_per_suite(Config) ->
     Config.
 
-
 end_per_suite(Config) ->
     Config.
-
 
 init_per_testcase(_TC, Config) ->
     Patterns = make_patterns(?PATTERN_COUNT),
     Targets = make_targets(?MATCH_OPS),
     [{patterns, Patterns}, {targets, Targets} | Config].
 
-
 end_per_testcase(_TC, Config) ->
     Config.
-
 
 %% =============================================================================
 %% BENCHMARKS
 %% =============================================================================
-
 
 bench_a_insert_single_writer(Config) ->
     Patterns = ?config(patterns, Config),
@@ -87,10 +78,12 @@ bench_a_insert_single_writer(Config) ->
 
     Result = bench_insert(Inserts),
 
-    report(a, "insert throughput (single writer, no readers)",
-           [{ptrie, Result}]),
+    report(
+        a,
+        "insert throughput (single writer, no readers)",
+        [{ptrie, Result}]
+    ),
     ok.
-
 
 bench_b_match_no_writers(Config) ->
     Patterns = ?config(patterns, Config),
@@ -102,7 +95,6 @@ bench_b_match_no_writers(Config) ->
     report(b, "match latency (no writers)", [{ptrie, Result}]),
     ok.
 
-
 bench_c_match_under_4_writers(Config) ->
     Patterns = ?config(patterns, Config),
     Targets0 = ?config(targets, Config),
@@ -110,13 +102,15 @@ bench_c_match_under_4_writers(Config) ->
     Writers = 4,
 
     Result = with_ptrie(Patterns, fun(H) ->
-        run_with_writers(Writers, fun() -> write_loop(H, Patterns) end,
-                         fun() -> measure_match(H, Targets) end)
+        run_with_writers(
+            Writers,
+            fun() -> write_loop(H, Patterns) end,
+            fun() -> measure_match(H, Targets) end
+        )
     end),
 
     report(c, "match latency (4 writers concurrent)", [{ptrie, Result}]),
     ok.
-
 
 bench_d_insert_under_16_readers(Config) ->
     Patterns = ?config(patterns, Config),
@@ -126,13 +120,15 @@ bench_d_insert_under_16_readers(Config) ->
     Inserts = extend_cycling(Patterns, InsertOps),
 
     Result = with_ptrie(Patterns, fun(H) ->
-        run_with_readers(Readers, fun() -> read_loop(H, Targets) end,
-                         fun() -> measure_inserts(H, Inserts) end)
+        run_with_readers(
+            Readers,
+            fun() -> read_loop(H, Targets) end,
+            fun() -> measure_inserts(H, Inserts) end
+        )
     end),
 
     report(d, "insert latency (16 readers concurrent)", [{ptrie, Result}]),
     ok.
-
 
 bench_e_match_scaling(Config) ->
     Patterns = ?config(patterns, Config),
@@ -144,20 +140,23 @@ bench_e_match_scaling(Config) ->
         [{N, match_scale(H, Targets0, N, OpsPerReader)} || N <- Scales]
     end),
 
-    report_scaling(e, "match throughput (N readers, no writers)",
-                   [{ptrie, Results}]),
+    report_scaling(
+        e,
+        "match throughput (N readers, no writers)",
+        [{ptrie, Results}]
+    ),
     ok.
-
 
 %% =============================================================================
 %% PTRIE HARNESS
 %% =============================================================================
 
-
 %% @private
 with_ptrie(Patterns, Fun) ->
-    Name = list_to_atom("bench_ptrie_"
-                        ++ integer_to_list(erlang:unique_integer([positive]))),
+    Name = list_to_atom(
+        "bench_ptrie_" ++
+            integer_to_list(erlang:unique_integer([positive]))
+    ),
     H = bondy_registry_ptrie:new(Name),
     try
         populate(H, Patterns),
@@ -166,35 +165,37 @@ with_ptrie(Patterns, Fun) ->
         catch bondy_registry_ptrie:delete(H)
     end.
 
-
 %% @private
 populate(H, Patterns) ->
     lists:foreach(
         fun({K, Policy, V}) ->
-            EncodedK = case Policy of
-                wildcard -> bondy_registry_ptrie:encode_pattern(K);
-                _ -> K
-            end,
+            EncodedK =
+                case Policy of
+                    wildcard -> bondy_registry_ptrie:encode_pattern(K);
+                    _ -> K
+                end,
             ok = bondy_registry_ptrie:insert(H, EncodedK, Policy, V)
         end,
         Patterns
     ).
 
-
 %% @private
 bench_insert(Inserts) ->
     H = bondy_registry_ptrie:new(
-        list_to_atom("bench_ptrie_ins_"
-                     ++ integer_to_list(erlang:unique_integer([positive])))
+        list_to_atom(
+            "bench_ptrie_ins_" ++
+                integer_to_list(erlang:unique_integer([positive]))
+        )
     ),
     try
         T0 = erlang:monotonic_time(nanosecond),
         lists:foreach(
             fun({K, Policy, V}) ->
-                EncodedK = case Policy of
-                    wildcard -> bondy_registry_ptrie:encode_pattern(K);
-                    _ -> K
-                end,
+                EncodedK =
+                    case Policy of
+                        wildcard -> bondy_registry_ptrie:encode_pattern(K);
+                        _ -> K
+                    end,
                 ok = bondy_registry_ptrie:insert(H, EncodedK, Policy, V)
             end,
             Inserts
@@ -205,45 +206,49 @@ bench_insert(Inserts) ->
         catch bondy_registry_ptrie:delete(H)
     end.
 
-
 %% @private
 measure_match(H, Targets) ->
-    Samples = [begin
-        T0 = erlang:monotonic_time(nanosecond),
-        _ = bondy_registry_ptrie:match(H, T),
-        T1 = erlang:monotonic_time(nanosecond),
-        T1 - T0
-    end || T <- Targets],
+    Samples = [
+        begin
+            T0 = erlang:monotonic_time(nanosecond),
+            _ = bondy_registry_ptrie:match(H, T),
+            T1 = erlang:monotonic_time(nanosecond),
+            T1 - T0
+        end
+     || T <- Targets
+    ],
     summarize(latency, Samples).
-
 
 %% @private
 measure_inserts(H, Inserts) ->
-    Samples = [begin
-        T0 = erlang:monotonic_time(nanosecond),
-        EncodedK = case Policy of
-            wildcard -> bondy_registry_ptrie:encode_pattern(K);
-            _ -> K
-        end,
-        ok = bondy_registry_ptrie:insert(H, EncodedK, Policy, V),
-        T1 = erlang:monotonic_time(nanosecond),
-        T1 - T0
-    end || {K, Policy, V} <- Inserts],
+    Samples = [
+        begin
+            T0 = erlang:monotonic_time(nanosecond),
+            EncodedK =
+                case Policy of
+                    wildcard -> bondy_registry_ptrie:encode_pattern(K);
+                    _ -> K
+                end,
+            ok = bondy_registry_ptrie:insert(H, EncodedK, Policy, V),
+            T1 = erlang:monotonic_time(nanosecond),
+            T1 - T0
+        end
+     || {K, Policy, V} <- Inserts
+    ],
     summarize(latency, Samples).
-
 
 %% @private
 write_loop(H, Patterns) ->
     {K, Policy, V} = lists:nth(rand:uniform(length(Patterns)), Patterns),
-    EncodedK = case Policy of
-        wildcard -> bondy_registry_ptrie:encode_pattern(K);
-        _ -> K
-    end,
+    EncodedK =
+        case Policy of
+            wildcard -> bondy_registry_ptrie:encode_pattern(K);
+            _ -> K
+        end,
     _ = bondy_registry_ptrie:insert(
         H, EncodedK, Policy, {V, erlang:unique_integer()}
     ),
     write_loop(H, Patterns).
-
 
 %% @private
 read_loop(H, Targets) ->
@@ -251,31 +256,36 @@ read_loop(H, Targets) ->
     _ = bondy_registry_ptrie:match(H, T),
     read_loop(H, Targets).
 
-
 %% @private
 match_scale(H, Targets, NReaders, OpsPerReader) ->
     Parent = self(),
     T0 = erlang:monotonic_time(nanosecond),
-    Pids = [spawn_link(fun() ->
-        lists:foreach(
-            fun(I) ->
-                Target = lists:nth((I rem length(Targets)) + 1, Targets),
-                _ = bondy_registry_ptrie:match(H, Target)
-            end,
-            lists:seq(1, OpsPerReader)
-        ),
-        Parent ! {done, self()}
-    end) || _ <- lists:seq(1, NReaders)],
-    [receive {done, P} -> ok end || P <- Pids],
+    Pids = [
+        spawn_link(fun() ->
+            lists:foreach(
+                fun(I) ->
+                    Target = lists:nth((I rem length(Targets)) + 1, Targets),
+                    _ = bondy_registry_ptrie:match(H, Target)
+                end,
+                lists:seq(1, OpsPerReader)
+            ),
+            Parent ! {done, self()}
+        end)
+     || _ <- lists:seq(1, NReaders)
+    ],
+    [
+        receive
+            {done, P} -> ok
+        end
+     || P <- Pids
+    ],
     T1 = erlang:monotonic_time(nanosecond),
     TotalOps = NReaders * OpsPerReader,
     summarize(throughput, TotalOps, T1 - T0).
 
-
 %% =============================================================================
 %% WORKER HARNESS
 %% =============================================================================
-
 
 %% @private
 run_with_writers(N, WriterFun, MeasureFun) ->
@@ -285,7 +295,6 @@ run_with_writers(N, WriterFun, MeasureFun) ->
     [exit(P, kill) || P <- Writers],
     Result.
 
-
 %% @private
 run_with_readers(N, ReaderFun, MeasureFun) ->
     Readers = [spawn_link(fun() -> ReaderFun() end) || _ <- lists:seq(1, N)],
@@ -294,11 +303,9 @@ run_with_readers(N, ReaderFun, MeasureFun) ->
     [exit(P, kill) || P <- Readers],
     Result.
 
-
 %% =============================================================================
 %% SUMMARIZATION
 %% =============================================================================
-
 
 %% @private
 summarize(throughput, Ops, Nanos) ->
@@ -311,7 +318,6 @@ summarize(throughput, Ops, Nanos) ->
         ops_per_sec => round(OpsPerSec),
         avg_ns => round(AvgNs)
     }.
-
 
 %% @private
 summarize(latency, Samples) ->
@@ -328,21 +334,21 @@ summarize(latency, Samples) ->
         p99_ns => P99
     }.
 
-
 %% @private
 pick(Sorted, N, Pct) ->
     Idx = max(1, round(N * Pct)),
     lists:nth(Idx, Sorted).
 
-
 %% @private
 report(Case, Description, Results) ->
     ct:pal(
         "~n=== Bench ~s: ~s ===~n~s",
-        [string:to_upper(atom_to_list(Case)), Description,
-         format_results(Results)]
+        [
+            string:to_upper(atom_to_list(Case)),
+            Description,
+            format_results(Results)
+        ]
     ).
-
 
 %% @private
 format_results(Results) ->
@@ -353,45 +359,57 @@ format_results(Results) ->
         Results
     ).
 
-
 %% @private
 format_metric(#{kind := throughput} = M) ->
     io_lib:format(
         "ops=~p  wall=~.2f ms  ops/s=~p  avg=~p ns/op",
-        [maps:get(ops, M),
-         maps:get(wall_ns, M) / 1_000_000,
-         maps:get(ops_per_sec, M),
-         maps:get(avg_ns, M)]
+        [
+            maps:get(ops, M),
+            maps:get(wall_ns, M) / 1_000_000,
+            maps:get(ops_per_sec, M),
+            maps:get(avg_ns, M)
+        ]
     );
 format_metric(#{kind := latency} = M) ->
     io_lib:format(
         "n=~p  avg=~p ns  p50=~p ns  p99=~p ns",
-        [maps:get(samples, M),
-         maps:get(avg_ns, M),
-         maps:get(p50_ns, M),
-         maps:get(p99_ns, M)]
+        [
+            maps:get(samples, M),
+            maps:get(avg_ns, M),
+            maps:get(p50_ns, M),
+            maps:get(p99_ns, M)
+        ]
     ).
-
 
 %% @private
 report_scaling(Case, Description, Runs) ->
-    Lines = [io_lib:format("  ~-16s: ~s~n",
-                           [Label,
-                            lists:join(", ",
-                                       [io_lib:format("N=~p ops/s=~p",
-                                                      [N, maps:get(ops_per_sec, M)])
-                                        || {N, M} <- Result])])
-             || {Label, Result} <- Runs],
+    Lines = [
+        io_lib:format(
+            "  ~-16s: ~s~n",
+            [
+                Label,
+                lists:join(
+                    ", ",
+                    [
+                        io_lib:format(
+                            "N=~p ops/s=~p",
+                            [N, maps:get(ops_per_sec, M)]
+                        )
+                     || {N, M} <- Result
+                    ]
+                )
+            ]
+        )
+     || {Label, Result} <- Runs
+    ],
     ct:pal(
         "~n=== Bench ~s: ~s ===~n~s",
         [string:to_upper(atom_to_list(Case)), Description, Lines]
     ).
 
-
 %% =============================================================================
 %% WORKLOAD GENERATORS
 %% =============================================================================
-
 
 %% @private
 %% Realistic WAMP-like mix: ~60% exact, ~25% prefix, ~15% wildcard.
@@ -399,23 +417,32 @@ make_patterns(N) ->
     rand:seed(exsss, {1, 2, 3}),
     [make_pattern(I) || I <- lists:seq(1, N)].
 
-
 %% @private
 make_pattern(I) ->
-    Policy = case I rem 20 of
-        R when R < 12 -> exact;
-        R when R < 17 -> prefix;
-        _             -> wildcard
-    end,
+    Policy =
+        case I rem 20 of
+            R when R < 12 -> exact;
+            R when R < 17 -> prefix;
+            _ -> wildcard
+        end,
     URI = make_uri(I, Policy),
     {URI, Policy, I}.
 
-
 %% @private
 make_uri(I, Policy) ->
-    Domain = lists:nth((I rem 8) + 1,
-                       [<<"com">>, <<"org">>, <<"net">>, <<"edu">>,
-                        <<"example">>, <<"acme">>, <<"svc">>, <<"internal">>]),
+    Domain = lists:nth(
+        (I rem 8) + 1,
+        [
+            <<"com">>,
+            <<"org">>,
+            <<"net">>,
+            <<"edu">>,
+            <<"example">>,
+            <<"acme">>,
+            <<"svc">>,
+            <<"internal">>
+        ]
+    ),
     Service = iolist_to_binary(io_lib:format("service_~4..0b", [I rem 200])),
     Method = iolist_to_binary(io_lib:format("method_~4..0b", [I])),
     case Policy of
@@ -425,28 +452,43 @@ make_uri(I, Policy) ->
             iolist_to_binary([Domain, <<".">>, Service, <<".">>]);
         wildcard ->
             case I rem 3 of
-                0 -> iolist_to_binary([Domain, <<"..">>, Method]);
-                1 -> iolist_to_binary([Domain, <<".">>, Service, <<"..">>,
-                                       Method]);
-                _ -> iolist_to_binary([<<"..">>, Service, <<".">>, Method])
+                0 ->
+                    iolist_to_binary([Domain, <<"..">>, Method]);
+                1 ->
+                    iolist_to_binary([
+                        Domain,
+                        <<".">>,
+                        Service,
+                        <<"..">>,
+                        Method
+                    ]);
+                _ ->
+                    iolist_to_binary([<<"..">>, Service, <<".">>, Method])
             end
     end.
-
 
 %% @private
 make_targets(N) ->
     [make_target(I) || I <- lists:seq(1, N)].
 
-
 %% @private
 make_target(I) ->
-    Domain = lists:nth((I rem 8) + 1,
-                       [<<"com">>, <<"org">>, <<"net">>, <<"edu">>,
-                        <<"example">>, <<"acme">>, <<"svc">>, <<"internal">>]),
+    Domain = lists:nth(
+        (I rem 8) + 1,
+        [
+            <<"com">>,
+            <<"org">>,
+            <<"net">>,
+            <<"edu">>,
+            <<"example">>,
+            <<"acme">>,
+            <<"svc">>,
+            <<"internal">>
+        ]
+    ),
     Service = iolist_to_binary(io_lib:format("service_~4..0b", [I rem 300])),
     Method = iolist_to_binary(io_lib:format("method_~4..0b", [I])),
     iolist_to_binary([Domain, <<".">>, Service, <<".">>, Method]).
-
 
 %% @private
 extend_cycling(L, N) ->

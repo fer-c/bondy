@@ -29,7 +29,6 @@ transport options directly from a small dedicated `wamp_uds` config block.
 -define(DEFAULT_NUM_ACCEPTORS, 10).
 -define(DEFAULT_MAX_CONNECTIONS, infinity).
 
-
 -export([connections/0]).
 -export([path/0]).
 -export([resume_listeners/0]).
@@ -37,13 +36,9 @@ transport options directly from a small dedicated `wamp_uds` config block.
 -export([stop_listeners/0]).
 -export([suspend_listeners/0]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Conditionally starts the WAMP Unix domain socket listener. A no-op unless
@@ -64,7 +59,8 @@ start_listeners() ->
             case Result of
                 {ok, _} ->
                     ?LOG_NOTICE(#{
-                        description => "Started WAMP Unix domain socket listener",
+                        description =>
+                            "Started WAMP Unix domain socket listener",
                         listener => ?UDS,
                         path => Path
                     }),
@@ -72,11 +68,9 @@ start_listeners() ->
                 {error, _} = Error ->
                     Error
             end;
-
         false ->
             ok
     end.
-
 
 -doc "Stops the listener and removes its socket file.".
 -spec stop_listeners() -> ok.
@@ -86,13 +80,11 @@ stop_listeners() ->
     _ = file:delete(path()),
     ok.
 
-
 -spec suspend_listeners() -> ok.
 
 suspend_listeners() ->
     catch ranch:suspend_listener(?UDS),
     ok.
-
 
 -spec resume_listeners() -> ok.
 
@@ -100,13 +92,11 @@ resume_listeners() ->
     catch ranch:resume_listener(?UDS),
     ok.
 
-
 connections() ->
     case bondy_config:get([?UDS, enabled], false) of
         true -> ranch:procs(?UDS, connections);
         false -> []
     end.
-
 
 -doc "Returns the filesystem path the listener binds to.".
 -spec path() -> string().
@@ -114,13 +104,9 @@ connections() ->
 path() ->
     bondy_config:get([?UDS, path], ?DEFAULT_PATH).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 transport_opts(Path) ->
@@ -132,13 +118,14 @@ transport_opts(Path) ->
         socket_opts => [{ip, {local, Path}}, {port, 0}]
     }.
 
-
 %% @private A stale socket file from a previous run makes `gen_tcp:listen/2` fail
 %% with `eaddrinuse`, so remove it first.
 ensure_clean_path(Path) ->
     case file:delete(Path) of
-        ok -> ok;
-        {error, enoent} -> ok;
+        ok ->
+            ok;
+        {error, enoent} ->
+            ok;
         {error, Reason} ->
             ?LOG_WARNING(#{
                 description => "Could not remove stale Unix domain socket file",

@@ -12,14 +12,13 @@ and device. Provides constructors, accessors and helpers to classify
 
 -include("bondy.hrl").
 
--type t()           ::  #{
-                            realm       :=  binary() | all,
-                            client_id   :=  binary() | all,
-                            device_id   :=  binary() | all
-                        }.
+-type t() :: #{
+    realm := binary() | all,
+    client_id := binary() | all,
+    device_id := binary() | all
+}.
 
 -export_type([t/0]).
-
 
 -export([client_id/1]).
 -export([device_id/1]).
@@ -30,26 +29,22 @@ and device. Provides constructors, accessors and helpers to classify
 -export([realm/1]).
 -export([type/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -spec new(optional(binary()), optional(binary()), optional(binary())) -> t().
 
-new(RealmUri, ClientId, DeviceId)
-when (is_binary(RealmUri) orelse RealmUri == all) andalso
-(is_binary(ClientId) orelse ClientId == all) andalso
-(is_binary(DeviceId) orelse DeviceId == all) ->
+new(RealmUri, ClientId, DeviceId) when
+    (is_binary(RealmUri) orelse RealmUri == all) andalso
+        (is_binary(ClientId) orelse ClientId == all) andalso
+        (is_binary(DeviceId) orelse DeviceId == all)
+->
     #{
         realm => cast(RealmUri),
         client_id => cast(ClientId),
         device_id => cast(DeviceId)
     }.
-
 
 -doc """
 Returns the access scope type. It can be one of the following atoms:
@@ -63,16 +58,12 @@ Returns the access scope type. It can be one of the following atoms:
 
 type(#{realm := all, client_id := all}) ->
     sso;
-
 type(#{realm := all, client_id := _}) ->
     client_sso;
-
 type(#{realm := R, client_id := all}) when R =/= all ->
     local;
-
 type(#{realm := R, client_id := _}) when R =/= all ->
     client_local.
-
 
 -doc """
 Returns true is scope A matches B.
@@ -80,15 +71,12 @@ Returns true is scope A matches B.
 -spec matches(A :: t(), B :: t()) -> boolean().
 
 matches(A, B) ->
-     type(A) =:= type(B).
-
+    type(A) =:= type(B).
 
 matches_realm(#{realm := all}, _) ->
     true;
-
 matches_realm(#{realm := Val}, RealmUri) ->
     Val == RealmUri.
-
 
 -spec normalize(map()) -> t().
 
@@ -100,40 +88,32 @@ normalize(Map) when is_map(Map) ->
     },
     maps:merge(Default, maps:with([client_id, device_id, realm], Map)).
 
-
 -spec realm(t()) -> binary() | all.
 
 realm(#{realm := Val}) ->
     Val.
-
 
 -spec client_id(t()) -> binary() | all.
 
 client_id(#{client_id := Val}) ->
     Val.
 
-
 -spec device_id(t()) -> binary() | all.
 
 device_id(#{device_id := Val}) ->
     Val.
 
-
 %% =============================================================================
 %% Private
 %% =============================================================================
-
 
 cast("all") -> all;
 cast(~"all") -> all;
 cast(Val) -> Val.
 
-
-
 %% =============================================================================
 %% EUNIT
 %% =============================================================================
-
 
 -ifdef(TEST).
 
@@ -269,8 +249,12 @@ matches_same_type_local_test() ->
     ?assert(bondy_auth_scope:matches(Scope1, Scope2)).
 
 matches_same_type_client_local_test() ->
-    Scope1 = bondy_auth_scope:new(test_realm1(), test_client1(), test_device1()),
-    Scope2 = bondy_auth_scope:new(test_realm2(), test_client2(), test_device2()),
+    Scope1 = bondy_auth_scope:new(
+        test_realm1(), test_client1(), test_device1()
+    ),
+    Scope2 = bondy_auth_scope:new(
+        test_realm2(), test_client2(), test_device2()
+    ),
 
     ?assert(bondy_auth_scope:matches(Scope1, Scope2)).
 
@@ -282,7 +266,9 @@ matches_different_types_sso_vs_client_sso_test() ->
 
 matches_different_types_local_vs_client_local_test() ->
     Scope1 = bondy_auth_scope:new(test_realm1(), all, test_device1()),
-    Scope2 = bondy_auth_scope:new(test_realm1(), test_client1(), test_device2()),
+    Scope2 = bondy_auth_scope:new(
+        test_realm1(), test_client1(), test_device2()
+    ),
 
     ?assertNot(bondy_auth_scope:matches(Scope1, Scope2)).
 
@@ -294,7 +280,9 @@ matches_different_types_sso_vs_local_test() ->
 
 matches_different_types_client_sso_vs_client_local_test() ->
     Scope1 = bondy_auth_scope:new(all, test_client1(), test_device1()),
-    Scope2 = bondy_auth_scope:new(test_realm1(), test_client1(), test_device2()),
+    Scope2 = bondy_auth_scope:new(
+        test_realm1(), test_client1(), test_device2()
+    ),
 
     ?assertNot(bondy_auth_scope:matches(Scope1, Scope2)).
 
@@ -478,7 +466,9 @@ integration_type_and_matches_test() ->
     SsoScope2 = bondy_auth_scope:new(all, all, test_device2()),
     ClientSsoScope = bondy_auth_scope:new(all, test_client1(), test_device1()),
     LocalScope = bondy_auth_scope:new(test_realm1(), all, test_device1()),
-    ClientLocalScope = bondy_auth_scope:new(test_realm1(), test_client1(), test_device1()),
+    ClientLocalScope = bondy_auth_scope:new(
+        test_realm1(), test_client1(), test_device1()
+    ),
 
     %% Verify types
     ?assertEqual(sso, bondy_auth_scope:type(SsoScope1)),
@@ -529,5 +519,3 @@ integration_new_vs_normalize_consistency_test() ->
     ?assert(bondy_auth_scope:matches(Scope1, Scope2)).
 
 -endif.
-
-

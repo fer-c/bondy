@@ -21,17 +21,12 @@ A `gen_event` handler for OS signals that initiates an orderly shutdown on
 
 -record(state, {}).
 
-
-
 %% =============================================================================
 %% GEN_EVENT CALLBACKS
 %% =============================================================================
 
-
-
 init(_Args) ->
     {ok, #state{}}.
-
 
 handle_event(sigterm, S) ->
     ?LOG_WARNING(#{
@@ -39,24 +34,19 @@ handle_event(sigterm, S) ->
     }),
     ok = init:stop(),
     {ok, S};
-
 handle_event(SignalMsg, S) ->
     %% Handle all other signals using the default OTP handler
     erl_signal_handler:handle_event(SignalMsg, S),
     {ok, S}.
 
-
 handle_info(_Info, S) ->
     {ok, S}.
-
 
 handle_call(_Request, S) ->
     {ok, ok, S}.
 
-
 code_change(_OldVsn, S, _Extra) ->
     {ok, S}.
-
 
 terminate(_Args, _S) ->
     ok.

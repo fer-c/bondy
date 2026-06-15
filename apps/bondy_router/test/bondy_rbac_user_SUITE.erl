@@ -32,13 +32,12 @@ all() ->
         remove_user
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     KeyPairs = [bondy_cryptosign:generate_key() || _ <- lists:seq(1, 3)],
     PubKeys = [
         maps:get(public, KeyPair)
-        || KeyPair <- KeyPairs
+     || KeyPair <- KeyPairs
     ],
     SSORealmUri = ?SSO_REALM_URI,
     ok = add_sso_realm(SSORealmUri),
@@ -77,7 +76,6 @@ end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
-
 add_sso_realm(RealmUri) ->
     Config = #{
         uri => RealmUri,
@@ -98,9 +96,7 @@ add_sso_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
 add_realm(RealmUri, SSORealmUri, _KeyPairs, Users) ->
-
     Config = #{
         uri => RealmUri,
         description => <<"A test realm">>,
@@ -150,8 +146,6 @@ add_realm(RealmUri, SSORealmUri, _KeyPairs, Users) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
-
 test(_) ->
     _LU1 = bondy_rbac_user:fetch(?REALM1_URI, ?LU1),
     _LU2 = bondy_rbac_user:fetch(?REALM1_URI, ?LU2),
@@ -160,9 +154,6 @@ test(_) ->
     _SSOU1 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
     _SSOU2 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU2),
     ok.
-
-
-
 
 resolve(_) ->
     Local = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
@@ -186,12 +177,11 @@ resolve(_) ->
         maps:get(meta, Resolved)
     ).
 
-
 invalid_sso_realm(Config) ->
     KeyPairs = ?config(keypairs, Config),
     PubKeys = [
         maps:get(public, KeyPair)
-        || KeyPair <- KeyPairs
+     || KeyPair <- KeyPairs
     ],
     User0 = #{
         username => ?SSOU1,
@@ -210,7 +200,6 @@ invalid_sso_realm(Config) ->
         {error, invalid_sso_realm},
         bondy_rbac_user:add(?REALM1_URI, bondy_rbac_user:new(User1))
     ).
-
 
 add_sso_user_to_realm(_) ->
     SSOU1 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
@@ -244,7 +233,6 @@ add_sso_user_to_realm(_) ->
         bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
     ).
 
-
 update(_) ->
     SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
     User0 = bondy_rbac_user:fetch(?REALM2_URI, ?SSOU1),
@@ -268,7 +256,6 @@ update(_) ->
         bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
     ),
 
-
     ?assertEqual(
         {ok, User0},
         bondy_rbac_user:update(
@@ -291,8 +278,6 @@ update(_) ->
     ),
 
     ok.
-
-
 
 change_password(_) ->
     SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
@@ -357,7 +342,6 @@ change_password(_) ->
         )
     ).
 
-
 update_groups(_) ->
     User0 = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
     SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
@@ -409,7 +393,6 @@ add_group(_) ->
         bondy_rbac_user:add_group(?REALM1_URI, ?SSOU1, <<"c">>)
     ),
 
-
     ?assertEqual(
         [<<"sso_g1">>],
         bondy_rbac_user:groups(SSOUser0)
@@ -426,8 +409,6 @@ add_group(_) ->
         {error, {no_such_groups, [<<"sso_g3">>]}},
         bondy_rbac_user:add_group(?SSO_REALM_URI, ?SSOU1, <<"sso_g3">>)
     ).
-
-
 
 remove_group(_) ->
     User0 = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
@@ -459,8 +440,6 @@ remove_group(_) ->
         bondy_rbac_user:groups(bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1))
     ).
 
-
-
 remove_user(_) ->
     _Local = bondy_rbac_user:fetch(?REALM1_URI, ?LU1),
     _SSO1 = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
@@ -487,4 +466,3 @@ remove_user(_) ->
         ok,
         bondy_rbac_user:remove(?SSO_REALM_URI, ?SSOU1)
     ).
-

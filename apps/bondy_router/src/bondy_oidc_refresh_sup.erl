@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_oidc_refresh_sup).
 -moduledoc """
 Supervisor for the OIDC refresh worker pool.
@@ -18,7 +17,6 @@ defaults to the number of schedulers.
 
 -define(POOL_NAME, bondy_oidc_refresh_pool).
 
-
 %% API
 -export([start_link/0]).
 -export([pool_name/0]).
@@ -26,18 +24,13 @@ defaults to the number of schedulers.
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -doc false.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
 
 -doc """
 Returns the gproc pool name used by the refresh workers.
@@ -47,13 +40,9 @@ Returns the gproc pool name used by the refresh workers.
 pool_name() ->
     ?POOL_NAME.
 
-
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     %% Create the ETS table before starting workers
@@ -70,13 +59,9 @@ init([]) ->
 
     {ok, {SupFlags, Children}}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 shards() ->
@@ -94,7 +79,7 @@ shards() ->
             _ = catch gproc_pool:add_worker(PoolName, WorkerName, Shard),
             Shard
         end
-        || Shard <- lists:seq(1, N)
+     || Shard <- lists:seq(1, N)
     ],
 
     [
@@ -106,5 +91,5 @@ shards() ->
             type => worker,
             modules => [WorkerMod]
         }
-        || Shard <- Shards
+     || Shard <- Shards
     ].

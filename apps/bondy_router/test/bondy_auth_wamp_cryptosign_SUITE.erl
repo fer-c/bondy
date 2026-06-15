@@ -48,12 +48,11 @@ all() ->
         context_method_set_after_challenge
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     KeyPairs = [
         bondy_cryptosign:generate_key()
-        || _ <- lists:seq(1, 3)
+     || _ <- lists:seq(1, 3)
     ],
     RealmUri = <<"com.example.test.auth_cryptosign">>,
     ok = add_realm(RealmUri, KeyPairs),
@@ -63,11 +62,10 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     {save_config, Config}.
 
-
 add_realm(RealmUri, KeyPairs) ->
     PubKeys = [
         maps:get(public, KeyPair)
-        || KeyPair <- KeyPairs
+     || KeyPair <- KeyPairs
     ],
 
     Config = #{
@@ -133,18 +131,13 @@ add_realm(RealmUri, KeyPairs) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
 
-
-
 %% @private
 encode_hex(Bin) when is_binary(Bin) ->
     list_to_binary(hex_utils:bin_to_hexstr(Bin)).
-
 
 %% @private
 make_details(KeyPair) ->
@@ -154,19 +147,14 @@ make_details(KeyPair) ->
         }
     }.
 
-
 %% @private
 sign_challenge(HexMessage, KeyPair) ->
     Message = hex_utils:hexstr_to_bin(HexMessage),
     encode_hex(bondy_cryptosign:sign(Message, KeyPair)).
 
-
-
 %% =============================================================================
 %% ORIGINAL TEST (PRESERVED)
 %% =============================================================================
-
-
 
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -177,7 +165,6 @@ test_1(Config) ->
     SourceIP = {127, 0, 0, 1},
 
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
-
 
     ?assertEqual(
         true,
@@ -208,7 +195,6 @@ test_1(Config) ->
         "Channel binding not supported yet, should be undefined"
     ),
 
-
     %% We simulate the response from the client
     Message = hex_utils:hexstr_to_bin(HexMessage),
     Signature = list_to_binary(
@@ -216,7 +202,6 @@ test_1(Config) ->
             bondy_cryptosign:sign(Message, KeyPair)
         )
     ),
-
 
     ?assertMatch(
         {ok, _, _},
@@ -254,13 +239,9 @@ test_1(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, <<"foo">>, undefined, Ctxt2)
     ).
 
-
-
 %% =============================================================================
 %% FULL CRYPTOSIGN FLOW
 %% =============================================================================
-
-
 
 full_cryptosign_flow(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -292,7 +273,6 @@ full_cryptosign_flow(Config) ->
     ?assertEqual(#{}, AuthExtra),
     ?assertEqual(?WAMP_CRYPTOSIGN_AUTH, bondy_auth:method(Ctxt2)).
 
-
 challenge_extra_has_required_keys(Config) ->
     RealmUri = ?config(realm_uri, Config),
     KeyPairs = ?config(keypairs, Config),
@@ -312,13 +292,9 @@ challenge_extra_has_required_keys(Config) ->
     ?assert(is_binary(maps:get(challenge, Extra))),
     ?assert(byte_size(maps:get(challenge, Extra)) > 0).
 
-
-
 %% =============================================================================
 %% WRONG KEY / SIGNATURE
 %% =============================================================================
-
-
 
 wrong_key_signature_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -347,7 +323,6 @@ wrong_key_signature_fails(Config) ->
         )
     ).
 
-
 invalid_hex_encoding_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
     KeyPairs = ?config(keypairs, Config),
@@ -370,7 +345,6 @@ invalid_hex_encoding_fails(Config) ->
         )
     ).
 
-
 missing_pubkey_in_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -386,7 +360,6 @@ missing_pubkey_in_challenge(Config) ->
             ?WAMP_CRYPTOSIGN_AUTH, #{authextra => #{}}, Ctxt0
         )
     ).
-
 
 no_matching_pubkey_in_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -405,13 +378,9 @@ no_matching_pubkey_in_challenge(Config) ->
         bondy_auth:challenge(?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt0)
     ).
 
-
-
 %% =============================================================================
 %% CIDR FILTERING
 %% =============================================================================
-
-
 
 user1_allowed_from_any_ip(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -433,7 +402,6 @@ user1_allowed_from_any_ip(Config) ->
         IPs
     ).
 
-
 user2_rejected_outside_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -448,13 +416,9 @@ user2_rejected_outside_cidr(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% METHOD SELECTION
 %% =============================================================================
-
-
 
 method_mismatch_after_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -476,7 +440,6 @@ method_mismatch_after_challenge(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, <<"x">>, undefined, Ctxt1)
     ).
 
-
 invalid_method_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -491,13 +454,9 @@ invalid_method_rejected(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% USER WITHOUT AUTHORIZED KEYS
 %% =============================================================================
-
-
 
 user_without_keys_excluded(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -512,13 +471,9 @@ user_without_keys_excluded(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% ERROR CASES
 %% =============================================================================
-
-
 
 nonexistent_user_error(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -529,13 +484,9 @@ nonexistent_user_error(Config) ->
         bondy_auth:init(SessionId, RealmUri, <<"ghost">>, [], {127, 0, 0, 1})
     ).
 
-
-
 %% =============================================================================
 %% CONTEXT AFTER CHALLENGE
 %% =============================================================================
-
-
 
 context_method_set_after_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),

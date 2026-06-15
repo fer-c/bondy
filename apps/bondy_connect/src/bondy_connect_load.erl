@@ -31,9 +31,9 @@ teardown** (`delete/1`); otherwise a row leaks per reconnect.
 -include_lib("kernel/include/logger.hrl").
 
 -record(load, {
-    max = 0         ::  non_neg_integer(),
-    in_flight = 0   ::  non_neg_integer(),
-    limiter         ::  bondy_regulator_rate_limit:t() | undefined
+    max = 0 :: non_neg_integer(),
+    in_flight = 0 :: non_neg_integer(),
+    limiter :: bondy_regulator_rate_limit:t() | undefined
 }).
 
 -type t() :: #load{}.
@@ -47,13 +47,9 @@ teardown** (`delete/1`); otherwise a row leaks per reconnect.
 -export([reset/1]).
 -export([delete/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Build a load regulator from a handler config map. Recognised keys:
@@ -68,7 +64,6 @@ new(Opts) when is_map(Opts) ->
     Max = maps:get(max_concurrency, Opts, 0),
     #load{max = Max, limiter = make_limiter(maps:get(rate, Opts, undefined))}.
 
-
 -doc """
 Try to admit one invocation. Increments the in-flight count (and consumes a
 rate-limit token when configured) on success.
@@ -76,10 +71,8 @@ rate-limit token when configured) on success.
 -spec admit(t()) -> {ok, t()} | {error, overloaded}.
 admit(#load{max = Max, in_flight = N}) when Max > 0, N >= Max ->
     {error, overloaded};
-
 admit(#load{limiter = undefined, in_flight = N} = L) ->
     {ok, L#load{in_flight = N + 1}};
-
 admit(#load{limiter = T, in_flight = N} = L) ->
     case bondy_regulator_rate_limit:allow(T, 1) of
         {true, _} ->
@@ -88,18 +81,15 @@ admit(#load{limiter = T, in_flight = N} = L) ->
             {error, overloaded}
     end.
 
-
 -doc "Release one previously-admitted invocation.".
 -spec release(t()) -> t().
 release(#load{in_flight = N} = L) ->
     L#load{in_flight = max(0, N - 1)}.
 
-
 -doc "The current number of in-flight invocations.".
 -spec in_flight(t()) -> non_neg_integer().
 in_flight(#load{in_flight = N}) ->
     N.
-
 
 -doc """
 Reset for a reconnect: zero the in-flight count (the previous session's handler
@@ -112,7 +102,6 @@ are time-based and intentionally survive the reconnect.
 reset(#load{} = L) ->
     L#load{in_flight = 0}.
 
-
 -doc """
 Delete the token bucket (if any) on connection teardown, freeing its
 `bondy_regulator` ETS row. A no-op when no rate limit is configured.
@@ -123,18 +112,13 @@ delete(#load{limiter = undefined}) ->
 delete(#load{limiter = T}) ->
     bondy_regulator_rate_limit:delete(T).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 make_limiter(undefined) ->
     undefined;
-
 make_limiter(Opts) when is_map(Opts) ->
     Key = {?MODULE, self(), erlang:unique_integer([positive])},
     case bondy_regulator_rate_limit:new(token_bucket, Key, Opts) of

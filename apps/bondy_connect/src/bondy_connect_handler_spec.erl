@@ -30,45 +30,36 @@ connection runs `invoke/4` inside an isolated, monitored worker
 (`bondy_connect_handler`).
 """.
 
--type handler() ::  fun((list(), map(), map()) -> term())
-                    | {module(), atom()}
-                    | {module(), atom(), term()}.
+-type handler() ::
+    fun((list(), map(), map()) -> term())
+    | {module(), atom()}
+    | {module(), atom(), term()}.
 
 -export_type([handler/0]).
 
 -export([validate/1]).
 -export([invoke/4]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Validate the *shape* of a handler.".
 -spec validate(term()) -> ok | {error, {invalid_handler, term()}}.
 validate(H) when is_function(H, 3) ->
     ok;
-
 validate({M, F}) when is_atom(M), is_atom(F) ->
     ok;
-
 validate({M, F, _Extra}) when is_atom(M), is_atom(F) ->
     ok;
-
 validate(Other) ->
     {error, {invalid_handler, Other}}.
-
 
 -doc "Invoke a (already-validated) handler.".
 -spec invoke(handler(), list(), map(), map()) -> term().
 invoke(H, Args, KWArgs, Details) when is_function(H, 3) ->
     H(Args, KWArgs, Details);
-
 invoke({M, F}, Args, KWArgs, Details) ->
     M:F(Args, KWArgs, Details);
-
 invoke({M, F, Extra}, Args, KWArgs, Details) ->
     M:F(Args, KWArgs, Details, Extra).

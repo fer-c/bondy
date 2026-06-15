@@ -46,7 +46,6 @@ all() ->
         security_disabled_allows_anon
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.auth_anonymous">>,
@@ -64,7 +63,6 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 add_realm(RealmUri) ->
     Config = #{
@@ -128,7 +126,6 @@ add_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
 add_anon_only_realm(RealmUri) ->
     Config = #{
         uri => RealmUri,
@@ -153,7 +150,6 @@ add_anon_only_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
 add_security_disabled_realm(RealmUri) ->
     Config = #{
         uri => RealmUri,
@@ -163,13 +159,9 @@ add_security_disabled_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
-
 %% =============================================================================
 %% ORIGINAL TEST (PRESERVED)
 %% =============================================================================
-
-
 
 test(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -185,7 +177,6 @@ test(Config) ->
         {false, _},
         bondy_auth:challenge(?WAMP_ANON_AUTH, undefined, Ctxt)
     ),
-
 
     ?assertEqual(
         true,
@@ -207,21 +198,15 @@ test(Config) ->
         authenticate(<<"foo">>, RealmUri, Roles, SourceIP)
     ).
 
-
-
 authenticate(Method, Uri, Roles, Peer) ->
     SessionId = bondy_session_id:new(),
     Roles = [],
     {ok, Ctxt} = bondy_auth:init(SessionId, Uri, anonymous, Roles, Peer),
     bondy_auth:authenticate(Method, undefined, undefined, Ctxt).
 
-
-
 %% =============================================================================
 %% CHALLENGE BEHAVIOUR
 %% =============================================================================
-
-
 
 challenge_returns_false(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -237,13 +222,9 @@ challenge_returns_false(Config) ->
         bondy_auth:challenge(?WAMP_ANON_AUTH, #{}, Ctxt)
     ).
 
-
-
 %% =============================================================================
 %% SUCCESSFUL ANONYMOUS AUTH
 %% =============================================================================
-
-
 
 anonymous_auth_succeeds(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -257,7 +238,6 @@ anonymous_auth_succeeds(Config) ->
         bondy_auth:authenticate(?WAMP_ANON_AUTH, undefined, undefined, Ctxt)
     ).
 
-
 anonymous_auth_returns_empty_extra(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -270,13 +250,9 @@ anonymous_auth_returns_empty_extra(Config) ->
     ),
     ?assertEqual(#{}, Extra).
 
-
-
 %% =============================================================================
 %% NAMED USER CANNOT USE ANONYMOUS
 %% =============================================================================
-
-
 
 named_user_cannot_use_anon(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -290,13 +266,9 @@ named_user_cannot_use_anon(Config) ->
         lists:member(?WAMP_ANON_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% METHOD SELECTION
 %% =============================================================================
-
-
 
 anon_not_available_when_not_in_realm(_Config) ->
     %% Create a realm that only allows PASSWORD_AUTH
@@ -323,7 +295,6 @@ anon_not_available_when_not_in_realm(_Config) ->
         lists:member(?WAMP_ANON_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
 invalid_method_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -337,7 +308,6 @@ invalid_method_rejected(Config) ->
             <<"nonexistent_method">>, undefined, undefined, Ctxt
         )
     ).
-
 
 method_not_allowed_for_anon(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -355,13 +325,9 @@ method_not_allowed_for_anon(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% CIDR FILTERING
 %% =============================================================================
-
-
 
 anonymous_from_any_ip(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -383,13 +349,9 @@ anonymous_from_any_ip(Config) ->
         IPs
     ).
 
-
-
 %% =============================================================================
 %% ERROR CASES
 %% =============================================================================
-
-
 
 nonexistent_realm_error(_Config) ->
     SessionId = bondy_session_id:new(),
@@ -405,13 +367,9 @@ nonexistent_realm_error(_Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% CONTEXT
 %% =============================================================================
-
-
 
 context_user_id_is_anonymous(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -426,13 +384,9 @@ context_user_id_is_anonymous(Config) ->
     ?assertEqual(SessionId, bondy_auth:session_id(Ctxt)),
     ?assertEqual({127, 0, 0, 1}, bondy_auth:source_ip(Ctxt)).
 
-
-
 %% =============================================================================
 %% COEXISTENCE WITH OTHER METHODS
 %% =============================================================================
-
-
 
 anon_coexists_with_password(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -455,13 +409,9 @@ anon_coexists_with_password(Config) ->
     ?assert(lists:member(?PASSWORD_AUTH, NamedMethods)),
     ?assertNot(lists:member(?WAMP_ANON_AUTH, NamedMethods)).
 
-
-
 %% =============================================================================
 %% SECURITY DISABLED
 %% =============================================================================
-
-
 
 security_disabled_allows_anon(Config) ->
     RealmUri = ?config(disabled_realm_uri, Config),

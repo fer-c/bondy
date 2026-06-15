@@ -12,38 +12,30 @@ shard and registers them in a `gproc_pool`.
 
 -include("bondy.hrl").
 
-
 %% API
 -export([start_link/0]).
-
 
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
-        intensity => 5, % max restarts
-        period => 10, % seconds
+        % max restarts
+        intensity => 5,
+        % seconds
+        period => 10,
         auto_shutdown => never
     },
 
@@ -52,14 +44,9 @@ init([]) ->
 
     {ok, {SupFlags, Children}}.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 shards() ->
@@ -77,7 +64,7 @@ shards() ->
             _ = catch gproc_pool:add_worker(PoolName, WorkerName, Shard),
             Shard
         end
-        || Shard <- lists:seq(1, N)
+     || Shard <- lists:seq(1, N)
     ],
 
     [
@@ -89,8 +76,5 @@ shards() ->
             type => worker,
             modules => [WorkerMod]
         }
-        || Shard <- Shards
+     || Shard <- Shards
     ].
-
-
-

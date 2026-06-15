@@ -3,13 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_cache).
 -moduledoc """
 Stub key/value cache API keyed by realm URI. Currently a placeholder whose
 operations are not yet implemented.
 """.
-
 
 -export([get/2]).
 -export([put/3]).
@@ -25,7 +23,6 @@ get(_, _) ->
 
 put(RealmUri, K, V) ->
     bondy_cache:put(RealmUri, K, V, #{}).
-
 
 put(_RealmUri, _, _, _Opts) ->
     %%TODO

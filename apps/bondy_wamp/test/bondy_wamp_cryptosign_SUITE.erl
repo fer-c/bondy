@@ -8,7 +8,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -compile([nowarn_export_all, export_all]).
 
-
 all() ->
     [
         %% Crypto
@@ -44,7 +43,6 @@ all() ->
         signer_invalid_config
     ].
 
-
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(crypto),
     Config.
@@ -52,13 +50,9 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% CRYPTO
 %% =============================================================================
-
-
 
 generate_key_shape(_) ->
     #{public := Pub, secret := Sec} = bondy_wamp_cryptosign:generate_key(),
@@ -70,14 +64,12 @@ generate_key_shape(_) ->
         bondy_wamp_cryptosign:generate_key()
     ).
 
-
 sign_verify_round_trip(_) ->
     KeyPair = #{public := Pub} = bondy_wamp_cryptosign:generate_key(),
     Challenge = bondy_wamp_cryptosign:strong_rand_bytes(32),
     Signature = bondy_wamp_cryptosign:sign(Challenge, KeyPair),
     ?assertEqual(64, byte_size(Signature)),
     ?assert(bondy_wamp_cryptosign:verify(Signature, Challenge, Pub)).
-
 
 verify_rejects_tampered_signature(_) ->
     KeyPair = #{public := Pub} = bondy_wamp_cryptosign:generate_key(),
@@ -86,14 +78,12 @@ verify_rejects_tampered_signature(_) ->
     Tampered = <<(First bxor 1), Rest/binary>>,
     ?assertNot(bondy_wamp_cryptosign:verify(Tampered, Challenge, Pub)).
 
-
 verify_rejects_wrong_challenge(_) ->
     KeyPair = #{public := Pub} = bondy_wamp_cryptosign:generate_key(),
     Challenge = bondy_wamp_cryptosign:strong_rand_bytes(32),
     Signature = bondy_wamp_cryptosign:sign(Challenge, KeyPair),
     Other = bondy_wamp_cryptosign:strong_rand_bytes(32),
     ?assertNot(bondy_wamp_cryptosign:verify(Signature, Other, Pub)).
-
 
 verify_rejects_wrong_key(_) ->
     KeyPair = bondy_wamp_cryptosign:generate_key(),
@@ -102,11 +92,9 @@ verify_rejects_wrong_key(_) ->
     Signature = bondy_wamp_cryptosign:sign(Challenge, KeyPair),
     ?assertNot(bondy_wamp_cryptosign:verify(Signature, Challenge, OtherPub)).
 
-
 normalise_64(_) ->
     Sig = bondy_wamp_cryptosign:strong_rand_bytes(64),
     ?assertEqual(Sig, bondy_wamp_cryptosign:normalise_signature(Sig, <<"x">>)).
-
 
 normalise_96_match(_) ->
     Sig = bondy_wamp_cryptosign:strong_rand_bytes(64),
@@ -115,7 +103,6 @@ normalise_96_match(_) ->
     ?assertEqual(
         Sig, bondy_wamp_cryptosign:normalise_signature(Concat, Challenge)
     ).
-
 
 normalise_96_mismatch(_) ->
     Sig = bondy_wamp_cryptosign:strong_rand_bytes(64),
@@ -127,13 +114,11 @@ normalise_96_mismatch(_) ->
         bondy_wamp_cryptosign:normalise_signature(Concat, Wrong)
     ).
 
-
 normalise_invalid_length(_) ->
     ?assertError(
         invalid_signature,
         bondy_wamp_cryptosign:normalise_signature(<<"short">>, <<"x">>)
     ).
-
 
 %% A deterministic Ed25519 vector: signing a fixed challenge with a fixed seed
 %% always yields the same signature, and the matching public key verifies it.
@@ -146,20 +131,15 @@ known_answer_vector(_) ->
     ?assertEqual(Sig1, Sig2),
     ?assert(bondy_wamp_cryptosign:verify(Sig1, Challenge, Pub)).
 
-
-
 %% =============================================================================
 %% HEX
 %% =============================================================================
-
-
 
 hex_round_trip_uppercase(_) ->
     Bin = bondy_wamp_cryptosign:strong_rand_bytes(48),
     Hex = bondy_wamp_cryptosign:encode_hex(Bin),
     ?assertEqual(Hex, string:uppercase(Hex)),
     ?assertEqual(Bin, bondy_wamp_cryptosign:decode_hex(Hex)).
-
 
 hex_decode_case_insensitive(_) ->
     Bin = bondy_wamp_cryptosign:strong_rand_bytes(48),
@@ -168,25 +148,19 @@ hex_decode_case_insensitive(_) ->
     ?assertEqual(Bin, bondy_wamp_cryptosign:decode_hex(Upper)),
     ?assertEqual(Bin, bondy_wamp_cryptosign:decode_hex(Lower)).
 
-
 hex_decode_invalid(_) ->
     ?assertError(
         invalid_hex_encoding, bondy_wamp_cryptosign:decode_hex(<<"not_hex!!!">>)
     ).
-
 
 hex_decode_odd_length(_) ->
     ?assertError(
         invalid_hex_encoding, bondy_wamp_cryptosign:decode_hex(<<"abc">>)
     ).
 
-
-
 %% =============================================================================
 %% KEY NORMALISATION
 %% =============================================================================
-
-
 
 key_pair_from_seed_derives_public(_) ->
     #{public := Pub, secret := Seed} = bondy_wamp_cryptosign:generate_key(),
@@ -194,7 +168,6 @@ key_pair_from_seed_derives_public(_) ->
         bondy_wamp_cryptosign:key_pair(Seed),
     ?assertEqual(Seed, Seed2),
     ?assertEqual(Pub, Derived).
-
 
 key_pair_from_64_byte_secret_splits(_) ->
     #{public := Pub, secret := Seed} = bondy_wamp_cryptosign:generate_key(),
@@ -204,26 +177,20 @@ key_pair_from_64_byte_secret_splits(_) ->
     ?assertEqual(Seed, Seed2),
     ?assertEqual(Pub, Pub2).
 
-
 key_pair_explicit_public_wins(_) ->
     #{secret := Seed} = bondy_wamp_cryptosign:generate_key(),
     #{public := Other} = bondy_wamp_cryptosign:generate_key(),
     #{public := Pub} = bondy_wamp_cryptosign:key_pair(Seed, Other),
     ?assertEqual(Other, Pub).
 
-
 key_pair_invalid_secret(_) ->
     ?assertError(
         invalid_secret_key, bondy_wamp_cryptosign:key_pair(<<"too-short">>)
     ).
 
-
-
 %% =============================================================================
 %% SIGNER SOURCES
 %% =============================================================================
-
-
 
 signer_inline_privkey(_) ->
     #{public := Pub, secret := Seed} = bondy_wamp_cryptosign:generate_key(),
@@ -235,7 +202,6 @@ signer_inline_privkey(_) ->
     Sig = bondy_wamp_cryptosign:decode_hex(HexSig),
     ?assert(bondy_wamp_cryptosign:verify(Sig, Challenge, Pub)).
 
-
 signer_inline_64_byte_privkey(_) ->
     #{public := Pub, secret := Seed} = bondy_wamp_cryptosign:generate_key(),
     PrivHex = bondy_wamp_cryptosign:encode_hex(<<Seed/binary, Pub/binary>>),
@@ -244,7 +210,6 @@ signer_inline_64_byte_privkey(_) ->
     Challenge = bondy_wamp_cryptosign:strong_rand_bytes(32),
     Sig = bondy_wamp_cryptosign:decode_hex(Signer(Challenge)),
     ?assert(bondy_wamp_cryptosign:verify(Sig, Challenge, Pub)).
-
 
 signer_env_var(_) ->
     #{public := Pub, secret := Seed} = bondy_wamp_cryptosign:generate_key(),
@@ -260,7 +225,6 @@ signer_env_var(_) ->
         os:unsetenv(Var)
     end.
 
-
 signer_env_var_missing(_) ->
     Var = "BONDY_WAMP_CS_DEFINITELY_UNSET_VAR",
     os:unsetenv(Var),
@@ -269,13 +233,11 @@ signer_env_var_missing(_) ->
         bondy_wamp_cryptosign:signer(undefined, #{privkey_env_var => Var})
     ).
 
-
 signer_procedure_not_implemented(_) ->
     ?assertError(
         not_implemented,
         bondy_wamp_cryptosign:signer(undefined, #{procedure => <<"x">>})
     ).
-
 
 signer_invalid_config(_) ->
     ?assertError(

@@ -51,7 +51,6 @@ Four groups:
     resolve_service_secrets_missing_field/1
 ]).
 
-
 %% ===================================================================
 %% CT callbacks
 %% ===================================================================
@@ -99,30 +98,31 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
-init_per_group(Group, Config)
-  when Group =:= integration_mocked; Group =:= non_crashing ->
+init_per_group(Group, Config) when
+    Group =:= integration_mocked; Group =:= non_crashing
+->
     ok = meck:new(erlcloud_aws, [passthrough]),
     ok = meck:new(erlcloud_sm, [passthrough]),
 
     meck:expect(erlcloud_aws, default_config, fun() -> mock_config end),
-    meck:expect(erlcloud_aws, service_config,
+    meck:expect(
+        erlcloud_aws,
+        service_config,
         fun(<<"sm">>, _Region, _AwsConfig) -> mock_sm_config end
     ),
 
     Config;
-
 init_per_group(_Group, Config) ->
     Config.
 
-end_per_group(Group, _Config)
-  when Group =:= integration_mocked; Group =:= non_crashing ->
+end_per_group(Group, _Config) when
+    Group =:= integration_mocked; Group =:= non_crashing
+->
     catch meck:unload(erlcloud_sm),
     catch meck:unload(erlcloud_aws),
     ok;
-
 end_per_group(_Group, _Config) ->
     ok.
-
 
 %% ===================================================================
 %% Helpers
@@ -140,7 +140,9 @@ mock_secret_json() ->
 
 mock_sm_success(SecretJson) ->
     SecretString = iolist_to_binary(json:encode(SecretJson)),
-    meck:expect(erlcloud_sm, get_secret_value,
+    meck:expect(
+        erlcloud_sm,
+        get_secret_value,
         fun(_SecretId, [], _SmConfig) ->
             {ok, [{<<"SecretString">>, SecretString}]}
         end
@@ -152,8 +154,11 @@ make_service(Name, SecretsSpec) ->
         base_url => <<"https://example.com">>,
         auth_mod => bondy_rpc_gateway_auth_generic,
         auth_conf => #{
-            fetch => #{method => post, url => <<"https://idp/token">>,
-                       token_path => [<<"access_token">>]},
+            fetch => #{
+                method => post,
+                url => <<"https://idp/token">>,
+                token_path => [<<"access_token">>]
+            },
             apply => #{placement => header, name => <<"Authorization">>},
             vars => #{},
             cache => #{default_ttl => 3600, refresh_margin => 60},
@@ -169,8 +174,11 @@ make_service_no_secrets(Name) ->
         base_url => <<"https://example.com">>,
         auth_mod => bondy_rpc_gateway_auth_generic,
         auth_conf => #{
-            fetch => #{method => post, url => <<"https://idp/token">>,
-                       token_path => [<<"access_token">>]},
+            fetch => #{
+                method => post,
+                url => <<"https://idp/token">>,
+                token_path => [<<"access_token">>]
+            },
             apply => #{placement => header, name => <<"Authorization">>},
             vars => #{client_id => <<"static-id">>},
             cache => #{default_ttl => 3600, refresh_margin => 60}
@@ -178,7 +186,6 @@ make_service_no_secrets(Name) ->
         timeout => 30000,
         retries => 3
     }.
-
 
 %% ===================================================================
 %% unit_decode_basic_auth
@@ -222,7 +229,6 @@ decode_basic_auth_invalid(_Config) ->
         bondy_rpc_gateway_secret_resolver:decode_basic_auth(Header)
     ).
 
-
 %% ===================================================================
 %% unit_transforms
 %% ===================================================================
@@ -237,16 +243,19 @@ transform_basic_username(_Config) ->
     Header = basic_header(<<"alice">>, <<"secret123">>),
     ?assertEqual(
         <<"alice">>,
-        bondy_rpc_gateway_secret_resolver:apply_transform(Header, basic_username)
+        bondy_rpc_gateway_secret_resolver:apply_transform(
+            Header, basic_username
+        )
     ).
 
 transform_basic_password(_Config) ->
     Header = basic_header(<<"alice">>, <<"secret123">>),
     ?assertEqual(
         <<"secret123">>,
-        bondy_rpc_gateway_secret_resolver:apply_transform(Header, basic_password)
+        bondy_rpc_gateway_secret_resolver:apply_transform(
+            Header, basic_password
+        )
     ).
-
 
 %% ===================================================================
 %% integration_mocked
@@ -279,8 +288,10 @@ resolve_services_with_secrets(_Config) ->
     [Resolved] = bondy_rpc_gateway_secret_resolver:resolve_services([Service]),
 
     #{auth_conf := #{vars := Vars}} = Resolved,
-    ?assertEqual(<<"https://idp.example.com/token">>,
-                 maps:get(token_endpoint, Vars)),
+    ?assertEqual(
+        <<"https://idp.example.com/token">>,
+        maps:get(token_endpoint, Vars)
+    ),
     ?assertEqual(<<"myuser">>, maps:get(client_id, Vars)),
     ?assertEqual(<<"mypass">>, maps:get(client_secret, Vars)).
 
@@ -340,12 +351,15 @@ resolve_services_missing_field(_Config) ->
     Service = make_service(<<"missing-svc">>, SecretsSpec),
 
     ?assertError(
-        {secret_field_not_found, <<"missing-svc">>, my_var, <<"MISSING_FIELD">>},
+        {secret_field_not_found, <<"missing-svc">>, my_var,
+            <<"MISSING_FIELD">>},
         bondy_rpc_gateway_secret_resolver:resolve_services([Service])
     ).
 
 resolve_services_aws_error(_Config) ->
-    meck:expect(erlcloud_sm, get_secret_value,
+    meck:expect(
+        erlcloud_sm,
+        get_secret_value,
         fun(_SecretId, [], _SmConfig) ->
             {error, {http_error, 403, <<"Forbidden">>}}
         end
@@ -361,7 +375,7 @@ resolve_services_aws_error(_Config) ->
 
     ?assertError(
         {secret_resolution_failed, <<"err-svc">>,
-         {http_error, 403, <<"Forbidden">>}},
+            {http_error, 403, <<"Forbidden">>}},
         bondy_rpc_gateway_secret_resolver:resolve_services([Service])
     ).
 
@@ -385,7 +399,6 @@ resolve_services_removes_secrets_from_auth_conf(_Config) ->
 
     #{auth_conf := AuthConf} = Resolved,
     ?assertNot(maps:is_key(secrets, AuthConf)).
-
 
 %% ===================================================================
 %% non_crashing — resolve_service_secrets/2
@@ -413,12 +426,16 @@ resolve_service_secrets_ok(_Config) ->
     {ok, Vars} = bondy_rpc_gateway_secret_resolver:resolve_service_secrets(
         SecretsSpec, <<"ok-svc">>
     ),
-    ?assertEqual(<<"https://idp.example.com/token">>,
-                 maps:get(token_endpoint, Vars)),
+    ?assertEqual(
+        <<"https://idp.example.com/token">>,
+        maps:get(token_endpoint, Vars)
+    ),
     ?assertEqual(<<"myuser">>, maps:get(client_id, Vars)).
 
 resolve_service_secrets_aws_error(_Config) ->
-    meck:expect(erlcloud_sm, get_secret_value,
+    meck:expect(
+        erlcloud_sm,
+        get_secret_value,
         fun(_SecretId, [], _SmConfig) ->
             {error, {http_error, 403, <<"Forbidden">>}}
         end
@@ -457,6 +474,7 @@ resolve_service_secrets_missing_field(_Config) ->
             SecretsSpec, <<"missing-svc">>
         ),
     ?assertMatch(
-        {secret_field_not_found, <<"missing-svc">>, my_var, <<"MISSING_FIELD">>},
+        {secret_field_not_found, <<"missing-svc">>, my_var,
+            <<"MISSING_FIELD">>},
         Reason
     ).

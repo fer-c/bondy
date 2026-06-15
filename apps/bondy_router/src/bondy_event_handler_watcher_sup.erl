@@ -25,30 +25,24 @@ A `simple_one_for_one` supervisor for `bondy_event_handler_watcher` processes.
 -export([start_watcher/3]).
 -export([terminate_watcher/1]).
 
-
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-
 -spec start_watcher(
     Manager :: module(),
-    {swap, OldHandler :: {module(), any()}, NewHandler :: {module(), any()}}) ->
+    {swap, OldHandler :: {module(), any()}, NewHandler :: {module(), any()}}
+) ->
     ok | {error, any()}.
 
 start_watcher(Manager, {swap, {_, _}, {_, _}} = Cmd) ->
     supervisor:start_child(?MODULE, [Manager, Cmd]).
-
 
 -spec start_watcher(Manager :: module(), Handler :: module(), Args :: any()) ->
     ok | {error, any()}.
@@ -56,18 +50,12 @@ start_watcher(Manager, {swap, {_, _}, {_, _}} = Cmd) ->
 start_watcher(Manager, Handler, Args) ->
     supervisor:start_child(?MODULE, [Manager, Handler, Args]).
 
-
-
-terminate_watcher(Watcher) when is_pid(Watcher)->
+terminate_watcher(Watcher) when is_pid(Watcher) ->
     supervisor:terminate_child(?MODULE, Watcher).
-
-
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     Children = [
@@ -76,11 +64,6 @@ init([]) ->
     Specs = {{simple_one_for_one, 0, 1}, Children},
     {ok, Specs}.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-

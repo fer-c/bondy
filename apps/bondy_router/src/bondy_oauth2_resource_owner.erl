@@ -13,21 +13,21 @@ represented as RBAC users belonging to the `resource_owners` group.
 -include("bondy_oauth.hrl").
 
 -define(VALIDATE_USERNAME, fun
-        (<<"all">>) ->
-            false;
-        ("all") ->
-            false;
-        (all) ->
-            false;
-        (_) ->
-            true
-    end
-).
+    (<<"all">>) ->
+        false;
+    ("all") ->
+        false;
+    (all) ->
+        false;
+    (_) ->
+        true
+end).
 
 -define(ADD_SPEC, #{
     <<"groups">> => #{
         alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
+        %% bondy_security requirement
+        key => <<"groups">>,
         allow_null => false,
         allow_undefined => false,
         required => true,
@@ -39,7 +39,8 @@ represented as RBAC users belonging to the `resource_owners` group.
 -define(UPDATE_SPEC, #{
     <<"groups">> => #{
         alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
+        %% bondy_security requirement
+        key => <<"groups">>,
         required => false,
         allow_null => false,
         allow_undefined => false,
@@ -48,7 +49,7 @@ represented as RBAC users belonging to the `resource_owners` group.
 }).
 -define(TYPE, outh2_resource_owner).
 
--type t()       ::  bondy_rbac_user:t().
+-type t() :: bondy_rbac_user:t().
 
 -export([add/2]).
 -export([remove/2]).
@@ -57,12 +58,9 @@ represented as RBAC users belonging to the `resource_owners` group.
 -export([change_password/5]).
 -export([to_external/1]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Adds a resource owner (end-user or system) to realm RealmUri.
@@ -77,7 +75,6 @@ add(RealmUri, Data) ->
     User = bondy_rbac_user:new(validate(Data, ?ADD_SPEC)),
     bondy_rbac_user:add(RealmUri, User).
 
-
 -spec update(uri(), binary(), map()) ->
     {ok, t()} | {error, term()} | no_return().
 
@@ -85,13 +82,11 @@ update(RealmUri, ClientId, Data0) ->
     Data = validate(Data0, ?UPDATE_SPEC),
     bondy_rbac_user:update(RealmUri, ClientId, Data).
 
-
 -spec change_password(uri(), binary(), binary(), binary()) ->
     ok | {error, any()}.
 
 change_password(RealmUri, _Issuer, Username, New) when is_binary(New) ->
     bondy_rbac_user:change_password(RealmUri, Username, New).
-
 
 -spec change_password(uri(), binary(), binary(), binary(), binary()) ->
     ok | {error, any()}.
@@ -99,25 +94,19 @@ change_password(RealmUri, _Issuer, Username, New) when is_binary(New) ->
 change_password(RealmUri, _Issuer, Username, New, Old) ->
     bondy_rbac_user:change_password(RealmUri, Username, New, Old).
 
-
-
 -spec remove(uri(), list() | binary()) -> ok.
 
 remove(RealmUri, Id) ->
     bondy_rbac_user:remove(RealmUri, Id).
-
 
 -spec to_external(t()) -> map().
 
 to_external(Owner) ->
     bondy_rbac_user:to_external(Owner).
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 validate(Data0, Spec) ->
@@ -126,12 +115,10 @@ validate(Data0, Spec) ->
     Data = maps_utils:validate(Data0, Spec, #{keep_unknown => true}),
     maybe_add_groups(Data).
 
-
 %% @private
 maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
     Groups1 = [?RESOURCE_OWNERS | Groups0],
     maps:put(<<"groups">>, lists:usort(Groups1), M);
-
 maybe_add_groups(#{} = M) ->
     %% For update op
     M.

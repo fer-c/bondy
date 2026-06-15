@@ -137,7 +137,8 @@ WAMP permission required to call the procedures.
 -include("bondy_security.hrl").
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_SECS, 2 * 60). % 2 mins
+% 2 mins
+-define(LEEWAY_SECS, 2 * 60).
 
 %% TODO review, using a dynamic prefix is a bad idea, turn this into
 %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
@@ -178,55 +179,54 @@ WAMP permission required to call the procedures.
     }
 }).
 
--type t()           ::  #{
-                            id                  :=  ticket_id(),
-                            authrealm           :=  uri(),
-                            authid              :=  authid(),
-                            authroles           :=  [binary()],
-                            authmethod          :=  binary(),
-                            issued_by           :=  authid(),
-                            issued_on           :=  node(),
-                            issued_at           :=  pos_integer(),
-                            expires_at          :=  pos_integer(),
-                            scope               :=  scope(),
-                            kid                 :=  binary(),
-                            %% Optional OIDC fields
-                            oidc_provider       =>  binary(),
-                            oidc_refresh_token  =>  binary(),
-                            oidc_access_token_expires_in
-                                                =>  pos_integer()
-                        }.
--type opts()        ::  #{
-                            expiry_time_secs    =>  pos_integer(),
-                            allow_sso           =>  boolean(),
-                            client_ticket       =>  jwt(),
-                            client_id           =>  binary(),
-                            device_id  =>  binary()
-                        }.
--type verify_opts() ::  #{
-                            allow_not_found     =>  boolean()
-                        }.
--type scope()       ::  #{
-                            realm               :=  optional(uri()),
-                            client_id           :=  optional(authid()),
-                            device_id  :=  optional(binary())
-                        }.
--type jwt()         ::  binary().
--type ticket_id()   ::  binary().
--type authid()      ::  bondy_rbac_user:username().
--type issue_error() ::  {no_such_user, authid()}
-                        | {no_such_realm, uri()}
-                        | {invalid_request, binary()}
-                        | invalid_ticket
-                        | not_authorized.
-
+-type t() :: #{
+    id := ticket_id(),
+    authrealm := uri(),
+    authid := authid(),
+    authroles := [binary()],
+    authmethod := binary(),
+    issued_by := authid(),
+    issued_on := node(),
+    issued_at := pos_integer(),
+    expires_at := pos_integer(),
+    scope := scope(),
+    kid := binary(),
+    %% Optional OIDC fields
+    oidc_provider => binary(),
+    oidc_refresh_token => binary(),
+    oidc_access_token_expires_in =>
+        pos_integer()
+}.
+-type opts() :: #{
+    expiry_time_secs => pos_integer(),
+    allow_sso => boolean(),
+    client_ticket => jwt(),
+    client_id => binary(),
+    device_id => binary()
+}.
+-type verify_opts() :: #{
+    allow_not_found => boolean()
+}.
+-type scope() :: #{
+    realm := optional(uri()),
+    client_id := optional(authid()),
+    device_id := optional(binary())
+}.
+-type jwt() :: binary().
+-type ticket_id() :: binary().
+-type authid() :: bondy_rbac_user:username().
+-type issue_error() ::
+    {no_such_user, authid()}
+    | {no_such_realm, uri()}
+    | {invalid_request, binary()}
+    | invalid_ticket
+    | not_authorized.
 
 -export_type([t/0]).
 -export_type([jwt/0]).
 -export_type([ticket_id/0]).
 -export_type([scope/0]).
 -export_type([opts/0]).
-
 
 -export([issue/2]).
 -export([lookup/3]).
@@ -240,13 +240,9 @@ WAMP permission required to call the procedures.
 -export([update_claims/3]).
 -export([verify/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Issues a ticket to be used with the WAMP Ticket authentication method. The
@@ -278,31 +274,32 @@ issue(Session, Opts0) ->
         Authmethod = bondy_session:authmethod(Session),
         Allowed = bondy_config:get([security, ticket, authmethods]),
 
-        lists:member(Authmethod, Allowed) orelse throw({
-            not_authorized,
-            <<
-                "The authentication method '", Authmethod/binary,
-                "' you used to establish this session is not in the list of "
-                "methods allowed to issue tickets (configuration option "
-                "'security.ticket.authmethods')."
-            >>
-        }),
+        lists:member(Authmethod, Allowed) orelse
+            throw(
+                {
+                    not_authorized,
+                    <<
+                        "The authentication method '",
+                        Authmethod/binary,
+                        "' you used to establish this session is not in the list of "
+                        "methods allowed to issue tickets (configuration option "
+                        "'security.ticket.authmethods')."
+                    >>
+                }
+            ),
 
         do_issue(Session, Opts)
     catch
         throw:Reason ->
             {error, Reason};
-
         _:Reason ->
             {error, Reason}
     end.
-
 
 -spec verify(Ticket :: binary()) -> {ok, t()} | {error, expired | invalid}.
 
 verify(Ticket) ->
     verify(Ticket, #{}).
-
 
 -spec verify(Ticket :: binary(), Opts :: verify_opts()) ->
     {ok, t()} | {error, expired | invalid}.
@@ -340,14 +337,11 @@ verify(Ticket, Opts) ->
                 case lookup(AuthRealmUri, Authid, Scope) of
                     {ok, Claims} = OK ->
                         OK;
-
                     {ok, _Other} ->
                         throw(no_match);
-
                     {error, not_found} when AllowNotFound == true ->
                         %% We trust the signed JWT
                         {ok, Claims};
-
                     {error, not_found} ->
                         %% TODO Try to retrieve from Claims.node
                         %% or use Scope to lookup indices
@@ -356,23 +350,20 @@ verify(Ticket, Opts) ->
             false ->
                 {ok, Claims}
         end
-
     catch
         error:{badkey, _} ->
             {error, invalid};
-
         error:{badarg, _} ->
             {error, invalid};
-
         throw:Reason ->
             {error, Reason}
     end.
 
-
 -spec lookup(
     RealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
-    Scope :: scope()) -> {ok, Claims :: t()} | {error, no_found}.
+    Scope :: scope()
+) -> {ok, Claims :: t()} | {error, no_found}.
 
 lookup(RealmUri, Authid, Scope) ->
     Prefix = ?PLUM_DB_PREFIX(RealmUri),
@@ -395,12 +386,10 @@ lookup(RealmUri, Authid, Scope) ->
             end
     end.
 
-
 -spec revoke(optional(t())) -> ok | {error, any()}.
 
 revoke(undefined) ->
     ok;
-
 revoke(Ticket) when is_binary(Ticket) ->
     case verify(Ticket) of
         {ok, Claims} ->
@@ -408,7 +397,6 @@ revoke(Ticket) when is_binary(Ticket) ->
         {error, _} = Error ->
             Error
     end;
-
 revoke(Claims) when is_map(Claims) ->
     #{
         authrealm := RealmUri,
@@ -417,21 +405,21 @@ revoke(Claims) when is_map(Claims) ->
     } = Claims,
     revoke(RealmUri, Authid, Scope).
 
-
 -doc """
 `RealmUri` should be the value of the ticket's `authrealm` claim.
 """.
 -spec revoke(
     RealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
-    Scope :: scope()) -> ok.
+    Scope :: scope()
+) -> ok.
 
-revoke(RealmUri, Authid, Scope)
-when is_binary(RealmUri), is_binary(Authid), is_map(Scope) ->
+revoke(RealmUri, Authid, Scope) when
+    is_binary(RealmUri), is_binary(Authid), is_map(Scope)
+->
     Prefix = ?PLUM_DB_PREFIX(RealmUri),
     Key = lookup_key(Authid, Scope),
     plum_db:delete(Prefix, Key).
-
 
 -doc """
 Revokes all tickets issued to all users in realm `RealmUri`.
@@ -444,7 +432,6 @@ revoke_all(RealmUri) when is_binary(RealmUri) ->
     %% We cannot use keys_only as it will currently ignore remove_tombstones
     Opts = [{remove_tombstones, true}, {resolver, lww}],
     ok = plum_db:foreach(Fun, Prefix, Opts).
-
 
 -doc """
 Revokes all tickets issued to user with `Username` in realm `RealmUri`.
@@ -472,15 +459,15 @@ revoke_all(RealmUri, Authid) ->
     ],
     plum_db:foreach(Fun, Prefix, Opts).
 
-
 -doc """
 Revokes all tickets issued to user with `Username` in realm `RealmUri` matching
 the scope `Scope`.
 """.
 -spec revoke_all(
     RealmUri :: uri(),
-    Authid ::  all | bondy_rbac_user:username(),
-    Scope :: scope()) -> ok.
+    Authid :: all | bondy_rbac_user:username(),
+    Scope :: scope()
+) -> ok.
 
 revoke_all(_RealmUri, _Authid, _Scope) ->
     % Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
@@ -510,7 +497,6 @@ revoke_all(_RealmUri, _Authid, _Scope) ->
     % plum_db:foreach(Fun, Prefix, [{resolver, ticket_resolver/2}]).
     error(not_implemented).
 
-
 remove_expired() ->
     % Prefix = {?PLUM_DB_TICKET_TAB, '_'},
     % Fun = fun
@@ -529,7 +515,6 @@ remove_expired() ->
 
     ok.
 
-
 -doc """
 Updates the claims stored in PlumDB for an existing ticket. This is used by the
 OIDC refresh worker to update OIDC tokens (refresh_token,
@@ -541,9 +526,10 @@ access_token_expires_at) without re-issuing the ticket.
     UpdateFun :: fun((t()) -> t())
 ) -> ok | {error, not_found}.
 
-update_claims(AuthRealmUri, Authid, UpdateFun)
-when is_binary(AuthRealmUri) andalso is_binary(Authid)
-andalso is_function(UpdateFun, 1) ->
+update_claims(AuthRealmUri, Authid, UpdateFun) when
+    is_binary(AuthRealmUri) andalso is_binary(Authid) andalso
+        is_function(UpdateFun, 1)
+->
     Scope = #{realm => all, client_id => all, device_id => all},
     Prefix = ?PLUM_DB_PREFIX(AuthRealmUri),
     Key = lookup_key(Authid, Scope),
@@ -560,12 +546,9 @@ andalso is_function(UpdateFun, 1) ->
             {error, not_found}
     end.
 
-
 %% ===========================================================================
 %% PRIVATE
 %% ===========================================================================
-
-
 
 %% @private
 do_issue(Session, Opts) ->
@@ -575,16 +558,17 @@ do_issue(Session, Opts) ->
     User = bondy_session:user(Session),
     SSORealmUri = bondy_rbac_user:sso_realm_uri(User),
 
-    ScopeUri = case maps:get(allow_sso, Opts) of
-        true when SSORealmUri =/= undefined ->
-            %% The ticket can be used to authenticate on all user realms
-            %% connected to this SSORealmUri
-            undefined;
-        _ ->
-            %% SSORealmUri is undefined or SSO was not allowed,
-            %% the scope realm can only be the session realm
-            RealmUri
-    end,
+    ScopeUri =
+        case maps:get(allow_sso, Opts) of
+            true when SSORealmUri =/= undefined ->
+                %% The ticket can be used to authenticate on all user realms
+                %% connected to this SSORealmUri
+                undefined;
+            _ ->
+                %% SSORealmUri is undefined or SSO was not allowed,
+                %% the scope realm can only be the session realm
+                RealmUri
+        end,
 
     Scope = scope(Session, Opts, ScopeUri),
     ScopeType = scope_type(Scope),
@@ -627,11 +611,10 @@ do_issue(Session, Opts) ->
 
     {ok, Ticket, Claims}.
 
-
-
 %% @private
-scope(Session, #{client_ticket := Ticket} = Opts, Uri)
-when is_binary(Ticket) ->
+scope(Session, #{client_ticket := Ticket} = Opts, Uri) when
+    is_binary(Ticket)
+->
     Authid = bondy_session:authid(Session),
 
     %% We are relaxed here as these are signed by us.
@@ -640,21 +623,18 @@ when is_binary(Ticket) ->
     case verify(Ticket, VerifyOpts) of
         {ok, #{scope := #{client_id := Val}}} when Val =/= all ->
             throw({invalid_request, "Nested tickets are not allowed"});
-
         {ok, #{issued_by := Authid}} ->
             %% A client is requesting a ticket issued to itself using its own
             %% client_ticket.
             throw({invalid_request, "Self-granting ticket not allowed"});
-
         {ok, #{authid := ClientId, scope := Scope}} ->
             Id0 = maps:get(device_id, Scope),
             Id = maps:get(device_id, Opts, Id0),
 
-            all =:= Id0 orelse Id =:= Id0
-                orelse throw({invalid_request, "invalid device_id"}),
+            all =:= Id0 orelse Id =:= Id0 orelse
+                throw({invalid_request, "invalid device_id"}),
 
             bondy_auth_scope:new(Uri, ClientId, Id);
-
         {error, _Reason} ->
             %% TODO implement new Error standard
             error(#{
@@ -669,7 +649,6 @@ when is_binary(Ticket) ->
                 >>
             })
     end;
-
 scope(Session, Opts, Uri) ->
     Authid = bondy_session:authid(Session),
     ClientId = maps:get(client_id, Opts, all),
@@ -684,10 +663,8 @@ scope(Session, Opts, Uri) ->
         device_id => InstanceId
     }.
 
-
 %% @private
 authorize(ScopeType, AuthCtxt) ->
-
     case ScopeType of
         sso ->
             ok = bondy_rbac:authorize(
@@ -703,59 +680,49 @@ authorize(ScopeType, AuthCtxt) ->
             );
         client_local ->
             ok = bondy_rbac:authorize(
-                <<"bondy.issue">>, <<"bondy.ticket.scope.client_local">>,
+                <<"bondy.issue">>,
+                <<"bondy.ticket.scope.client_local">>,
                 AuthCtxt
             )
     end.
 
-
 scope_type(#{realm := all, client_id := all}) ->
     sso;
-
 scope_type(#{realm := all, client_id := _}) ->
     client_sso;
-
 scope_type(#{client_id := all}) ->
     local;
-
 scope_type(#{client_id := _}) ->
     client_local.
-
 
 %% @private
 is_persistent(Type) ->
     bondy_config:get([security, ticket, Type, persistence], true).
 
-
 %% @private
 store_key(Authid, Scope) ->
     store_key(Authid, Scope, scope_type(Scope)).
 
-
 %% @private
-store_key(Authid, #{client_id := ClientId}, Type)
-when ClientId =/= all andalso
-(Type == client_local orelse Type == client_sso) ->
+store_key(Authid, #{client_id := ClientId}, Type) when
+    ClientId =/= all andalso
+        (Type == client_local orelse Type == client_sso)
+->
     %% client scope or client_realm scope ticket
     %% device_id handled internally by list_key
     {Authid, ClientId, <<>>};
-
 store_key(Authid, #{device_id := all}, sso) ->
     {Authid, <<>>, <<>>};
-
 store_key(Authid, #{device_id := Id}, sso) ->
     {Authid, <<>>, Id};
-
 store_key(Authid, #{realm := Uri, device_id := all}, local) ->
     {Authid, Uri, <<>>};
-
 store_key(Authid, #{realm := Uri, device_id := Id}, local) ->
     {Authid, Uri, Id}.
 
 %% @private
 lookup_key(Authid, Scope) ->
     store_key(Authid, normalise_scope(Scope)).
-
 
 %% @private
 normalise_scope(Scope) ->
@@ -766,11 +733,9 @@ normalise_scope(Scope) ->
     },
     maps:merge(Default, Scope).
 
-
 %% @private
 list_key(#{realm := Uri, device_id := Id}) ->
     {Uri, Id}.
-
 
 %% @private
 store_ticket(AuthRealmUri, Authid, Claims) ->
@@ -783,7 +748,6 @@ store_ticket(AuthRealmUri, Authid, Claims) ->
             %% local | sso ticket scope type
             %% We just replace any existing ticket in this location
             ok = plum_db:put(Prefix, Key, Claims);
-
         _ ->
             %% client_local | client_sso scope type
             %% We have to update the value, so first we fetch it.
@@ -793,86 +757,73 @@ store_ticket(AuthRealmUri, Authid, Claims) ->
             ok = plum_db:put(Prefix, Key, Tickets)
     end.
 
-
 %% @private
 update_tickets(_, Claims, undefined) ->
     [Claims];
-
 update_tickets(Scope, Claims, Tickets) when is_map(Scope) ->
     update_tickets(list_key(Scope), Claims, Tickets);
-
 update_tickets({_, _} = Key, Claims, Tickets) ->
     lists:sort(
         lists:keystore(Key, 1, Tickets, {Key, Claims})
     ).
 
-
 %% @private
-expiry_time_secs(#{expiry_time_secs := Val})
-when is_integer(Val) andalso Val > 0 ->
+expiry_time_secs(#{expiry_time_secs := Val}) when
+    is_integer(Val) andalso Val > 0
+->
     expiry_time_secs(Val);
-
 expiry_time_secs(#{}) ->
     Default = bondy_config:get([security, ticket, expiry_time_secs]),
     expiry_time_secs(Default);
-
 expiry_time_secs(Val) when is_integer(Val) ->
     Max = bondy_config:get([security, ticket, max_expiry_time_secs]),
     min(Val, Max).
 
-
 %% @private
 issuer(Authid, #{client_id := all}) ->
     Authid;
-
 issuer(_, #{client_id := ClientId}) ->
     ClientId.
-
 
 %% @private
 allow_not_found(#{allow_not_found := Value}) ->
     Value;
-
 allow_not_found(_) ->
     bondy_config:get([security, ticket, allow_not_found]).
-
 
 %% @private
 is_expired(#{expires_at := Exp}) ->
     Exp =< ?NOW + ?LEEWAY_SECS.
 
-
 %% @private
 ticket_resolver(?TOMBSTONE, ?TOMBSTONE) ->
     ?TOMBSTONE;
-
 ticket_resolver(?TOMBSTONE, L) when is_list(L) ->
     maybe_tombstone(remove_expired(L));
-
 ticket_resolver(L, ?TOMBSTONE) when is_list(L) ->
     maybe_tombstone(remove_expired(L));
-
 ticket_resolver(L1, L2) when is_list(L1) andalso is_list(L2) ->
     %% Lists are sorted already as we sort them every time we put
     maybe_tombstone(
         remove_expired(lists:umerge(L1, L2))
     );
-
 ticket_resolver(?TOMBSTONE, T) when is_map(T) ->
     case is_expired(T) of
         true -> ?TOMBSTONE;
         T -> T
     end;
-
 ticket_resolver(T, ?TOMBSTONE) when is_map(T) ->
     ticket_resolver(?TOMBSTONE, T);
-
-ticket_resolver(TA, TB)
-when is_map(TA) andalso is_map(TB) ->
+ticket_resolver(TA, TB) when
+    is_map(TA) andalso is_map(TB)
+->
     case {is_expired(TA), is_expired(TB)} of
-        {true, true} -> ?TOMBSTONE;
-        {false, true} -> TA;
-        {true, false} -> TB;
+        {true, true} ->
+            ?TOMBSTONE;
+        {false, true} ->
+            TA;
+        {true, false} ->
+            TB;
         {false, false} ->
             ExpA = maps:get(expires_at, TA),
             ExpB = maps:get(expires_at, TB),
@@ -882,16 +833,13 @@ when is_map(TA) andalso is_map(TB) ->
             end
     end.
 
-
 %% @private
 remove_expired(L) ->
     %% TODO
     L.
 
-
 %% @private
 maybe_tombstone([]) ->
     ?TOMBSTONE;
-
 maybe_tombstone(L) ->
     L.

@@ -30,7 +30,9 @@ get(Key, SessionId, _Details) ->
                         {ok, #{}, [bondy_session:to_external(Session)], #{}};
                     OtherId ->
                         ?LOG_WARNING(#{
-                            description => "Session data inconsistency. SessionId should be " ++ integer_to_list(SessionId) ++ ".",
+                            description =>
+                                "Session data inconsistency. SessionId should be " ++
+                                integer_to_list(SessionId) ++ ".",
                             session_id => OtherId
                         }),
                         throw(no_such_session)
@@ -38,7 +40,6 @@ get(Key, SessionId, _Details) ->
             {error, not_found} ->
                 throw(no_such_session)
         end
-
     catch
         throw:no_such_session ->
             Uri = ?WAMP_NO_SUCH_SESSION,
@@ -50,17 +51,16 @@ get(Key, SessionId, _Details) ->
 %% CALBACKS
 %% =============================================================================
 
-
 -spec handle_call(
-    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()
+) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
-
 
 handle_call(~"bondy.session.self", #call{} = M, Ctxt) ->
     case bondy_context:session(Ctxt) of

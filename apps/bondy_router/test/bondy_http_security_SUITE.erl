@@ -16,11 +16,8 @@ that CORS and security response headers are correctly set on all handler types.
 
 -compile([nowarn_export_all, export_all]).
 
-
 -define(API_PORT, 18080).
 -define(ADMIN_PORT, 18081).
-
-
 
 all() ->
     [
@@ -31,22 +28,16 @@ all() ->
         admin_ready_security_headers
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
-
 
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 sse_options_cors(_Config) ->
     Url = api_url("/wamp/sse/open"),
@@ -69,7 +60,6 @@ sse_options_cors(_Config) ->
     MaxAge = header_value(<<"access-control-max-age">>, RespHeaders),
     ?assertNotEqual(undefined, MaxAge).
 
-
 longpoll_options_cors(_Config) ->
     Url = api_url("/wamp/longpoll/open"),
     Headers = [{<<"origin">>, <<"https://test.example.com">>}],
@@ -83,7 +73,6 @@ longpoll_options_cors(_Config) ->
         <<"access-control-allow-credentials">>, RespHeaders
     ),
     ?assertEqual(<<"false">>, Credentials).
-
 
 admin_ping_security_headers(_Config) ->
     Url = admin_url("/ping"),
@@ -103,7 +92,6 @@ admin_ping_security_headers(_Config) ->
     Hsts = header_value(<<"strict-transport-security">>, RespHeaders),
     ?assertEqual(undefined, Hsts).
 
-
 admin_ping_server_header(_Config) ->
     Url = admin_url("/ping"),
     {ok, _Status, RespHeaders, _Ref} = hackney:request(
@@ -112,7 +100,6 @@ admin_ping_server_header(_Config) ->
     Server = header_value(<<"server">>, RespHeaders),
     ?assertNotEqual(undefined, Server),
     ?assertMatch(<<"bondy/", _/binary>>, Server).
-
 
 admin_ready_security_headers(_Config) ->
     Url = admin_url("/ready"),
@@ -126,25 +113,19 @@ admin_ready_security_headers(_Config) ->
     ),
     ?assertEqual(<<"nosniff">>, ContentTypeOpts).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 api_url(Path) ->
     iolist_to_binary([
         "http://localhost:", integer_to_list(?API_PORT), Path
     ]).
 
-
 admin_url(Path) ->
     iolist_to_binary([
         "http://localhost:", integer_to_list(?ADMIN_PORT), Path
     ]).
-
 
 header_value(Name, Headers) ->
     case lists:keyfind(Name, 1, Headers) of

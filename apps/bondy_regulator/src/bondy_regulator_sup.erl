@@ -19,7 +19,6 @@ Top supervisor for the `bondy_regulator` application.
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-
 init([]) ->
     SupFlags = #{
         strategy => one_for_all,

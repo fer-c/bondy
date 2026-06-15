@@ -29,14 +29,12 @@ itself the in-VM peer.
 
 -define(REALM, <<"com.example.bondy_connect.m5.local">>).
 
-
 all() ->
     [
         local_call_round_trip,
         local_pubsub_round_trip,
         local_cross_session_call
     ].
-
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -47,24 +45,21 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 %% A full register→call works over the in-VM transport (caller + callee on the
 %% same connection, routed through the live dealer).
 local_call_round_trip(_) ->
     Conn = connect(),
     ?assertEqual(established, bondy_connect:status(Conn)),
-    {ok, _} = bondy_connect:register(Conn, <<"com.example.res.local">>, echo_handler()),
+    {ok, _} = bondy_connect:register(
+        Conn, <<"com.example.res.local">>, echo_handler()
+    ),
     {ok, R} = bondy_connect:call(Conn, <<"com.example.res.local">>, [<<"hi">>]),
     ?assertEqual([<<"hi">>], maps:get(args, R)),
     ok = bondy_connect:disconnect(Conn).
-
 
 %% A subscribe→publish→event round trip works over the in-VM transport, proving
 %% the EVENT (broker) path survives in-process delivery.
@@ -86,7 +81,6 @@ local_pubsub_round_trip(_) ->
     ok = bondy_connect:disconnect(Sub),
     ok = bondy_connect:disconnect(Pub).
 
-
 %% A callee on one local connection and a caller on a *second* local connection:
 %% the call must be routed by the dealer between two distinct in-VM sessions.
 local_cross_session_call(_) ->
@@ -101,23 +95,20 @@ local_cross_session_call(_) ->
     ok = bondy_connect:disconnect(Callee),
     ok = bondy_connect:disconnect(Caller).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 echo_handler() ->
     fun(Args, _, _) -> {reply, Args} end.
 
-
 %% @private An event handler that forwards each event's args to `Pid`.
 event_handler(Pid) ->
-    fun(Args, _, _) -> Pid ! {event, Args}, ok end.
-
+    fun(Args, _, _) ->
+        Pid ! {event, Args},
+        ok
+    end.
 
 %% @private Open an in-VM connection to the test realm.
 connect() ->
@@ -129,7 +120,6 @@ connect() ->
         serializers => [json]
     }),
     Conn.
-
 
 %% @private
 add_anon_realm(RealmUri) ->

@@ -25,7 +25,6 @@ caller's own session.
 -define(HOST, "127.0.0.1").
 -define(PORT, 18082).
 
-
 all() ->
     [
         connect_call_disconnect,
@@ -36,7 +35,6 @@ all() ->
         call_after_disconnect_fails
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     {ok, _} = application:ensure_all_started(bondy_connect),
@@ -45,7 +43,6 @@ init_per_suite(Config) ->
 
 end_per_suite(_) ->
     ok.
-
 
 %% @private
 add_anon_realm(RealmUri) ->
@@ -72,7 +69,6 @@ add_anon_realm(RealmUri) ->
     _ = bondy_realm:create(Cfg),
     ok.
 
-
 %% @private
 spec() ->
     #{
@@ -83,13 +79,9 @@ spec() ->
         serializers => [json]
     }.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 connect_call_disconnect(_) ->
     {ok, Conn} = bondy_connect:connect(spec()),
@@ -104,7 +96,6 @@ connect_call_disconnect(_) ->
     ok = bondy_connect:disconnect(Conn),
     ?assertEqual(down, bondy_connect:status(Conn)).
 
-
 named_connection(_) ->
     {ok, Conn} = bondy_connect:connect(m1_named, spec()),
     %% A named connection can be referenced from its name via named/1 (yielding
@@ -117,7 +108,6 @@ named_connection(_) ->
     {ok, Conn2} = bondy_connect:connect(m1_named, spec()),
     ok = bondy_connect:disconnect(Conn2).
 
-
 multiple_calls(_) ->
     {ok, Conn} = bondy_connect:connect(spec()),
     {ok, R1} = bondy_connect:call(Conn, <<"bondy.session.self">>, []),
@@ -125,7 +115,6 @@ multiple_calls(_) ->
     ?assertMatch(#{args := _, kwargs := _}, R1),
     ?assertMatch(#{args := _, kwargs := _}, R2),
     ok = bondy_connect:disconnect(Conn).
-
 
 %% Calling an unregistered procedure must come back as a correlated WAMP ERROR
 %% (proves the dealer is really routing and that ERROR correlation works).
@@ -136,13 +125,13 @@ call_unknown_procedure_errors(_) ->
     ?assertMatch({error, #{uri := _}}, Result),
     ok = bondy_connect:disconnect(Conn).
 
-
 connect_unknown_realm_fails(_) ->
     Spec = (spec())#{realm => <<"com.example.no.such.realm.m1">>},
     ?assertMatch({error, _}, bondy_connect:connect(Spec)).
 
-
 call_after_disconnect_fails(_) ->
     {ok, Conn} = bondy_connect:connect(spec()),
     ok = bondy_connect:disconnect(Conn),
-    ?assertMatch({error, _}, bondy_connect:call(Conn, <<"bondy.session.self">>, [])).
+    ?assertMatch(
+        {error, _}, bondy_connect:call(Conn, <<"bondy.session.self">>, [])
+    ).

@@ -14,7 +14,6 @@
 -define(REALM, <<"com.example.realm">>).
 -define(PASSWORD, <<"aWe11KeptSecret">>).
 
-
 all() ->
     [
         %% Config validation
@@ -46,7 +45,6 @@ all() ->
         format_status_redacts_secret
     ].
 
-
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(crypto),
     {ok, _} = application:ensure_all_started(bondy_wamp),
@@ -55,13 +53,9 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private Build a protocol in the `closed' state for an auth config.
 protocol(AuthConfig) ->
@@ -71,12 +65,10 @@ protocol(AuthConfig) ->
     {ok, St} = bondy_connect_protocol:init(Cfg),
     St.
 
-
 %% @private Build a protocol already in `establishing' (HELLO sent).
 establishing(AuthConfig) ->
     {ok, _Hello, St} = bondy_connect_protocol:start(protocol(AuthConfig)),
     St.
-
 
 %% @private CRA params matching the server's stored-password params.
 cra_params(Salt, Iterations, KeyLen) ->
@@ -87,13 +79,9 @@ cra_params(Salt, Iterations, KeyLen) ->
         iterations => Iterations
     }.
 
-
-
 %% =============================================================================
 %% CONFIG VALIDATION
 %% =============================================================================
-
-
 
 config_defaults_to_anonymous(_) ->
     {ok, Cfg} = bondy_connect_config:validate(#{realm => ?REALM}),
@@ -102,10 +90,8 @@ config_defaults_to_anonymous(_) ->
     ?assertEqual(<<"bondy_connect/0.1.0">>, maps:get(agent, Cfg)),
     ?assertEqual(#{verify => verify_peer}, maps:get(tls, Cfg)).
 
-
 config_missing_realm(_) ->
     ?assertEqual({error, missing_realm}, bondy_connect_config:validate(#{})).
-
 
 config_bad_authmethod(_) ->
     ?assertEqual(
@@ -115,13 +101,9 @@ config_bad_authmethod(_) ->
         })
     ).
 
-
-
 %% =============================================================================
 %% HELLO / START
 %% =============================================================================
-
-
 
 start_builds_hello(_) ->
     St0 = protocol(#{method => <<"anonymous">>}),
@@ -133,7 +115,6 @@ start_builds_hello(_) ->
     ?assertEqual([<<"anonymous">>], maps:get(authmethods, Details)),
     ?assert(maps:is_key(roles, Details)),
     ?assertEqual(establishing, bondy_connect_protocol:state_name(St1)).
-
 
 %% The default HELLO advertises exactly the advanced-profile features the client
 %% implements (M3). Crucially it must NOT advertise progressive_call_results or
@@ -165,9 +146,8 @@ hello_advertises_feature_matrix(_) ->
             ?assertNot(maps:is_key(progressive_call_results, Features)),
             ?assertNot(maps:is_key(progressive_calls, Features))
         end
-        || Role <- [caller, callee, publisher, subscriber]
+     || Role <- [caller, callee, publisher, subscriber]
     ].
-
 
 %% @private
 feature(Role, Feature, Roles) ->
@@ -175,19 +155,16 @@ feature(Role, Feature, Roles) ->
         Feature, maps:get(features, maps:get(Role, Roles, #{}), #{}), false
     ).
 
-
 start_only_from_closed(_) ->
     St1 = establishing(#{method => <<"anonymous">>}),
-    ?assertMatch({error, {invalid_state, establishing}},
-        bondy_connect_protocol:start(St1)).
-
-
+    ?assertMatch(
+        {error, {invalid_state, establishing}},
+        bondy_connect_protocol:start(St1)
+    ).
 
 %% =============================================================================
 %% AUTH ROUND-TRIPS
 %% =============================================================================
-
-
 
 anonymous_welcome(_) ->
     St1 = establishing(#{method => <<"anonymous">>}),
@@ -207,7 +184,6 @@ anonymous_welcome(_) ->
     ?assertEqual(12345, bondy_connect_session:id(Session)),
     ?assertEqual(<<"anonymous">>, bondy_connect_session:authid(Session)),
     ?assertEqual(?REALM, bondy_connect_session:realm_uri(Session)).
-
 
 %% The client's CRA response must equal the signature the server computes from
 %% the stored salted password (bondy_wamp_cra:response/2).
@@ -239,7 +215,6 @@ cra_response_matches_server(_) ->
     ?assertEqual(Expected, Signature),
     ?assertEqual(challenging, bondy_connect_protocol:state_name(St2)).
 
-
 %% The client's cryptosign signature must verify server-side against the
 %% advertised public key (bondy_wamp_cryptosign:verify/3).
 cryptosign_signature_verifies(_) ->
@@ -247,12 +222,14 @@ cryptosign_signature_verifies(_) ->
     PrivHex = bondy_wamp_cryptosign:encode_hex(Secret),
     PubHex = bondy_wamp_cryptosign:encode_hex(Pub),
 
-    {ok, Hello, St1} = bondy_connect_protocol:start(protocol(#{
-        method => <<"cryptosign">>,
-        authid => <<"alice">>,
-        privkey => PrivHex,
-        pubkey => PubHex
-    })),
+    {ok, Hello, St1} = bondy_connect_protocol:start(
+        protocol(#{
+            method => <<"cryptosign">>,
+            authid => <<"alice">>,
+            privkey => PrivHex,
+            pubkey => PubHex
+        })
+    ),
     #hello{details = Details} = Hello,
     ?assertEqual(#{<<"pubkey">> => PubHex}, maps:get(authextra, Details)),
 
@@ -270,19 +247,19 @@ cryptosign_signature_verifies(_) ->
     Signature = bondy_wamp_cryptosign:decode_hex(SignatureHex),
     ?assert(bondy_wamp_cryptosign:verify(Signature, ChallengeBytes, Pub)).
 
-
 cryptosign_derives_pubkey_from_privkey(_) ->
     #{public := Pub, secret := Secret} = bondy_wamp_cryptosign:generate_key(),
     PrivHex = bondy_wamp_cryptosign:encode_hex(Secret),
     PubHex = bondy_wamp_cryptosign:encode_hex(Pub),
 
     %% No pubkey in config -> derived from the private key.
-    {ok, Hello, _St1} = bondy_connect_protocol:start(protocol(#{
-        method => <<"cryptosign">>, privkey => PrivHex
-    })),
+    {ok, Hello, _St1} = bondy_connect_protocol:start(
+        protocol(#{
+            method => <<"cryptosign">>, privkey => PrivHex
+        })
+    ),
     #hello{details = Details} = Hello,
     ?assertEqual(#{<<"pubkey">> => PubHex}, maps:get(authextra, Details)).
-
 
 ticket_sends_secret(_) ->
     Ticket = <<"s3cr3t-ticket">>,
@@ -293,7 +270,6 @@ ticket_sends_secret(_) ->
         #challenge{auth_method = <<"ticket">>, extra = #{}}, St1
     ),
     ?assertEqual(Ticket, Auth#authenticate.signature).
-
 
 welcome_after_challenge(_) ->
     St1 = establishing(#{
@@ -312,7 +288,6 @@ welcome_after_challenge(_) ->
     ?assertEqual(established, bondy_connect_protocol:state_name(St3)),
     ?assertEqual(7, bondy_connect_session:id(Session)).
 
-
 %% A WELCOME arriving straight from `establishing` (no prior CHALLENGE) must be
 %% rejected for every credential-bearing method — silently accepting it would
 %% downgrade the operator's configured security posture (review B2). Anonymous
@@ -321,8 +296,16 @@ welcome_without_challenge_aborts(_) ->
     #{secret := Secret} = bondy_wamp_cryptosign:generate_key(),
     PrivHex = bondy_wamp_cryptosign:encode_hex(Secret),
     Configs = [
-        #{method => <<"cryptosign">>, authid => <<"alice">>, privkey => PrivHex},
-        #{method => <<"wampcra">>, authid => <<"alice">>, password => ?PASSWORD},
+        #{
+            method => <<"cryptosign">>,
+            authid => <<"alice">>,
+            privkey => PrivHex
+        },
+        #{
+            method => <<"wampcra">>,
+            authid => <<"alice">>,
+            password => ?PASSWORD
+        },
         #{method => <<"ticket">>, authid => <<"bob">>, ticket => <<"s3cr3t">>}
     ],
     Welcome = #welcome{session_id = 99, details = #{authid => <<"alice">>}},
@@ -330,20 +313,17 @@ welcome_without_challenge_aborts(_) ->
         fun(AuthConfig) ->
             St1 = establishing(AuthConfig),
             ?assertMatch(
-                {stop, {shutdown, {welcome_without_challenge, _}}, [#abort{}], _},
+                {stop, {shutdown, {welcome_without_challenge, _}}, [#abort{}],
+                    _},
                 bondy_connect_protocol:handle_message(Welcome, St1)
             )
         end,
         Configs
     ).
 
-
-
 %% =============================================================================
 %% TERMINATION
 %% =============================================================================
-
-
 
 router_abort_stops(_) ->
     St1 = establishing(#{method => <<"anonymous">>}),
@@ -351,31 +331,34 @@ router_abort_stops(_) ->
     {stop, Reason, Out, _St2} =
         bondy_connect_protocol:handle_message(Abort, St1),
     ?assertEqual([], Out),
-    ?assertMatch({shutdown, {abort, <<"wamp.error.no_such_realm">>, _}}, Reason).
-
+    ?assertMatch(
+        {shutdown, {abort, <<"wamp.error.no_such_realm">>, _}}, Reason
+    ).
 
 router_goodbye_acks_and_stops(_) ->
     St1 = establishing(#{method => <<"anonymous">>}),
     {established, _, St2} = bondy_connect_protocol:handle_message(
         #welcome{session_id = 1, details = #{}}, St1
     ),
-    Goodbye = #goodbye{reason_uri = <<"wamp.close.close_realm">>, details = #{}},
+    Goodbye = #goodbye{
+        reason_uri = <<"wamp.close.close_realm">>, details = #{}
+    },
     {stop, Reason, [Ack], St3} =
         bondy_connect_protocol:handle_message(Goodbye, St2),
     ?assertMatch(#goodbye{reason_uri = <<"wamp.close.goodbye_and_out">>}, Ack),
     ?assertMatch({shutdown, {goodbye, _}}, Reason),
     ?assertEqual(shutting_down, bondy_connect_protocol:state_name(St3)).
 
-
 unexpected_message_aborts(_) ->
     St1 = establishing(#{method => <<"anonymous">>}),
     %% A bare term that is not a WAMP message must become an ABORT, not crash.
     {stop, Reason, [Abort], St2} =
         bondy_connect_protocol:handle_message(garbage, St1),
-    ?assertMatch(#abort{reason_uri = <<"wamp.error.protocol_violation">>}, Abort),
+    ?assertMatch(
+        #abort{reason_uri = <<"wamp.error.protocol_violation">>}, Abort
+    ),
     ?assertMatch({shutdown, {protocol_violation, _}}, Reason),
     ?assertEqual(shutting_down, bondy_connect_protocol:state_name(St2)).
-
 
 outbound_before_established_errors(_) ->
     St1 = establishing(#{method => <<"anonymous">>}),
@@ -385,13 +368,9 @@ outbound_before_established_errors(_) ->
         bondy_connect_protocol:outbound(Msg, St1)
     ).
 
-
-
 %% =============================================================================
 %% SECURITY
 %% =============================================================================
-
-
 
 %% The raw secret must not survive format_status/1 (it is present beforehand).
 format_status_redacts_secret(_) ->

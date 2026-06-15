@@ -64,9 +64,11 @@ explicit_ap_is_stored() ->
 
 invalid_class_is_rejected() ->
     NS = mk_ns(),
-    Result = bondy_oplog_core_registry:register(NS, primary, 0, (base_config())#{
-        consistency_class => not_a_real_class
-    }),
+    Result = bondy_oplog_core_registry:register(
+        NS, primary, 0, (base_config())#{
+            consistency_class => not_a_real_class
+        }
+    ),
     ?assertEqual(
         {error, {invalid_consistency_class, not_a_real_class}},
         Result

@@ -23,14 +23,13 @@ Tokens are sharded by key and globally replicated to cluster peers.
 -define(VERSION, ~"1.1").
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_SECS, 2 * 0). % 0 mins
+% 0 mins
+-define(LEEWAY_SECS, 2 * 0).
 -define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
 -define(IS_GRANT_TYPE(X),
-    (
-        X == client_credentials orelse
+    (X == client_credentials orelse
         X == password orelse
-        X == authorization_code
-    )
+        X == authorization_code)
 ).
 %% TODO not supported yet
 
@@ -40,7 +39,9 @@ Tokens are sharded by key and globally replicated to cluster peers.
 -define(CLIENT_CREDENTIALS_GRANT_TTL,
     bondy_config:get([oauth2, client_credentials_grant_duration])
 ).
--define(PASSWORD_TOKEN_TTL, bondy_config:get([oauth2, password_grant_duration])).
+-define(PASSWORD_TOKEN_TTL,
+    bondy_config:get([oauth2, password_grant_duration])
+).
 -define(REFRESH_TOKEN_TTL, bondy_config:get([oauth2, refresh_token_duration])).
 -define(REFRESH_TOKEN_LEN, bondy_config:get([oauth2, refresh_token_length])).
 -define(MAX_TOKENS, bondy_config:get([oauth2, max_tokens_per_user])).
@@ -83,43 +84,42 @@ Tokens are sharded by key and globally replicated to cluster peers.
     }
 }).
 
--type t()           ::  #{
-                            type := ?MODULE,
-                            version := binary(),
-                            id => binary(),
-                            token_type := token_type(),
-                            grant_type := grant_type(),
-                            refresh_expires_in := pos_integer(),
-                            access_expires_in := pos_integer(),
-                            issued_at := pos_integer(),
-                            issued_on := nodestring(),
-                            kid := binary(),
-                            issuer := uri(),
-                            authrealm := uri(),
-                            authid := binary(),
-                            authscope := bondy_auth_scope:t(),
-                            authroles := [binary()],
-                            authgrants := map(),
-                            meta := map(),
-                            refresh_token := optional(binary()),
-                            created_at := pos_integer(),
-                            refreshed_at := pos_integer()
-                        }.
--type token_id()    ::  binary().
--type opts()        ::  #{
-                            client_id => binary(),
-                            allow_sso =>  boolean(),
-                            device_id => binary(),
-                            expiry_time_secs => pos_integer(),
-                            metadata => map()
-                        }.
--type token_type()      ::  access | refresh.
--type grant_type()      ::  client_credentials | password | authorization_code.
--type issue_error()     ::  any().
+-type t() :: #{
+    type := ?MODULE,
+    version := binary(),
+    id => binary(),
+    token_type := token_type(),
+    grant_type := grant_type(),
+    refresh_expires_in := pos_integer(),
+    access_expires_in := pos_integer(),
+    issued_at := pos_integer(),
+    issued_on := nodestring(),
+    kid := binary(),
+    issuer := uri(),
+    authrealm := uri(),
+    authid := binary(),
+    authscope := bondy_auth_scope:t(),
+    authroles := [binary()],
+    authgrants := map(),
+    meta := map(),
+    refresh_token := optional(binary()),
+    created_at := pos_integer(),
+    refreshed_at := pos_integer()
+}.
+-type token_id() :: binary().
+-type opts() :: #{
+    client_id => binary(),
+    allow_sso => boolean(),
+    device_id => binary(),
+    expiry_time_secs => pos_integer(),
+    metadata => map()
+}.
+-type token_type() :: access | refresh.
+-type grant_type() :: client_credentials | password | authorization_code.
+-type issue_error() :: any().
 
 -export_type([t/0]).
 -export_type([id/0]).
-
 
 -export([cleanup/0]).
 -export([issue/3]).
@@ -133,7 +133,6 @@ Tokens are sharded by key and globally replicated to cluster peers.
 -export([to_access_token/1]).
 -export([to_refresh_token/1]).
 
-
 -export([id/1]).
 -export([authid/1]).
 -export([authscope/1]).
@@ -141,12 +140,9 @@ Tokens are sharded by key and globally replicated to cluster peers.
 -export([is_expired/2]).
 -export([expires_at/1]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Issues a token.
@@ -154,7 +150,8 @@ Issues a token.
 -spec issue(
     GrantType :: grant_type(),
     AuthCtxt :: bondy_auth:context(),
-    Opts :: opts()) ->
+    Opts :: opts()
+) ->
     {ok, t()} | {error, issue_error()}.
 
 issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
@@ -167,7 +164,7 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
     AuthRoles = bondy_auth:roles(AuthCtxt),
     AuthGrants = [
         bondy_rbac:externalize_grant(X)
-        || X <- bondy_rbac:user_grants(RealmUri, AuthId)
+     || X <- bondy_rbac:user_grants(RealmUri, AuthId)
     ],
     Issuer = bondy_auth:issuer(AuthCtxt),
 
@@ -184,28 +181,28 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
         AuthRealm = bondy_realm:fetch(AuthRealmUri),
         Kid = bondy_realm:get_random_kid(AuthRealm),
         DeviceId = maps:get(device_id, Opts, all),
-        ScopeUri = case maps:get(allow_sso, Opts) of
-            true when AuthRealmUri =/= RealmUri ->
-                %% The token can be used to authenticate on all user realms
-                %% connected to this SSORealmUri
-                all;
-
-            _ ->
-                %% SSORealmUri is all or SSO was not allowed,
-                %% the scope realm can only be the session realm
-                RealmUri
-        end,
+        ScopeUri =
+            case maps:get(allow_sso, Opts) of
+                true when AuthRealmUri =/= RealmUri ->
+                    %% The token can be used to authenticate on all user realms
+                    %% connected to this SSORealmUri
+                    all;
+                _ ->
+                    %% SSORealmUri is all or SSO was not allowed,
+                    %% the scope realm can only be the session realm
+                    RealmUri
+            end,
 
         AuthScope = bondy_auth_scope:new(ScopeUri, ClientId, DeviceId),
         TokenType = token_type(GrantType),
 
-        {TokenId, RToken} = case TokenType of
-            access ->
-                {bondy_uuidv7:new(), undefined};
-
-            refresh ->
-                gen_refresh_token(store_key(AuthId))
-        end,
+        {TokenId, RToken} =
+            case TokenType of
+                access ->
+                    {bondy_uuidv7:new(), undefined};
+                refresh ->
+                    gen_refresh_token(store_key(AuthId))
+            end,
 
         T = #{
             type => ?MODULE,
@@ -232,26 +229,23 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
 
         ok = add_to_set(T),
         {ok, T}
-
     catch
         throw:not_found ->
             {error, {no_such_realm, AuthRealmUri}};
-
         throw:Reason ->
             {error, Reason};
-
         _:Reason ->
             {error, Reason}
     end.
-
 
 -doc """
 """.
 -spec refresh(Realm :: bondy_realm:uri(), RefreshToken :: binary()) ->
     {ok, t()} | {error, oauth2_invalid_grant}.
 
-refresh(RealmUri, RefreshToken)
-when is_binary(RealmUri) andalso is_binary(RefreshToken) ->
+refresh(RealmUri, RefreshToken) when
+    is_binary(RealmUri) andalso is_binary(RefreshToken)
+->
     maybe
         {ok, AuthRealmUri} ?= get_authrealm_uri(RealmUri),
         {ok, Components} ?= bondy_oauth_refresh_token:parse(RefreshToken),
@@ -259,21 +253,16 @@ when is_binary(RealmUri) andalso is_binary(RefreshToken) ->
         ok ?= check_expired(T),
         {ok, _} ?= check_authid(T, AuthRealmUri),
         do_refresh(T, Set)
-
     else
         {error, user_not_found} ->
             %% We do not remove tokens, as this should have been done by
             %% bondy_rbac_user
             {error, oauth2_invalid_grant};
-
         {error, not_found} ->
             {error, oauth2_invalid_grant};
-
         {error, _} = Error ->
             Error
-
     end.
-
 
 -doc """
 """.
@@ -286,19 +275,18 @@ lookup(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
         {ok, Components} ?= bondy_oauth_refresh_token:parse(RefreshToken),
         {ok, {T, _Set}} ?= find_in_set(AuthRealmUri, Components),
         {ok, T}
-
     else
         {error, _} = Error ->
             Error
     end.
-
 
 -doc """
 """.
 -spec lookup(
     RealmUri :: uri(),
     AuthId :: bondy_rbac_user:username(),
-    Scope :: bondy_auth_scope:t()) ->
+    Scope :: bondy_auth_scope:t()
+) ->
     {ok, Token :: t()} | {error, no_found | oauth2_invalid_grant}.
 
 lookup(RealmUri, AuthId, Scope) when is_map(Scope) ->
@@ -306,16 +294,12 @@ lookup(RealmUri, AuthId, Scope) when is_map(Scope) ->
         {ok, AuthRealmUri} ?= get_authrealm_uri(RealmUri),
         {ok, {T, _}} ?= find_in_set(AuthRealmUri, AuthId, Scope),
         {ok, T}
-
     else
         {error, not_found} ->
             {error, oauth2_invalid_grant};
-
         {error, _} = Error ->
             Error
-
     end.
-
 
 -spec revoke(t()) -> ok.
 
@@ -325,16 +309,13 @@ revoke(#{type := ?MODULE} = T) ->
     maybe
         {ok, {T, Set}} ?= find_in_set(AuthRealmUri, AuthId, AuthScope),
         do_revoke(T, Set)
-
     else
         {error, user_not_found} ->
             %% We do not remove tokens, as this should have been done by
             %% bondy_rbac_user
             ok;
-
         {error, not_found} ->
             ok;
-
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Error while revoking token",
@@ -342,7 +323,6 @@ revoke(#{type := ?MODULE} = T) ->
             }),
             ok
     end.
-
 
 -doc """
 RFC: https://tools.ietf.org/html/rfc7009
@@ -366,19 +346,15 @@ revoke(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
         {ok, Components} ?= bondy_oauth_refresh_token:parse(RefreshToken),
         {ok, {T, Set}} ?= find_in_set(AuthRealmUri, Components),
         do_revoke(T, Set)
-
     else
         {error, user_not_found} ->
             %% We do not remove tokens, as this should have been done by
             %% bondy_rbac_user
             ok;
-
         {error, not_found} ->
             ok;
-
         {error, invalid_token} ->
             ok;
-
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Error while revoking token",
@@ -386,7 +362,6 @@ revoke(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
             }),
             ok
     end.
-
 
 -doc """
 Revokes all tokens issued to all users in realm `RealmUri`.
@@ -397,13 +372,12 @@ revoke_all(RealmUri) when is_binary(RealmUri) ->
     try
         case get_authrealm_uri(RealmUri) of
             {ok, AuthRealmUri} ->
-                    Prefix = ?DB_PREFIX(AuthRealmUri),
-                    Fun = fun({Key, _Set}) -> plum_db:delete(Prefix, Key) end,
-                    %% We cannot use keys_only as it will currently ignore
-                    %% remove_tombstones
-                    Opts = [{remove_tombstones, true}, {resolver, lww}],
-                    plum_db:foreach(Fun, Prefix, Opts);
-
+                Prefix = ?DB_PREFIX(AuthRealmUri),
+                Fun = fun({Key, _Set}) -> plum_db:delete(Prefix, Key) end,
+                %% We cannot use keys_only as it will currently ignore
+                %% remove_tombstones
+                Opts = [{remove_tombstones, true}, {resolver, lww}],
+                plum_db:foreach(Fun, Prefix, Opts);
             {error, _} ->
                 ok
         end
@@ -416,7 +390,6 @@ revoke_all(RealmUri) when is_binary(RealmUri) ->
             })
     end.
 
-
 -doc """
 Revokes all tokens issued to user with `Username` in realm `RealmUri`.
 """.
@@ -424,14 +397,12 @@ Revokes all tokens issued to user with `Username` in realm `RealmUri`.
     ok.
 
 revoke_all(RealmUri, AuthId) ->
-
     try
         case get_authrealm_uri(RealmUri) of
             {ok, AuthRealmUri} ->
                 Prefix = ?DB_PREFIX(AuthRealmUri),
                 Key = store_key(AuthId),
                 plum_db:delete(Prefix, Key);
-
             {error, _} ->
                 ok
         end
@@ -444,7 +415,6 @@ revoke_all(RealmUri, AuthId) ->
             })
     end.
 
-
 -doc """
 """.
 -spec to_access_token(t()) ->
@@ -456,17 +426,14 @@ to_access_token(#{type := ?MODULE, authrealm := RealmUri, kid := Kid} = T0) ->
     T = T0#{id => bondy_uuidv7:format(bondy_uuidv7:new())},
     to_access_token(T, PrivKey).
 
-
 -doc """
 """.
 -spec to_refresh_token(t()) -> binary() | no_return().
 
 to_refresh_token(#{type := ?MODULE, refresh_token := undefined}) ->
     error(bardag);
-
 to_refresh_token(#{type := ?MODULE, refresh_token := Val}) ->
     Val.
-
 
 -doc """
 """.
@@ -488,38 +455,27 @@ cleanup() ->
     }),
     Stats.
 
-
-
 id(#{type := ?MODULE, id := Val}) ->
     Val.
-
 
 authid(#{type := ?MODULE, authid := Val}) ->
     Val.
 
-
 authscope(#{type := ?MODULE, authscope := Val}) ->
     Val.
-
 
 is_expired(#{type := ?MODULE} = T) ->
     is_expired(T, ?NOW).
 
-
 is_expired(#{type := ?MODULE} = T, Now) ->
     expires_at(T) + ?LEEWAY_SECS =< Now.
-
 
 expires_at(#{type := ?MODULE, issued_at := Ts, refresh_expires_in := Exp}) ->
     Ts + Exp.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 -spec get_authrealm_uri(uri()) -> {ok, uri()} | {error, not_found}.
 
@@ -530,41 +486,30 @@ get_authrealm_uri(RealmUri) ->
         {ok, Uri}
     end).
 
-
 get_access_expires_in(client_credentials) ->
     ?CLIENT_CREDENTIALS_GRANT_TTL;
-
 get_access_expires_in(password) ->
     ?PASSWORD_TOKEN_TTL;
-
 %% get_access_expires_in(application_code) ->
 %%     refresh;
 
 get_access_expires_in(Grant) ->
     throw({oauth2_unsupported_grant_type, Grant}).
 
-
-
-
 %% @private
 token_type(client_credentials) ->
     access;
-
 token_type(application_code) ->
     refresh;
-
 token_type(password) ->
     refresh;
-
 token_type(Grant) ->
     throw({oauth2_unsupported_grant_type, Grant}).
-
 
 %% @private
 to_access_token(#{type := ?MODULE, access_expires_in := Exp} = T, PrivKey) ->
     JWT = bondy_oauth_jwt:encode(to_jwt_claims(T), PrivKey),
     {ok, {JWT, Exp}}.
-
 
 %% @private
 to_jwt_claims(#{type := ?MODULE, version := ~"1.1" = Vsn} = T) ->
@@ -602,11 +547,9 @@ to_jwt_claims(#{type := ?MODULE, version := ~"1.1" = Vsn} = T) ->
         ~"groups" => AuthRoles
     }.
 
-
 %% @private
 store_key(AuthId) ->
     base16:encode(crypto:hash(sha256, string:casefold(AuthId))).
-
 
 %% @private
 add_to_set(#{type := ?MODULE} = T) ->
@@ -623,18 +566,16 @@ add_to_set(#{type := ?MODULE} = T) ->
         Set1 = bondy_oauth_token_set:add(Set0, T),
         {_Truncated, Set} = bondy_oauth_token_set:truncate(Set1, ?MAX_TOKENS),
         ok = plum_db:put(Prefix, Key, Set, ?DB_PUT_OPTS)
-
     catch
-      Class:Reason:Stacktrace ->
-        ?LOG_ERROR(#{
-            description => "Error while writing token to store",
-            class => Class,
-            reason => Reason,
-            stacktrace => Stacktrace
-        }),
-        throw(database_error)
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while writing token to store",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            throw(database_error)
     end.
-
 
 %% @private
 -spec find_in_set(uri(), bondy_oauth_refresh_token:components()) ->
@@ -646,12 +587,10 @@ find_in_set(RealmUri, #{key := Key, id := TokenId}) ->
     case plum_db:get(Prefix, Key) of
         undefined ->
             {error, not_found};
-
         Set when is_map(Set) ->
             Result = bondy_oauth_token_set:find(Set, TokenId),
             resulto:map(Result, fun(Token) -> {Token, Set} end)
     end.
-
 
 %% @private
 -spec find_in_set(uri(), binary(), bondy_auth_scope:t()) ->
@@ -659,7 +598,6 @@ find_in_set(RealmUri, #{key := Key, id := TokenId}) ->
 
 find_in_set(RealmUri, AuthId, Scope) ->
     find_in_set(RealmUri, AuthId, Scope, undefined).
-
 
 %% @private
 -spec find_in_set(uri(), binary(), bondy_auth_scope:t(), token_id()) ->
@@ -672,27 +610,22 @@ find_in_set(RealmUri, AuthId, Scope, TokenId) ->
     case plum_db:get(Prefix, Key) of
         undefined ->
             {error, not_found};
-
         Set when TokenId == undefined ->
             Result = bondy_oauth_token_set:find(Set, Scope),
             resulto:map(Result, fun(Token) -> {Token, Set} end);
-
         Set ->
             Result = bondy_oauth_token_set:find(Set, Scope, TokenId),
             resulto:map(Result, fun(Token) -> {Token, Set} end)
     end.
-
 
 %% @private
 check_expired(#{type := ?MODULE} = T) ->
     case is_expired(T) of
         true ->
             {error, oauth2_invalid_grant};
-
         false ->
             ok
     end.
-
 
 %% @private
 check_authid(#{authid := AuthId}, RealmUri) ->
@@ -702,15 +635,12 @@ check_authid(#{authid := AuthId}, RealmUri) ->
         fun
             (not_found) ->
                 user_not_found;
-
             (Other) ->
                 Other
         end
     );
-
 check_authid(_, _) ->
     {error, oauth2_invalid_grant}.
-
 
 %% @private
 do_refresh(#{type := ?MODULE} = T0, Set0) ->
@@ -726,7 +656,6 @@ do_refresh(#{type := ?MODULE} = T0, Set0) ->
     Key = store_key(AuthId),
 
     try
-
         {TokenId, RefreshToken} = gen_refresh_token(Key),
 
         T = T0#{
@@ -745,14 +674,11 @@ do_refresh(#{type := ?MODULE} = T0, Set0) ->
         ),
         ok = plum_db:put(Prefix, Key, Set, ?DB_PUT_OPTS),
         {ok, T}
-
     catch
         throw:not_found ->
             {error, {no_such_realm, AuthRealmUri}};
-
         throw:Reason ->
             {error, Reason};
-
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Error while writing token to store",
@@ -762,7 +688,6 @@ do_refresh(#{type := ?MODULE} = T0, Set0) ->
             }),
             throw(database_error)
     end.
-
 
 %% @private
 do_revoke(#{type := ?MODULE} = T0, Set0) ->
@@ -784,14 +709,11 @@ do_revoke(#{type := ?MODULE} = T0, Set0) ->
         ),
         ok = plum_db:put(Prefix, Key, Set, ?DB_PUT_OPTS),
         ok
-
     catch
         throw:not_found ->
             {error, {no_such_realm, AuthRealmUri}};
-
         throw:Reason ->
             {error, Reason};
-
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Error while writing token to store",
@@ -802,7 +724,6 @@ do_revoke(#{type := ?MODULE} = T0, Set0) ->
             throw(database_error)
     end.
 
-
 enqueue(Job, Report) ->
     Q = high_priority,
 
@@ -812,7 +733,6 @@ enqueue(Job, Report) ->
                 queue => Q,
                 queue_id => Id
             });
-
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Failed to enqueued reliable job.",
@@ -821,24 +741,18 @@ enqueue(Job, Report) ->
             })
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE: REFRESH TOKEN HELPERS
 %% =============================================================================
-
-
 
 %% @private
 gen_refresh_token(Key) ->
     bondy_oauth_refresh_token:new(Key).
 
-
 %% @private
 cleanup_expired_tokens(Stats0) ->
     %% TODO
     Stats0.
-
 
 %% @private
 cleanup_unused_tokens(Stats0) ->

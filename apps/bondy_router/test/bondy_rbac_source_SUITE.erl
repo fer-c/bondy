@@ -16,17 +16,15 @@ all() ->
         multiple_methods
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.rbac_source">>,
     ok = add_realm(RealmUri),
-    [{realm_uri, RealmUri}|Config].
+    [{realm_uri, RealmUri} | Config].
 
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
     {save_config, Config}.
-
 
 no_sources(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -34,7 +32,6 @@ no_sources(Config) ->
         [],
         bondy_rbac_source:list(RealmUri)
     ).
-
 
 multiple_methods(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -70,7 +67,6 @@ multiple_methods(Config) ->
         [_, _],
         bondy_rbac_source:list(RealmUri)
     ).
-
 
 add_realm(RealmUri) ->
     Config = #{

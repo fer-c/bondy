@@ -37,7 +37,6 @@ M4 (Phase 6 — resilience) tests.
 -define(PORT, 18082).
 -define(DEAD_PORT, 18099).
 
-
 all() ->
     [
         %% pure config
@@ -58,7 +57,6 @@ all() ->
         reconnect_budget_exhaustion_gives_up
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     {ok, _} = application:ensure_all_started(bondy_connect),
@@ -68,13 +66,9 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% CONFIG (pure)
 %% =============================================================================
-
-
 
 config_defaults(_) ->
     {ok, C} = bondy_connect_config:validate(#{realm => ?REALM}),
@@ -91,7 +85,6 @@ config_defaults(_) ->
     ?assertEqual(3, maps:get(max_attempts, P)),
     ?assertEqual(60000, maps:get(network_timeout, C)).
 
-
 config_merge_user_over_defaults(_) ->
     {ok, C} = bondy_connect_config:validate(#{
         realm => ?REALM,
@@ -103,25 +96,29 @@ config_merge_user_over_defaults(_) ->
     ?assertEqual(3, maps:get(max_retries, R)),
     ?assertEqual(3000, maps:get(interval, R)).
 
-
 config_rejects_bad_option(_) ->
     ?assertMatch(
         {error, {unknown_option, reconnect, bogus}},
-        bondy_connect_config:validate(#{realm => ?REALM, reconnect => #{bogus => 1}})
+        bondy_connect_config:validate(#{
+            realm => ?REALM, reconnect => #{bogus => 1}
+        })
     ),
     ?assertMatch(
         {error, {invalid_option, ping, enabled, yes}},
-        bondy_connect_config:validate(#{realm => ?REALM, ping => #{enabled => yes}})
+        bondy_connect_config:validate(#{
+            realm => ?REALM, ping => #{enabled => yes}
+        })
     ),
     ?assertMatch(
         {error, {invalid_option, reconnect, max_retries, -1}},
-        bondy_connect_config:validate(#{realm => ?REALM, reconnect => #{max_retries => -1}})
+        bondy_connect_config:validate(#{
+            realm => ?REALM, reconnect => #{max_retries => -1}
+        })
     ),
     ?assertMatch(
         {error, {invalid_network_timeout, -1}},
         bondy_connect_config:validate(#{realm => ?REALM, network_timeout => -1})
     ).
-
 
 %% The optional `handler' load-regulation config (Decision 5) is plumbed through
 %% validation so `max_concurrency'/`rate' are reachable by the connection's
@@ -143,34 +140,38 @@ config_handler_options(_) ->
     ),
     ?assertMatch(
         {error, {unknown_option, handler, bogus}},
-        bondy_connect_config:validate(#{realm => ?REALM, handler => #{bogus => 1}})
+        bondy_connect_config:validate(#{
+            realm => ?REALM, handler => #{bogus => 1}
+        })
     ).
-
-
 
 %% =============================================================================
 %% LIVE
 %% =============================================================================
-
-
 
 %% A connection with a short ping idle interval must stay established across an
 %% idle period far longer than that interval: the router answers each ping and
 %% the client never falsely reconnects.
 ping_keepalive_survives_idle(_) ->
     {Conn, _Server} = connect_and_server(#{
-        ping => #{enabled => true, idle_timeout => 300, timeout => 1000, max_attempts => 3}
+        ping => #{
+            enabled => true,
+            idle_timeout => 300,
+            timeout => 1000,
+            max_attempts => 3
+        }
     }),
     ?assertEqual(established, bondy_connect:status(Conn)),
     %% Idle ~7x the ping interval — several ping/pong cycles must occur.
     timer:sleep(2000),
     ?assertEqual(established, bondy_connect:status(Conn)),
     %% And it still works.
-    {ok, _} = bondy_connect:register(Conn, <<"com.example.res.ka">>, ok_handler()),
+    {ok, _} = bondy_connect:register(
+        Conn, <<"com.example.res.ka">>, ok_handler()
+    ),
     {ok, R} = bondy_connect:call(Conn, <<"com.example.res.ka">>, [<<"hi">>]),
     ?assertEqual([<<"hi">>], maps:get(args, R)),
     ok = bondy_connect:disconnect(Conn).
-
 
 %% The flip side of the above (review B8): a client whose pings go *unanswered*
 %% must give up after `max_attempts` and reconnect. We point the client at a
@@ -210,18 +211,18 @@ ping_failure_triggers_reconnect(_) ->
         %% to 5s.
         ok = wait_until(
             fun() ->
-                bondy_connect:status(Conn) =:= established
-                    andalso is_port(socket_port(Conn))
-                    andalso socket_port(Conn) =/= Port0
+                bondy_connect:status(Conn) =:= established andalso
+                    is_port(socket_port(Conn)) andalso
+                    socket_port(Conn) =/= Port0
             end,
-            50, 100
+            50,
+            100
         ),
         ?assert(is_process_alive(conn_pid(Conn))),
         ok = bondy_connect:disconnect(Conn)
     after
         stop_silent_server(Server)
     end.
-
 
 %% Killing the callee's server-side handler drops its socket without a GOODBYE;
 %% the client reconnects and replays its declared registration, so the procedure
@@ -240,7 +241,9 @@ reconnect_replays_registration(_) ->
     _ = exit(CalleeServer, kill),
 
     %% The callee reconnects...
-    ok = wait_until(fun() -> bondy_connect:status(Callee) =:= established end, 100, 100),
+    ok = wait_until(
+        fun() -> bondy_connect:status(Callee) =:= established end, 100, 100
+    ),
 
     %% ...and the replayed registration makes the procedure callable again.
     ok = wait_until(
@@ -250,12 +253,12 @@ reconnect_replays_registration(_) ->
                 _ -> false
             end
         end,
-        100, 100
+        100,
+        100
     ),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
-
 
 %% A malformed frame arriving on an established connection must trigger
 %% on_transport_failure -> reconnect (the codec returns {protocol_error,_}),
@@ -287,11 +290,12 @@ malformed_frame_triggers_reconnect(_) ->
     %% (and that the statem did not crash/restart).
     ok = wait_until(
         fun() ->
-            bondy_connect:status(Callee) =:= established
-                andalso is_port(socket_port(Callee))
-                andalso socket_port(Callee) =/= Port0
+            bondy_connect:status(Callee) =:= established andalso
+                is_port(socket_port(Callee)) andalso
+                socket_port(Callee) =/= Port0
         end,
-        100, 100
+        100,
+        100
     ),
     ?assert(is_process_alive(conn_pid(Callee))),
 
@@ -303,12 +307,12 @@ malformed_frame_triggers_reconnect(_) ->
                 _ -> false
             end
         end,
-        100, 100
+        100,
+        100
     ),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
-
 
 %% A router-driven registration_revocation (an unsolicited UNREGISTERED with
 %% request_id 0) drops only the *established* registration: the callee stops
@@ -348,7 +352,8 @@ revocation_keeps_declared_replays_on_reconnect(_) ->
                 _ -> false
             end
         end,
-        100, 100
+        100,
+        100
     ),
     ?assertEqual(established, bondy_connect:status(Callee)),
 
@@ -368,12 +373,12 @@ revocation_keeps_declared_replays_on_reconnect(_) ->
                 _ -> false
             end
         end,
-        200, 100
+        200,
+        100
     ),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
-
 
 %% An in-flight async call is terminated with {error, disconnected} (fail-fast)
 %% when the caller's link drops.
@@ -412,7 +417,6 @@ in_flight_call_fails_on_drop(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
 %% By default the initial connect is fail-fast: a dead endpoint returns an error
 %% promptly rather than blocking on the reconnect budget.
 initial_connect_fails_fast(_) ->
@@ -428,7 +432,6 @@ initial_connect_fails_fast(_) ->
     ?assertMatch({error, _}, Result),
     %% Well under the 30s await_ready ceiling — proves it did not retry-loop.
     ?assert(Elapsed < 5000000).
-
 
 %% With retry_initial_connect => true the initial connect retries the configured
 %% budget and then returns an error (still bounded, no infinite block).
@@ -449,7 +452,6 @@ initial_connect_retries_when_enabled(_) ->
         }
     }),
     ?assertMatch({error, _}, Result).
-
 
 %% After a connection has *established once*, an abrupt server disappearance
 %% drives the reconnect/backoff loop; once the retry budget is exhausted the
@@ -498,13 +500,9 @@ reconnect_budget_exhaustion_gives_up(_) ->
     %% The process is gone for good — no restart.
     ?assertEqual(down, bondy_connect:status(Conn)).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 ok_handler() ->
@@ -512,7 +510,6 @@ ok_handler() ->
 
 echo_handler() ->
     fun(Args, _, _) -> {reply, Args} end.
-
 
 %% @private Establish a connection (with extra config merged in).
 connect(Extra) ->
@@ -526,7 +523,6 @@ connect(Extra) ->
     {ok, Conn} = bondy_connect:connect(maps:merge(Base, Extra)),
     Conn.
 
-
 %% @private Establish a connection and return its *server-side* ranch handler pid
 %% (identified as the new TCP connection that appears during connect).
 connect_and_server(Extra) ->
@@ -535,16 +531,17 @@ connect_and_server(Extra) ->
     Server = new_server_conn(Before, 100),
     {Conn, Server}.
 
-
 %% @private
 new_server_conn(_Before, 0) ->
     error(no_new_server_conn);
 new_server_conn(Before, N) ->
     case bondy_wamp_tcp:tcp_connections() -- Before of
-        [Pid | _] -> Pid;
-        [] -> timer:sleep(50), new_server_conn(Before, N - 1)
+        [Pid | _] ->
+            Pid;
+        [] ->
+            timer:sleep(50),
+            new_server_conn(Before, N - 1)
     end.
-
 
 %% @private Start a mock raw-socket WAMP server that completes the handshake +
 %% an anonymous WELCOME (so a connecting client reaches `established`) but then
@@ -559,16 +556,18 @@ start_silent_server() ->
         {packet, 0}
     ]),
     {ok, Port} = inet:port(LSock),
-    Acceptor = spawn(fun() -> receive go -> silent_accept_loop(LSock) end end),
+    Acceptor = spawn(fun() ->
+        receive
+            go -> silent_accept_loop(LSock)
+        end
+    end),
     ok = gen_tcp:controlling_process(LSock, Acceptor),
     Acceptor ! go,
     {silent_server, Port, Acceptor}.
 
-
 %% @private
 silent_server_port({silent_server, Port, _Acceptor}) ->
     Port.
-
 
 %% @private
 stop_silent_server({silent_server, _Port, Acceptor}) ->
@@ -577,13 +576,16 @@ stop_silent_server({silent_server, _Port, Acceptor}) ->
     _ = exit(Acceptor, kill),
     ok.
 
-
 %% @private Accept reconnects until the listen socket is closed; serve each on
 %% its own process.
 silent_accept_loop(LSock) ->
     case gen_tcp:accept(LSock, 1000) of
         {ok, Sock} ->
-            Handler = spawn(fun() -> receive go -> serve_silent(Sock) end end),
+            Handler = spawn(fun() ->
+                receive
+                    go -> serve_silent(Sock)
+                end
+            end),
             ok = gen_tcp:controlling_process(Sock, Handler),
             Handler ! go,
             silent_accept_loop(LSock);
@@ -593,7 +595,6 @@ silent_accept_loop(LSock) ->
             ok
     end.
 
-
 %% @private Complete the raw handshake + an anonymous WELCOME, then read-and-
 %% discard all inbound frames (pings included) until the client closes the
 %% socket — deliberately never sending a pong.
@@ -602,7 +603,6 @@ serve_silent(Sock) ->
     %% Stay silent: drain & drop everything (incl. pings) until the client gives
     %% up and closes the socket.
     silent_drain(Sock).
-
 
 %% @private Drive a connecting client to `established`: echo the 4-octet raw
 %% handshake (the non-zero serializer nibble reads as success), read-and-discard
@@ -628,14 +628,12 @@ serve_welcome(Sock) ->
     ok = gen_tcp:send(Sock, Frame),
     ok.
 
-
 %% @private
 silent_drain(Sock) ->
     case gen_tcp:recv(Sock, 0, infinity) of
         {ok, _Data} -> silent_drain(Sock);
         {error, _} -> ok
     end.
-
 
 %% @private Start a mock raw-socket WAMP server that establishes *one* session
 %% (handshake + WELCOME), then — on `drop_server_drop/1` — closes both the live
@@ -651,28 +649,28 @@ start_drop_server() ->
         {packet, 0}
     ]),
     {ok, Port} = inet:port(LSock),
-    Acceptor = spawn(fun() -> receive go -> drop_accept(LSock) end end),
+    Acceptor = spawn(fun() ->
+        receive
+            go -> drop_accept(LSock)
+        end
+    end),
     ok = gen_tcp:controlling_process(LSock, Acceptor),
     Acceptor ! go,
     {drop_server, Port, Acceptor}.
 
-
 %% @private
 drop_server_port({drop_server, Port, _Acceptor}) ->
     Port.
-
 
 %% @private Tell the server to vanish: drop the live socket and stop listening.
 drop_server_drop({drop_server, _Port, Acceptor}) ->
     Acceptor ! drop,
     ok.
 
-
 %% @private
 stop_drop_server({drop_server, _Port, Acceptor}) ->
     _ = exit(Acceptor, kill),
     ok.
-
 
 %% @private Accept exactly one connection, establish it, then wait for the
 %% `drop' cue (or a generous timeout) before closing both sockets.
@@ -687,7 +685,6 @@ drop_accept(LSock) ->
     _ = gen_tcp:close(LSock),
     ok.
 
-
 %% @private The TCP socket port owned by a connection process (`undefined` if
 %% there is not exactly one — e.g. mid-reconnect between close and re-connect).
 %% Lets a test inject a synthetic `{tcp, Port, _}` and observe the post-reconnect
@@ -696,31 +693,31 @@ socket_port(Conn) ->
     Pid = conn_pid(Conn),
     Ports = [
         P
-        || P <- erlang:ports(),
-           erlang:port_info(P, connected) =:= {connected, Pid},
-           erlang:port_info(P, name) =:= {name, "tcp_inet"}
+     || P <- erlang:ports(),
+        erlang:port_info(P, connected) =:= {connected, Pid},
+        erlang:port_info(P, name) =:= {name, "tcp_inet"}
     ],
     case Ports of
         [P] -> P;
         _ -> undefined
     end.
 
-
 %% @private The underlying connection process pid behind an opaque conn() handle.
 %% White-box tests need the raw pid to inject socket messages / probe liveness.
 conn_pid({bondy_connect, Pid}) when is_pid(Pid) -> Pid;
 conn_pid(Pid) when is_pid(Pid) -> Pid.
-
 
 %% @private Poll `Fun` until it returns `true` (or fail after Tries x SleepMs).
 wait_until(_Fun, 0, _Sleep) ->
     ct:fail(condition_not_met);
 wait_until(Fun, Tries, Sleep) ->
     case Fun() of
-        true -> ok;
-        _ -> timer:sleep(Sleep), wait_until(Fun, Tries - 1, Sleep)
+        true ->
+            ok;
+        _ ->
+            timer:sleep(Sleep),
+            wait_until(Fun, Tries - 1, Sleep)
     end.
-
 
 %% @private
 add_anon_realm(RealmUri) ->

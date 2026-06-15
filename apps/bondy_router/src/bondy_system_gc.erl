@@ -28,14 +28,9 @@ and garbage-collects those that are waiting, plus itself.
 -export([init/1]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-
 
 -doc """
 Starts the system garbage collection server.
@@ -43,24 +38,18 @@ Starts the system garbage collection server.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-
 -spec garbage_collect() -> ok.
 
 garbage_collect() ->
     gen_server:cast(?MODULE, garbage_collect).
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     ok = schedule_gc(),
     {ok, #state{}}.
-
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -70,12 +59,9 @@ handle_call(Event, From, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-
 handle_cast(garbage_collect, State) ->
     ok = do_gc(),
     {noreply, State};
-
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -83,12 +69,10 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
 handle_info(scheduled_gc, State) ->
     ok = do_gc(),
     ok = schedule_gc(),
     {noreply, State};
-
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
         reason => unexpected_event,
@@ -96,32 +80,21 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
-
 terminate(_Reason, _State) ->
     %% TODO publish metaevent
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 schedule_gc() ->
     Interval = bondy_config:get(gc_interval, timer:minutes(5)),
     erlang:send_after(Interval, self(), scheduled_gc),
     ok.
-
-
 
 do_gc() ->
     Count = erlang:system_info(process_count),
@@ -131,7 +104,7 @@ do_gc() ->
 
     [
         erlang:garbage_collect(P)
-        || P <- L,  {status, waiting} == process_info(P, status)
+     || P <- L, {status, waiting} == process_info(P, status)
     ],
 
     %% We gc ourselves

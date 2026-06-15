@@ -3,8 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
-
 -module(bondy_broker).
 -moduledoc """
 This module implements the capabilities of a Broker. It is used by
@@ -71,19 +69,21 @@ another subscribe request second might be permissible immediately.
     end
 ).
 
--type list_cont() ::     {
-                            [bondy_registry_entry:t()],
-                            bondy_registry_entry:continuation()
-                            | bondy_registry_entry:eot()
-                        }
-                        | bondy_registry_entry:eot().
+-type list_cont() ::
+    {
+        [bondy_registry_entry:t()],
+        bondy_registry_entry:continuation()
+        | bondy_registry_entry:eot()
+    }
+    | bondy_registry_entry:eot().
 
--type match_cont() ::    {
-                            {[bondy_registry_entry:t()], [node()]},
-                            bondy_registry_store:continuation()
-                            | bondy_registry_store:eot()
-                        }
-                        | bondy_registry_store:eot().
+-type match_cont() ::
+    {
+        {[bondy_registry_entry:t()], [node()]},
+        bondy_registry_store:continuation()
+        | bondy_registry_store:eot()
+    }
+    | bondy_registry_store:eot().
 
 %% API
 -export([features/0]).
@@ -103,19 +103,14 @@ another subscribe request second might be permissible immediately.
 -export([unsubscribe/1]).
 -export([unsubscribe/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec features() -> map().
 
 features() ->
     maps:from_list(bondy_config:get([wamp, broker, features])).
-
 
 -doc "Returns true if feature `F` is enabled by the broker.".
 -spec is_feature_enabled(binary() | atom()) -> boolean().
@@ -127,10 +122,8 @@ is_feature_enabled(F) when is_binary(F) ->
         _:_ ->
             false
     end;
-
 is_feature_enabled(F) when is_atom(F) ->
     bondy_config:get([wamp, broker, features, F], false).
-
 
 -doc """
 Removes all subscriptions that are associated for reference `Ref` in
@@ -152,32 +145,30 @@ flush(RealmUri, Ref) ->
             %% they will get this delete in the next AAE exchange
             #{broadcast => false}
         )
-
     catch
         Class:Reason:Stacktrace ->
-        ?LOG_DEBUG(#{
-            description => "Error while flushing subscriptions",
-            class => Class,
-            reason => Reason,
-            stacktrace => Stacktrace,
-            realm_uri => RealmUri,
-            ref => Ref
-        }),
-        ok
+            ?LOG_DEBUG(#{
+                description => "Error while flushing subscriptions",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                realm_uri => RealmUri,
+                ref => Ref
+            }),
+            ok
     end.
-
 
 -spec publish(
     Opts :: map(),
     {Realm :: uri(), TopicUri :: uri()} | uri(),
     Args :: [],
     ArgsKw :: map(),
-    bondy_context:t()) -> {ok, id()} | {error, any()}.
+    bondy_context:t()
+) -> {ok, id()} | {error, any()}.
 
 publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
     ReqId = bondy_context:gen_message_id(Ctxt, session),
     publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt).
-
 
 -spec publish(
     id(),
@@ -185,26 +176,25 @@ publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
     {Realm :: uri(), TopicUri :: uri()} | uri(),
     Args :: list(),
     ArgsKw :: map(),
-    bondy_context:t()) -> {ok, id()} | {error, any()}.
+    bondy_context:t()
+) -> {ok, id()} | {error, any()}.
 
-publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt)
-when is_map(Ctxt) ->
+publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt) when
+    is_map(Ctxt)
+->
     RealmUri = bondy_context:realm_uri(Ctxt),
 
     try
         ok = bondy_rbac:authorize(<<"wamp.publish">>, TopicUri, Ctxt),
         M = bondy_wamp_message:publish(ReqId, Opts, TopicUri, Args, KWArgs),
         do_publish(M, Ctxt)
-
     catch
         _:{not_authorized, _Reason} = Reason ->
             {error, Reason};
-
         _:{no_such_realm, RealmUri} = Reason ->
             %% Realm doesn't exist
             {error, Reason};
-
-        Class:Reason:Stacktrace->
+        Class:Reason:Stacktrace ->
             SessionId = bondy_context:session_id(Ctxt),
             ExtId = bondy_utils:external_session_id(SessionId),
             ?LOG_WARNING(#{
@@ -219,13 +209,11 @@ when is_map(Ctxt) ->
             {error, Reason}
     end.
 
-
 -spec subscribe(RealmUri :: uri(), Opts :: map(), Topic :: uri()) ->
     {ok, id()} | {ok, {id(), pid()}} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic) ->
     subscribe(RealmUri, Opts, Topic, self()).
-
 
 -doc """
 For internal use.
@@ -241,7 +229,8 @@ If the last argument is a pid, it registers the pid as a subscriber
     RealmUri :: uri(),
     Opts :: map(),
     Topic :: uri(),
-    SubscriberOrFun :: pid() | function()) ->
+    SubscriberOrFun :: pid() | function()
+) ->
     {ok, id()} | {ok, {id(), pid()}} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
@@ -256,12 +245,10 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
         Id, RealmUri, Opts, Topic, Fun
     ),
     resulto:map(Result, fun(Pid) -> {Id, Pid} end);
-
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     %% Add a local subscription
     subscribe(RealmUri, Opts, Topic, bondy_ref:new(internal, Pid));
-
-subscribe(RealmUri, Opts, Topic, Ref)  ->
+subscribe(RealmUri, Opts, Topic, Ref) ->
     bondy_ref:is_type(Ref) orelse error({badarg, Ref}),
 
     case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
@@ -273,18 +260,14 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
             ok = on_create(Entry),
             ok = on_subscribe(Entry),
             {ok, bondy_registry_entry:id(Entry)};
-
         {ok, {Entry, false}} ->
             on_subscribe(Entry),
             {ok, bondy_registry_entry:id(Entry)};
-
         {error, {already_exists, _Entry}} ->
             {error, already_exists};
-
         {error, _} = Error ->
             Error
     end.
-
 
 -doc """
 For internal Bondy use.
@@ -296,17 +279,14 @@ Terminates the process identified by `Pid` by
 
 unsubscribe(SubscriberId) when is_integer(SubscriberId) ->
     unsubscribe(bondy_subscriber:pid(SubscriberId));
-
 unsubscribe(Subscriber) when is_pid(Subscriber) ->
     bondy_subscribers_sup:terminate_subscriber(Subscriber).
-
 
 -spec unsubscribe(id(), bondy_context:t() | uri()) ->
     ok | {error, not_found | any()}.
 
 unsubscribe(SubsId, RealmUri) when is_integer(SubsId), is_binary(RealmUri) ->
     unsubscribe(SubsId, bondy_context:local_context(RealmUri));
-
 unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
 
@@ -318,25 +298,20 @@ unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
             case bondy_registry:remove(Entry) of
                 ok ->
                     on_unsubscribe(Entry);
-
                 {ok, false} ->
                     on_unsubscribe(Entry);
-
                 {ok, true} ->
                     %% WAMP 10.3.1 ...Similarly, the
                     %% wamp.subscription.on_delete event MUST always be
                     %% preceded by a wamp.subscription.on_unsubscribe event.
                     ok = on_unsubscribe(Entry),
                     on_delete(Entry);
-
                 Error ->
                     Error
             end;
-
         {error, _} = Error ->
             Error
     end.
-
 
 -doc """
 Handles a wamp message. This function is called by the `bondy_router`
@@ -363,18 +338,15 @@ forward(M, Ctxt) ->
                 false ->
                     ok
             end;
-
         _:{not_authorized, Reason} ->
             Reply = not_authorized_error(M, Reason),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
-
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
-
         Class:Reason:Stacktrace ->
             TraceId = bondy_utils:uuid(),
-             ?LOG_ERROR(#{
+            ?LOG_ERROR(#{
                 description =>
                     ~"Error while evaluating inbound message. Returning ERROR",
                 reason => Reason,
@@ -393,12 +365,12 @@ forward(M, Ctxt) ->
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
-
 -doc "Handles a message sent by a peer node through the `bondy_relay`.".
 -spec forward(
     M :: wamp_publish(),
     To :: optional(bondy_ref:t()),
-    Opts :: map()) ->
+    Opts :: map()
+) ->
     ok | no_return().
 
 forward(#publish{} = M, undefined, FwdOpts) ->
@@ -416,16 +388,17 @@ forward(#publish{} = M, undefined, FwdOpts) ->
 
     MatchOpts0 = make_match_opts(SessionId, M#publish.options),
 
-    MatchOpts = case bondy_ref:is_bridge_relay(Relay) of
-        true ->
-            %% A publish relayed from another cluster or node e.g. bridge relay.
-            %% We need to send to all subscribers in the cluster.
-            MatchOpts0;
-        false ->
-            %% A publish relayed by a cluster peer.
-            %% We need to send to this node local subscribers only.
-            MatchOpts0#{nodestring => bondy_config:nodestring()}
-    end,
+    MatchOpts =
+        case bondy_ref:is_bridge_relay(Relay) of
+            true ->
+                %% A publish relayed from another cluster or node e.g. bridge relay.
+                %% We need to send to all subscribers in the cluster.
+                MatchOpts0;
+            false ->
+                %% A publish relayed by a cluster peer.
+                %% We need to send to this node local subscribers only.
+                MatchOpts0#{nodestring => bondy_config:nodestring()}
+        end,
 
     MatchResult = match_subscriptions(TopicUri, RealmUri, MatchOpts),
 
@@ -456,8 +429,6 @@ forward(#publish{} = M, undefined, FwdOpts) ->
 
     {ok, PubId}.
 
-
-
 -doc """
 Returns the list of subscriptions for the active session.
 
@@ -469,7 +440,6 @@ When called with a `bondy:context()` it is equivalent to calling
 
 subscriptions(Cont) ->
     bondy_registry:entries(Cont).
-
 
 %% @private
 -doc """
@@ -485,7 +455,6 @@ of subscriptions returned.
 subscriptions(RealmUri, SessionId) ->
     bondy_registry:entries(subscription, RealmUri, SessionId).
 
-
 -doc """
 Returns the complete list of subscriptions matching the RealmUri
 and SessionId.
@@ -493,12 +462,12 @@ and SessionId.
 Use `subscriptions/3` to limit the number of subscriptions returned.
 """.
 -spec subscriptions(
-    RealmUri :: uri(), SessionId :: id(), Limit :: non_neg_integer()) ->
+    RealmUri :: uri(), SessionId :: id(), Limit :: non_neg_integer()
+) ->
     list_cont().
 
 subscriptions(RealmUri, SessionId, Limit) ->
     bondy_registry:entries(subscription, RealmUri, SessionId, Limit).
-
 
 -doc """
 Returns the tuple `{LocalSubscriptions, Nodes}` where `Nodes` are the
@@ -511,30 +480,24 @@ match_subscriptions(TopicUri, RealmUri) ->
     Opts = #{limit => ?MATCH_LIMIT},
     match_subscriptions(TopicUri, RealmUri, Opts).
 
-
 -spec match_subscriptions(uri(), RealmUri :: uri(), map()) ->
     {[bondy_registry_entry:t()], [node()]} | match_cont().
 
 match_subscriptions(TopicUri, RealmUri, Opts) ->
     bondy_registry:find_matches(subscription, RealmUri, TopicUri, Opts).
 
-
 -spec match_subscriptions(
     bondy_registry_store:continuation() | bondy_registry_store:eot()
-    ) -> match_cont().
+) -> match_cont().
 
 match_subscriptions(?EOT) ->
     ?EOT;
-
 match_subscriptions(Cont) ->
     bondy_registry:find_matches(Cont).
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 do_forward(#subscribe{} = M, Ctxt) ->
@@ -557,16 +520,13 @@ do_forward(#subscribe{} = M, Ctxt) ->
             %% subscription and the addition of a session.
             ok = on_create(Entry),
             on_subscribe(Entry);
-
         {ok, {Entry, false}} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Entry);
-
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id));
-
         {error, timeout} ->
             Error = bondy_wamp_message:error_from(
                 M,
@@ -575,9 +535,7 @@ do_forward(#subscribe{} = M, Ctxt) ->
                 [~"Request timed out waiting for subcription response."]
             ),
             bondy:send(RealmUri, Ref, Error)
-
     end;
-
 do_forward(#unsubscribe{} = M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     SubsId = M#unsubscribe.subscription_id,
@@ -587,11 +545,9 @@ do_forward(#unsubscribe{} = M, Ctxt) ->
             ReqId = M#unsubscribe.request_id,
             Reply = bondy_wamp_message:unsubscribed(ReqId),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
-
         {error, not_found} ->
             throw(not_found)
     end;
-
 do_forward(#publish{} = M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     ReqId = M#publish.request_id,
@@ -619,22 +575,24 @@ do_forward(#publish{} = M, Ctxt) ->
             ok
     end.
 
-
 %% @private
 not_found_error(M, _Ctxt) ->
     Msg = iolist_to_binary(
         [
             ~"There are no subcriptions matching the id ",
-            $', M#unsubscribe.subscription_id, $'
+            $',
+            M#unsubscribe.subscription_id,
+            $'
         ]
     ),
 
-    ErrorDetails = case M of
-        #publish{options = Opts} ->
-            maps:with(?WAMP_PPT_ATTRS, Opts);
-        _ ->
-            #{}
-    end,
+    ErrorDetails =
+        case M of
+            #publish{options = Opts} ->
+                maps:with(?WAMP_PPT_ATTRS, Opts);
+            _ ->
+                #{}
+        end,
 
     bondy_wamp_message:error(
         ?UNSUBSCRIBE,
@@ -648,7 +606,6 @@ not_found_error(M, _Ctxt) ->
         }
     ).
 
-
 %% @private
 not_authorized_error(M, Reason) ->
     bondy_wamp_message:error_from(
@@ -659,9 +616,9 @@ not_authorized_error(M, Reason) ->
         #{message => Reason}
     ).
 
-
 %% @private
--spec do_publish(M :: bondy_wamp_message:publish(), bondy_context:t()) -> {ok, id()}.
+-spec do_publish(M :: bondy_wamp_message:publish(), bondy_context:t()) ->
+    {ok, id()}.
 
 do_publish(#publish{} = M, Ctxt) ->
     %% REVIEW We need to parallelise this based on batches.
@@ -709,7 +666,6 @@ do_publish(#publish{} = M, Ctxt) ->
     Fwd = fun
         (Node) when is_atom(Node) ->
             ok = forward_using_relay(M, FwdOpts, Node);
-
         (Relay) ->
             ok = forward_using_bridge_relay(M, FwdOpts, Relay)
     end,
@@ -718,13 +674,12 @@ do_publish(#publish{} = M, Ctxt) ->
 
     {ok, PubId}.
 
-
 %% @private
 do_publish(_, ?EOT, _, _, _) ->
     ok;
-
-do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin)
-when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
+do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin) when
+    is_function(MakeEvent, 1), is_function(Fwd, 1)
+->
     %% REVIEW Consider creating a broadcast tree out of the registry's
     %% match results so that instead of sending possibly millions of
     %% messages to millions of peers (processes) we delegate that to peers
@@ -734,7 +689,6 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
         (Node, ok) when is_atom(Node) ->
             %% A remote subscriber located in a peer cluster node.
             Fwd(Node);
-
         (Entry, ok) ->
             Subscriber = bondy_registry_entry:ref(Entry),
             EntryId = bondy_registry_entry:id(Entry),
@@ -759,7 +713,6 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
                     Event = MakeEvent(EntryId),
                     CBArgs = bondy_registry_entry:callback_args(Entry),
                     ok = apply_dynamic_callback(Event, Subscriber, CBArgs);
-
                 {true, false} ->
                     case bondy_ref:is_bridge_relay(Subscriber) of
                         true ->
@@ -770,7 +723,6 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
                             %% need for forward the publication to a remote
                             %% cluster.
                             Fwd(Subscriber);
-
                         false ->
                             %% @TODO we should pass a 2nd argument with the
                             %% subscription options to remove unwanted info in
@@ -778,7 +730,6 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
                             Event = MakeEvent(EntryId),
                             ok = bondy:send(RealmUri, Subscriber, Event)
                     end;
-
                 {false, _} ->
                     ok
             end
@@ -788,7 +739,6 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     %% (local) Bridge Relays and Cluster Peer nodestrings where we found at
     %% least one subscriber
     fold_matches(MatchResult, Fun, ok).
-
 
 %% @private
 make_match_opts(SessionId, Opts) ->
@@ -816,20 +766,21 @@ make_match_opts(SessionId, Opts) ->
     %% By default, a Publisher of an event will not itself receive an event
     %% published, even when subscribed to the Topic the Publisher is publishing
     %% to. This behavior can be overridden using this feature.
-    Exclusions = case maps:get(exclude_me, Opts, true) of
-        true ->
-            lists:append(
-                [
-                    %% We get the protocol (WAMP) session identifier from the
-                    %% session identifier
-                    bondy_session_id:to_external(S)
-                    || S <- [SessionId], S =/= undefined
-                ],
+    Exclusions =
+        case maps:get(exclude_me, Opts, true) of
+            true ->
+                lists:append(
+                    [
+                        %% We get the protocol (WAMP) session identifier from the
+                        %% session identifier
+                        bondy_session_id:to_external(S)
+                     || S <- [SessionId], S =/= undefined
+                    ],
+                    Exclusions0
+                );
+            false ->
                 Exclusions0
-            );
-        false ->
-            Exclusions0
-    end,
+        end,
 
     MatchOpts0 = #{exclude => Exclusions},
 
@@ -838,7 +789,6 @@ make_match_opts(SessionId, Opts) ->
         case maps:find(eligible, Opts) of
             error ->
                 MatchOpts0;
-
             {ok, L} when is_list(L) ->
                 Eligible = sets:subtract(
                     sets:from_list(L), sets:from_list(Exclusions)
@@ -851,11 +801,9 @@ make_match_opts(SessionId, Opts) ->
     of
         true ->
             MatchOpts1;
-
         false ->
             MatchOpts1#{match => ?EXACT_MATCH}
     end.
-
 
 %% @private
 make_event_details(TopicUri, Opts, Ctxt) ->
@@ -877,7 +825,6 @@ make_event_details(TopicUri, Opts, Ctxt) ->
             Details
     end.
 
-
 %% @private
 -doc """
 This is an optimization for sending an EVENT to N remote subscribers
@@ -885,11 +832,11 @@ that located at cluster peer nodes. Instead of generating the N different
 EVENT messages we send a single PUBLISH per node (the equivalent of the
 original PUBLISH message).
 """.
-forward_using_relay( _, _, []) ->
+forward_using_relay(_, _, []) ->
     ok;
-
-forward_using_relay(M, FwdOpts, NodeOrNodes)
-when is_atom(NodeOrNodes); is_list(NodeOrNodes)->
+forward_using_relay(M, FwdOpts, NodeOrNodes) when
+    is_atom(NodeOrNodes); is_list(NodeOrNodes)
+->
     %% We forward the publication to all Nodes.
     %% @TODO stop replicating individual remote subscribers and instead
     %% use a per node reference counter
@@ -912,7 +859,6 @@ when is_atom(NodeOrNodes); is_list(NodeOrNodes)->
     _ = bondy_relay:forward(NodeOrNodes, RelayMsg, RelayOpts),
     ok.
 
-
 %% @private
 -doc """
 This is an optimization for sending an EVENT to N local bridge relays
@@ -923,36 +869,26 @@ forward_using_bridge_relay(M, FwdOpts, RefOrRefs) ->
     RelayMsg = {forward, undefined, M, FwdOpts},
     ok = bondy_bridge_relay:forward(RefOrRefs, RelayMsg).
 
-
-
 %% @private
 fold_matches(?EOT, _Fun, Acc) ->
     Acc;
-
 fold_matches({{L, R}, Cont}, Fun, Acc0) when is_list(L), is_list(R) ->
     %% Match with a limit set
     %% We fold the nodes then the (local) entriss
     Acc = fold_matches(L, Fun, fold_matches(R, Fun, Acc0)),
     fold_matches(match_subscriptions(Cont), Fun, Acc);
-
 fold_matches({L, R}, Fun, Acc) when is_list(L), is_list(R) ->
     %% Match without a limit set
     %% We fold the nodes then the (local) entries
     fold_matches(L, Fun, fold_matches(R, Fun, Acc));
-
-fold_matches([H|T], Fun, Acc) ->
+fold_matches([H | T], Fun, Acc) ->
     fold_matches(T, Fun, Fun(H, Acc));
-
 fold_matches([], _Fun, Acc) ->
     Acc.
-
-
 
 %% =============================================================================
 %% PRIVATE: META EVENTS
 %% =============================================================================
-
-
 
 %% @private
 -spec on_create(bondy_registry_entry:t()) -> ok.
@@ -961,7 +897,6 @@ on_create(Entry) ->
     ok = maybe_send_retained(Entry),
     bondy_event_manager:notify({[bondy, broker, subscription, created], Entry}).
 
-
 %% @private
 -spec on_subscribe(bondy_registry_entry:t()) -> ok.
 
@@ -969,13 +904,11 @@ on_subscribe(Entry) ->
     ok = maybe_send_retained(Entry),
     bondy_event_manager:notify({[bondy, broker, subscription, added], Entry}).
 
-
 %% @private
 -spec on_unsubscribe(bondy_registry_entry:t()) -> ok.
 
 on_unsubscribe(Entry) ->
     bondy_event_manager:notify({[bondy, broker, subscription, removed], Entry}).
-
 
 %% @private
 -spec on_delete(bondy_registry_entry:t()) -> ok.
@@ -983,13 +916,9 @@ on_unsubscribe(Entry) ->
 on_delete(Entry) ->
     bondy_event_manager:notify({[bondy, broker, subscription, deleted], Entry}).
 
-
-
 %% =============================================================================
 %% PRIVATE: EVENT RETENTION
 %% =============================================================================
-
-
 
 %% @private
 maybe_retain(#{retain := true} = Opts, Realm, Topic, MatchOpts, MakeEvent) ->
@@ -1001,10 +930,8 @@ maybe_retain(#{retain := true} = Opts, Realm, Topic, MatchOpts, MakeEvent) ->
     Event = MakeEvent(0),
     TTL = maps:get('_retained_ttl', Opts, undefined),
     bondy_retained_message_manager:put(Realm, Topic, Event, MatchOpts, TTL);
-
 maybe_retain(_, _, _, _, _) ->
     ok.
-
 
 %% @private
 maybe_send_retained(Entry) ->
@@ -1014,7 +941,6 @@ maybe_send_retained(Entry) ->
         false ->
             ok
     end.
-
 
 %% @private
 send_retained(Entry) ->
@@ -1039,7 +965,6 @@ send_retained(Entry) ->
         end,
         Matches
     ).
-
 
 %% @private
 -spec apply_dynamic_callback(wamp_event(), bondy_ref:t(), [any()]) ->
@@ -1069,14 +994,10 @@ apply_dynamic_callback(#event{} = Msg, Subscriber, CBArgs) ->
             ok
     end.
 
-
 %% @private
 args_to_list(undefined) ->
     [];
-
 args_to_list(L) when is_list(L) ->
     L;
-
 args_to_list(M) when is_map(M) ->
     [M].
-

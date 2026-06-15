@@ -19,8 +19,6 @@ queue notification forwarding, and subprotocol validation.
 
 -compile([nowarn_export_all, export_all]).
 
-
-
 all() ->
     [
         subprotocol_validation,
@@ -34,15 +32,12 @@ all() ->
         send_unknown_transport
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 init_per_testcase(_TestCase, Config) ->
     bondy_config:set([transport_queue, max_messages], 1000),
@@ -51,17 +46,12 @@ init_per_testcase(_TestCase, Config) ->
     bondy_config:set([transport_queue, transport_ttl], 3600000),
     Config.
 
-
 end_per_testcase(_TestCase, _Config) ->
     ok.
-
-
 
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 subprotocol_validation(_Config) ->
     %% wamp.2.json.sse should be valid
@@ -81,7 +71,6 @@ subprotocol_validation(_Config) ->
         {error, invalid_subprotocol},
         bondy_wamp_protocol:validate_subprotocol(<<"wamp.2.msgpack.sse">>)
     ).
-
 
 encoding_roundtrip(_Config) ->
     %% Verify that the http_sse subprotocol can encode and decode WAMP messages
@@ -103,7 +92,6 @@ encoding_roundtrip(_Config) ->
         {http_sse, text, json}, Bin, [{partial_decode, false}]
     ),
     ?assertEqual(Msg, DecodedMsg).
-
 
 open_and_init_protocol(_Config) ->
     TransportId = make_transport_id(),
@@ -129,7 +117,6 @@ open_and_init_protocol(_Config) ->
 
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
-
 
 register_sse_stream(_Config) ->
     TransportId = make_transport_id(),
@@ -162,7 +149,6 @@ register_sse_stream(_Config) ->
 
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
-
 
 reply_buffering(_Config) ->
     TransportId = make_transport_id(),
@@ -222,7 +208,6 @@ reply_buffering(_Config) ->
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
-
 queue_notification_forwarding(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<>>,
@@ -256,7 +241,6 @@ queue_notification_forwarding(_Config) ->
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
-
 sse_stream_down_cleanup(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<>>,
@@ -268,7 +252,9 @@ sse_stream_down_cleanup(_Config) ->
 
     %% Spawn a fake SSE stream process and register it
     FakeSse = spawn_link(fun() ->
-        receive stop -> ok end
+        receive
+            stop -> ok
+        end
     end),
     ok = bondy_http_transport_session:register_sse_stream(Pid, FakeSse),
 
@@ -292,7 +278,6 @@ sse_stream_down_cleanup(_Config) ->
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
-
 close_transport(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<>>,
@@ -312,7 +297,6 @@ close_transport(_Config) ->
         bondy_http_transport_session:whereis(TransportId)
     ).
 
-
 send_unknown_transport(_Config) ->
     FakeTransportId = <<"nonexistent-transport-id">>,
 
@@ -328,19 +312,14 @@ send_unknown_transport(_Config) ->
         bondy_http_transport_session:notify_enqueue(FakeTransportId)
     ).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 make_transport_id() ->
     Bin = integer_to_binary(erlang:unique_integer([positive])),
     <<"test-sse-transport-", Bin/binary>>.
-
 
 %% @private
 make_event(N) ->

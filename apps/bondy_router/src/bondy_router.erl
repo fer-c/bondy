@@ -79,9 +79,7 @@ all interactions targeting a remote peer.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
-
--type event()       ::  {wamp_message(), bondy_context:t()}.
-
+-type event() :: {wamp_message(), bondy_context:t()}.
 
 %% API
 -export([agent/0]).
@@ -92,13 +90,9 @@ all interactions targeting a remote peer.
 -export([stop/0]).
 -export([pre_stop/0]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Returns the broker and dealer roles with their features.
@@ -111,14 +105,12 @@ roles() ->
         dealer => #{features => bondy_dealer:features()}
     }.
 
-
 -doc """
 Returns the Bondy agent identification string.
 """.
 agent() ->
     Vsn = list_to_binary(bondy_app:vsn()),
     <<"LEAPSIGHT-BONDY-", Vsn/binary>>.
-
 
 -doc """
 Forwards a WAMP message to the Dealer or Broker based on message type.
@@ -136,14 +128,14 @@ originate from WAMP peers connected to this Bondy node.
     | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
 forward(
-    #call{procedure_uri = <<"wamp.", _/binary>>} = M, #{session := _} = Ctxt) ->
+    #call{procedure_uri = <<"wamp.", _/binary>>} = M, #{session := _} = Ctxt
+) ->
     async_forward(M, Ctxt);
-
 forward(
     #call{procedure_uri = <<"bondy.", _/binary>>} = M,
-    #{session := _} = Ctxt) ->
+    #{session := _} = Ctxt
+) ->
     async_forward(M, Ctxt);
-
 forward(#call{} = M, #{session := _} = Ctxt0) ->
     %% This is a sync call as it is an easy way to guarantee ordering of
     %% invocations between any given pair of Caller and Callee as
@@ -159,10 +151,9 @@ forward(#call{} = M, #{session := _} = Ctxt0) ->
     %% The invocation is always async and the result or error will be delivered
     %% asynchronously by the dealer.
     {ok, Ctxt0};
-
-
-forward(M, #{session := _} = Ctxt)
-when is_record(M, subscribe) orelse is_record(M, unsubscribe) ->
+forward(M, #{session := _} = Ctxt) when
+    is_record(M, subscribe) orelse is_record(M, unsubscribe)
+->
     %% This is a sync request as clients can subscribe multiple times
     %% concurrently. This is beczuse matching and adding to the registry is not
     %% done atomically: bondy_registry:add uses art_server:match/2 to
@@ -176,9 +167,9 @@ when is_record(M, subscribe) orelse is_record(M, unsubscribe) ->
     %% a pool of register servers to block.
     ok = sync_forward({M, Ctxt}),
     {ok, Ctxt};
-
-forward(M, #{session := _} = Ctxt)
-when is_record(M, register) orelse is_record(M, unregister) ->
+forward(M, #{session := _} = Ctxt) when
+    is_record(M, register) orelse is_record(M, unregister)
+->
     %% This is a sync call as it is an easy way to preserve RPC ordering as
     %% defined by RFC 11.2:
     %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
@@ -194,11 +185,8 @@ when is_record(M, register) orelse is_record(M, unregister) ->
     %% messages between two processes even when in different nodes.
     ok = sync_forward({M, Ctxt}),
     {ok, Ctxt};
-
 forward(M, #{session := _} = Ctxt) ->
     async_forward(M, Ctxt).
-
-
 
 -doc """
 This function is called by `bondy_relay` for messages
@@ -241,7 +229,6 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
             end
     end.
 
-
 -doc """
 Sends a GOODBYE message to all existing client connections.
 The client should reply with another GOODBYE within the configured time and
@@ -268,7 +255,6 @@ pre_stop() ->
                     }),
                     []
             end;
-
         ({RealmUri, Ref}) ->
             catch bondy:send(RealmUri, Ref, M),
             ok
@@ -278,10 +264,8 @@ pre_stop() ->
     Opts = #{limit => 100, return => ref},
     bondy_utils:foreach(Fun, bondy_session:list(Opts)).
 
-
 stop() ->
     ok.
-
 
 -doc """
 Removes all subscriptions, registrations and all the pending items in
@@ -294,23 +278,17 @@ flush(RealmUri, Ref) ->
     ok = bondy_dealer:flush(RealmUri, Ref),
     bondy_broker:flush(RealmUri, Ref).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 -spec acknowledge_message(map()) -> boolean().
 
 acknowledge_message(#publish{options = Opts}) ->
     maps:get(acknowledge, Opts, false);
-
 acknowledge_message(_) ->
     false.
-
 
 %% @private
 async_forward(M, Ctxt0) ->
@@ -342,7 +320,6 @@ async_forward(M, Ctxt0) ->
     try bondy_router_worker:cast(Fun) of
         ok ->
             {ok, Ctxt0};
-
         {error, overload} ->
             ?LOG_WARNING(#{
                 description =>
@@ -353,7 +330,6 @@ async_forward(M, Ctxt0) ->
             %% We do it synchronously i.e. blocking the caller
             ok = sync_forward(Event),
             {ok, Ctxt0}
-
     catch
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
@@ -367,7 +343,6 @@ async_forward(M, Ctxt0) ->
                 #{error => ErrorMap}
             ),
             {reply, Reply, Ctxt0};
-
         Class:Reason:Stacktrace ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
             SessionId = bondy_context:session_id(Ctxt0),
@@ -387,7 +362,6 @@ async_forward(M, Ctxt0) ->
             {ok, Ctxt0}
     end.
 
-
 %% @private
 -doc """
 Synchronously forwards a message in the calling process.
@@ -399,36 +373,26 @@ This function is called by `async_forward/2`.
 
 sync_forward({#subscribe{} = M, Ctxt}) ->
     bondy_broker:forward(M, Ctxt);
-
 sync_forward({#unsubscribe{} = M, Ctxt}) ->
     bondy_broker:forward(M, Ctxt);
-
 sync_forward({#publish{} = M, Ctxt}) ->
     bondy_broker:forward(M, Ctxt);
-
 sync_forward({#register{} = M, Ctxt}) ->
     bondy_dealer:forward(M, Ctxt);
-
 sync_forward({#unregister{} = M, Ctxt}) ->
     bondy_dealer:forward(M, Ctxt);
-
 sync_forward({#call{} = M, Ctxt}) ->
     bondy_dealer:forward(M, Ctxt);
-
 sync_forward({#cancel{} = M, Ctxt}) ->
     bondy_dealer:forward(M, Ctxt);
-
 sync_forward({#yield{} = M, Ctxt}) ->
     bondy_dealer:forward(M, Ctxt);
-
-sync_forward({#error{request_type = Type} = M, Ctxt})
-when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
+sync_forward({#error{request_type = Type} = M, Ctxt}) when
+    Type == ?INVOCATION orelse Type == ?INTERRUPT
+->
     bondy_dealer:forward(M, Ctxt);
-
 sync_forward({M, _Ctxt}) ->
     error({unexpected_message, M}).
-
-
 
 %% @private
 -doc """
@@ -445,16 +409,12 @@ on the publisher's node.
 """.
 do_forward(#publish{} = M, To, Opts) ->
     bondy_broker:forward(M, To, Opts);
-
 do_forward(#call{} = M, To, Opts) ->
     bondy_dealer:forward(M, To, Opts);
-
 do_forward(#cancel{} = M, To, Opts) ->
     bondy_dealer:forward(M, To, Opts);
-
 do_forward(#result{} = M, To, Opts) ->
     bondy_dealer:forward(M, To, Opts);
-
 do_forward(#error{} = M, To, Opts) ->
     %% This is a CALL, INVOCATION or INTERRUPT error
     bondy_dealer:forward(M, To, Opts).

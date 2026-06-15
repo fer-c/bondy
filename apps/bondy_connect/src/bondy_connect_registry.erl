@@ -23,20 +23,20 @@ instance in its `gen_statem` data.
 """.
 
 -record(registry, {
-    decl_regs = #{}     ::  #{uri() => entry()},
-    decl_subs = #{}     ::  #{uri() => entry()},
-    regs = #{}          ::  #{id() => established()},
-    subs = #{}          ::  #{id() => established()},
-    reg_uri = #{}       ::  #{uri() => id()},
-    sub_uri = #{}       ::  #{uri() => id()}
+    decl_regs = #{} :: #{uri() => entry()},
+    decl_subs = #{} :: #{uri() => entry()},
+    regs = #{} :: #{id() => established()},
+    subs = #{} :: #{id() => established()},
+    reg_uri = #{} :: #{uri() => id()},
+    sub_uri = #{} :: #{uri() => id()}
 }).
 
--type uri()         ::  binary().
--type id()          ::  integer().
--type handler()     ::  term().
--type entry()       ::  #{handler := handler(), options := map()}.
--type established() ::  #{uri := uri(), handler := handler(), options := map()}.
--type t()           ::  #registry{}.
+-type uri() :: binary().
+-type id() :: integer().
+-type handler() :: term().
+-type entry() :: #{handler := handler(), options := map()}.
+-type established() :: #{uri := uri(), handler := handler(), options := map()}.
+-type t() :: #registry{}.
 
 -export_type([t/0]).
 
@@ -57,31 +57,24 @@ instance in its `gen_statem` data.
 -export([declared_subscriptions/1]).
 -export([clear_established/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "An empty registry.".
 -spec new() -> t().
 new() ->
     #registry{}.
 
-
 -doc "Record the *desired* registration of `Uri` (before the router confirms).".
 -spec declare_registration(uri(), handler(), map(), t()) -> t().
 declare_registration(Uri, Handler, Opts, #registry{decl_regs = D} = R) ->
     R#registry{decl_regs = maps:put(Uri, entry(Handler, Opts), D)}.
 
-
 -doc "Record the *desired* subscription of `Uri` (before the router confirms).".
 -spec declare_subscription(uri(), handler(), map(), t()) -> t().
 declare_subscription(Uri, Handler, Opts, #registry{decl_subs = D} = R) ->
     R#registry{decl_subs = maps:put(Uri, entry(Handler, Opts), D)}.
-
 
 -doc """
 Link the router-assigned `RegId` to the declared registration for `Uri`,
@@ -100,7 +93,6 @@ confirm_registration(Uri, RegId, #registry{decl_regs = D} = R) ->
             R
     end.
 
-
 -doc "As `confirm_registration/3`, for a subscription.".
 -spec confirm_subscription(uri(), id(), t()) -> t().
 confirm_subscription(Uri, SubId, #registry{decl_subs = D} = R) ->
@@ -115,30 +107,25 @@ confirm_subscription(Uri, SubId, #registry{decl_subs = D} = R) ->
             R
     end.
 
-
 -doc "Look up an established registration by its id (for `INVOCATION` routing).".
 -spec registration(id(), t()) -> {ok, established()} | error.
 registration(RegId, #registry{regs = Regs}) ->
     maps:find(RegId, Regs).
-
 
 -doc "Look up an established subscription by its id (for `EVENT` routing).".
 -spec subscription(id(), t()) -> {ok, established()} | error.
 subscription(SubId, #registry{subs = Subs}) ->
     maps:find(SubId, Subs).
 
-
 -doc "Resolve a procedure URI to its established registration id.".
 -spec registration_id(uri(), t()) -> {ok, id()} | error.
 registration_id(Uri, #registry{reg_uri = Index}) ->
     maps:find(Uri, Index).
 
-
 -doc "Resolve a topic URI to its established subscription id.".
 -spec subscription_id(uri(), t()) -> {ok, id()} | error.
 subscription_id(Uri, #registry{sub_uri = Index}) ->
     maps:find(Uri, Index).
-
 
 -doc """
 Drop the *established* state of a registration by its server-assigned id,
@@ -162,7 +149,6 @@ forget_registration(RegId, #registry{regs = Regs} = R) ->
             R
     end.
 
-
 -doc """
 As `forget_registration/2` (established-only), for a subscription. For a
 router-driven `subscription_revocation` whose effect is session-scoped.
@@ -178,7 +164,6 @@ forget_subscription(SubId, #registry{subs = Subs} = R) ->
         error ->
             R
     end.
-
 
 -doc """
 Drop a registration entirely — both the *declared* (desired) entry and the
@@ -201,7 +186,6 @@ undeclare_registration(RegId, #registry{regs = Regs} = R) ->
             R
     end.
 
-
 -doc "As `undeclare_registration/2` (declared + established), for a subscription.".
 -spec undeclare_subscription(id(), t()) -> t().
 undeclare_subscription(SubId, #registry{subs = Subs} = R) ->
@@ -216,18 +200,15 @@ undeclare_subscription(SubId, #registry{subs = Subs} = R) ->
             R
     end.
 
-
 -doc "The declared registrations as `{Uri, Handler, Options}` (for replay).".
 -spec declared_registrations(t()) -> [{uri(), handler(), map()}].
 declared_registrations(#registry{decl_regs = D}) ->
     declared(D).
 
-
 -doc "The declared subscriptions as `{Uri, Handler, Options}` (for replay).".
 -spec declared_subscriptions(t()) -> [{uri(), handler(), map()}].
 declared_subscriptions(#registry{decl_subs = D}) ->
     declared(D).
-
 
 -doc """
 Drop all *established* state (the router-assigned ids), keeping the *declared*
@@ -238,18 +219,13 @@ registrations/subscriptions against fresh server-assigned ids.
 clear_established(#registry{} = R) ->
     R#registry{regs = #{}, subs = #{}, reg_uri = #{}, sub_uri = #{}}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 entry(Handler, Opts) ->
     #{handler => Handler, options => Opts}.
-
 
 %% @private
 declared(Map) ->

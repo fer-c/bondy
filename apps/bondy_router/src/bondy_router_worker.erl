@@ -19,10 +19,9 @@ asynchronously with load regulation.
 -define(POOL_NAME, router_pool).
 
 -record(state, {
-    pool_type                   ::  permanent | transient,
-    op                          ::  function()
+    pool_type :: permanent | transient,
+    op :: function()
 }).
-
 
 %% API
 -export([start_pool/0]).
@@ -37,13 +36,9 @@ asynchronously with load regulation.
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc """
 Starts a sidejob pool of workers according to the configuration
@@ -60,7 +55,6 @@ start_pool() ->
         {error, Reason} -> error(Reason)
     end.
 
-
 cast(Fun) when is_function(Fun, 0) ->
     Opts = bondy_config:get(router_pool),
     PoolType = key_value:get(type, Opts, transient),
@@ -68,39 +62,30 @@ cast(Fun) when is_function(Fun, 0) ->
     case do_cast(PoolType, router_pool, Fun) of
         ok ->
             ok;
-
         {ok, _} ->
             ok;
-
         {error, overload} = Error ->
             Error
     end.
 
-
-
 %% =============================================================================
 %% API : GEN_SERVER CALLBACKS FOR SIDEJOB WORKER
 %% =============================================================================
-
-
 
 init([?POOL_NAME]) ->
     %% We've been called by sidejob_worker
     %% We will be called via a a cast (handle_cast/2)
     %% TODO publish metaevent and stats
     {ok, #state{pool_type = permanent}};
-
 init([Fun]) ->
     %% We've been called by sidejob_supervisor
     State = #state{pool_type = transient},
     {ok, State, {continue, {apply, Fun}}}.
 
-
 handle_continue({apply, Fun}, State) ->
     %% We apply and terminate as this is a transient worker.
     _ = Fun(),
     {stop, normal, State}.
-
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -109,7 +94,6 @@ handle_call(Event, From, State) ->
         from => From
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
-
 
 handle_cast(Fun, State) when is_function(Fun, 0) ->
     try
@@ -127,14 +111,12 @@ handle_cast(Fun, State) when is_function(Fun, 0) ->
         %% We cleanup, liberating the Fun from having to try..catch and do it
         bondy:unset_process_metadata()
     end;
-
 handle_cast(Event, State) ->
     ?LOG_DEBUG(#{
         reason => unsupported_event,
         event => Event
     }),
     {noreply, State}.
-
 
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
@@ -143,31 +125,22 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(normal, _State) ->
     ok;
-
 terminate(shutdown, _State) ->
     ok;
-
 terminate({shutdown, _}, _State) ->
     ok;
-
 terminate(_Reason, _State) ->
     %% TODO publish metaevent
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 -doc """
@@ -183,12 +156,10 @@ do_start_pool() ->
         permanent ->
             Mod = ?MODULE,
             sidejob:new_resource(?POOL_NAME, Mod, Capacity, Size);
-
         transient ->
             Mod = sidejob_supervisor,
             sidejob:new_resource(?POOL_NAME, Mod, Capacity, Size)
     end.
-
 
 %% @private
 -doc """
@@ -203,7 +174,6 @@ do_cast(permanent, PoolName, Fun) ->
         overload ->
             {error, overload}
     end;
-
 do_cast(transient, PoolName, Fun) ->
     Opts = [
         {spawn_opt, [

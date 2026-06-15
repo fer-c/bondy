@@ -31,12 +31,13 @@ The module is split in three concerns:
 * [WAMP Cryptosign](https://wamp-proto.org/wamp_latest_ietf.html#name-cryptosign-based-authenticat)
 """.
 
--type key_pair()        ::  #{public := binary(), secret := binary()}.
--type signer()          ::  fun((Message :: binary()) -> HexSignature :: binary()).
--type signer_config()   ::  #{privkey := binary()}
-                            | #{privkey_env_var := string() | binary()}
-                            | #{exec := file:filename_all()}
-                            | #{procedure := binary()}.
+-type key_pair() :: #{public := binary(), secret := binary()}.
+-type signer() :: fun((Message :: binary()) -> HexSignature :: binary()).
+-type signer_config() ::
+    #{privkey := binary()}
+    | #{privkey_env_var := string() | binary()}
+    | #{exec := file:filename_all()}
+    | #{procedure := binary()}.
 
 -export_type([key_pair/0]).
 -export_type([signer/0]).
@@ -61,13 +62,9 @@ The module is split in three concerns:
 
 -define(EXEC_TIMEOUT, 10000).
 
-
-
 %% =============================================================================
 %% API: CRYPTO
 %% =============================================================================
-
-
 
 -doc "Generates a fresh Ed25519 key pair (32-byte public key, 32-byte seed).".
 -spec generate_key() -> key_pair().
@@ -75,7 +72,6 @@ The module is split in three concerns:
 generate_key() ->
     {Pub, Priv} = crypto:generate_key(eddsa, ed25519),
     #{public => Pub, secret => Priv}.
-
 
 -doc """
 Signs `Challenge` with the Ed25519 `secret` of `KeyPair`, returning the raw
@@ -85,11 +81,11 @@ Signs `Challenge` with the Ed25519 `secret` of `KeyPair`, returning the raw
 `key_pair/1,2`); pass a 32- or 64-byte secret through `key_pair/1` first to
 normalise it.
 """.
--spec sign(Challenge :: binary(), KeyPair :: key_pair()) -> Signature :: binary().
+-spec sign(Challenge :: binary(), KeyPair :: key_pair()) ->
+    Signature :: binary().
 
 sign(Challenge, #{public := Pub, secret := Priv}) ->
     public_key:sign(Challenge, ignored, {ed_pri, ed25519, Pub, Priv}, []).
-
 
 -doc """
 Verifies that `Signature` is a valid Ed25519 signature of `Challenge` for
@@ -100,7 +96,8 @@ Verifies that `Signature` is a valid Ed25519 signature of `Challenge` for
 clients) are accepted.
 """.
 -spec verify(
-    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()) ->
+    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()
+) ->
     boolean() | no_return().
 
 verify(Signature, Challenge, PublicKey) ->
@@ -108,7 +105,6 @@ verify(Signature, Challenge, PublicKey) ->
     public_key:verify(
         Challenge, ignored, Normalised, {ed_pub, ed25519, PublicKey}
     ).
-
 
 -doc """
 Normalises a cryptosign signature.
@@ -123,7 +119,6 @@ As the cryptosign spec is not formal, some clients (e.g. Python) return
 
 normalise_signature(Signature, _) when byte_size(Signature) == 64 ->
     Signature;
-
 normalise_signature(Signature, Challenge) when byte_size(Signature) == 96 ->
     case binary:match(Signature, Challenge) of
         {64, 32} ->
@@ -131,10 +126,8 @@ normalise_signature(Signature, Challenge) when byte_size(Signature) == 96 ->
         _ ->
             error(invalid_signature)
     end;
-
 normalise_signature(_, _) ->
     error(invalid_signature).
-
 
 -doc "Calls `strong_rand_bytes/1` with the default length of `32`.".
 -spec strong_rand_bytes() -> binary().
@@ -142,20 +135,15 @@ normalise_signature(_, _) ->
 strong_rand_bytes() ->
     strong_rand_bytes(32).
 
-
 -doc "Returns `Length` cryptographically strong random bytes.".
 -spec strong_rand_bytes(Length :: non_neg_integer()) -> binary().
 
 strong_rand_bytes(Length) when is_integer(Length) andalso Length >= 0 ->
     crypto:strong_rand_bytes(Length).
 
-
-
 %% =============================================================================
 %% API: HEX
 %% =============================================================================
-
-
 
 -doc """
 Encodes `Bin` as an **uppercase** hex binary.
@@ -167,7 +155,6 @@ signatures.
 
 encode_hex(Bin) when is_binary(Bin) ->
     binary:encode_hex(Bin).
-
 
 -doc """
 Decodes a hex string (upper- or lower-case) into a binary.
@@ -184,24 +171,18 @@ decode_hex(Hex) when is_binary(Hex) ->
         error:badarg ->
             error(invalid_hex_encoding)
     end;
-
 decode_hex(Hex) when is_list(Hex) ->
     decode_hex(list_to_binary(Hex)).
-
-
 
 %% =============================================================================
 %% API: CLIENT SIGNER SOURCES
 %% =============================================================================
-
-
 
 -doc "Equivalent to `key_pair(Secret, undefined)`.".
 -spec key_pair(Secret :: binary()) -> key_pair() | no_return().
 
 key_pair(Secret) ->
     key_pair(Secret, undefined).
-
 
 -doc """
 Normalises an Ed25519 secret into a `t:key_pair/0` usable by `sign/2`.
@@ -221,7 +202,6 @@ explicitly supplied `Public` takes precedence.
 key_pair(Secret, Public) when is_binary(Secret) ->
     {Seed, EmbeddedPub} = split_secret(Secret),
     #{public => resolve_public(Public, EmbeddedPub, Seed), secret => Seed}.
-
 
 -doc """
 Builds a signing function from a declarative `t:signer_config/0`.
@@ -249,7 +229,6 @@ Sources:
 
 signer(_, #{procedure := _}) ->
     error(not_implemented);
-
 signer(PubKey, #{exec := Filename}) ->
     SignerFun = fun(Message) ->
         exec_sign(Filename, PubKey, Message)
@@ -262,13 +241,11 @@ signer(PubKey, #{exec := Filename}) ->
         error:Reason ->
             error(Reason)
     end;
-
 signer(PubKey, #{privkey := HexString}) ->
     KeyPair = key_pair(decode_hex(HexString), PubKey),
     fun(Message) ->
         encode_hex(sign(Message, KeyPair))
     end;
-
 signer(PubKey, #{privkey_env_var := Var}) ->
     case os:getenv(ensure_list(Var)) of
         false ->
@@ -279,57 +256,48 @@ signer(PubKey, #{privkey_env_var := Var}) ->
                 encode_hex(sign(Message, KeyPair))
             end
     end;
-
 signer(_, Config) ->
     error({invalid_cryptosign_config, Config}).
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
--spec split_secret(binary()) -> {Seed :: binary(), Public :: binary() | undefined}.
+-spec split_secret(binary()) ->
+    {Seed :: binary(), Public :: binary() | undefined}.
 
 split_secret(Secret) when byte_size(Secret) == 32 ->
     {Secret, undefined};
-
 split_secret(Secret) when byte_size(Secret) == 64 ->
     <<Seed:32/binary, Public:32/binary>> = Secret,
     {Seed, Public};
-
 split_secret(_) ->
     error(invalid_secret_key).
-
 
 %% @private
 -spec resolve_public(
     Supplied :: binary() | undefined,
     Embedded :: binary() | undefined,
-    Seed :: binary()) -> binary() | no_return().
+    Seed :: binary()
+) -> binary() | no_return().
 
 resolve_public(Public, _, _) when is_binary(Public), byte_size(Public) == 32 ->
     Public;
-
 resolve_public(undefined, Public, _) when is_binary(Public) ->
     Public;
-
 resolve_public(undefined, undefined, Seed) ->
     {Public, Seed} = crypto:generate_key(eddsa, ed25519, Seed),
     Public;
-
 resolve_public(_, _, _) ->
     error(invalid_public_key).
-
 
 %% @private
 -spec exec_sign(
     Filename :: file:filename_all(),
     PubKey :: binary() | undefined,
-    Message :: binary()) -> binary() | no_return().
+    Message :: binary()
+) -> binary() | no_return().
 
 exec_sign(Filename, PubKey, Message) ->
     Args = [encode_hex_arg(PubKey), encode_hex(Message)],
@@ -343,7 +311,6 @@ exec_sign(Filename, PubKey, Message) ->
             error({invalid_executable, Reason})
     end.
 
-
 %% @private
 exec_receive(Port, Acc) ->
     receive
@@ -354,24 +321,19 @@ exec_receive(Port, Acc) ->
         {Port, {exit_status, Status}} ->
             catch erlang:port_close(Port),
             error({cryptosign_exit_status, Status})
-    after
-        ?EXEC_TIMEOUT ->
-            catch erlang:port_close(Port),
-            error(cryptosign_timeout)
+    after ?EXEC_TIMEOUT ->
+        catch erlang:port_close(Port),
+        error(cryptosign_timeout)
     end.
-
 
 %% @private
 encode_hex_arg(undefined) ->
     <<>>;
-
 encode_hex_arg(Bin) when is_binary(Bin) ->
     encode_hex(Bin).
-
 
 %% @private
 ensure_list(Var) when is_list(Var) ->
     Var;
-
 ensure_list(Var) when is_binary(Var) ->
     binary_to_list(Var).

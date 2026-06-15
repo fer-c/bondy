@@ -26,7 +26,6 @@ so the module is reusable. The Bondy registry uses it via
 under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
 """.
 
-
 %% =============================================================================
 %% MACROS AND RECORDS
 %% =============================================================================
@@ -58,40 +57,39 @@ under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
 -define(WILDCARD_BYTE, 0).
 -define(IS_POLICY(P), (P =:= exact orelse P =:= prefix orelse P =:= wildcard)).
 
-
 -record(pnode, {
-    id          ::  node_id(),
-    prefix      ::  binary(),
-    children    ::  children(),
-    leaves      ::  #{policy() => value()}
+    id :: node_id(),
+    prefix :: binary(),
+    children :: children(),
+    leaves :: #{policy() => value()}
 }).
-
 
 -record(handle, {
-    root_tab        ::  ets:tab(),
-    node_tab        ::  ets:tab(),
-    retire_tab      ::  ets:tab(),
-    epoch_tab       ::  ets:tab(),
-    current_epoch   ::  atomics:atomics_ref(),
-    name            ::  atom()
+    root_tab :: ets:tab(),
+    node_tab :: ets:tab(),
+    retire_tab :: ets:tab(),
+    epoch_tab :: ets:tab(),
+    current_epoch :: atomics:atomics_ref(),
+    name :: atom()
 }).
-
 
 %% =============================================================================
 %% TYPES
 %% =============================================================================
 
--type node_id()     ::  pos_integer().
--type key()         ::  binary().
--type value()       ::  term().
--type policy()      ::  exact | prefix | wildcard.
--type leaf()        ::  {key(), policy(), value()}.
--type update_fun()  ::  fun((undefined | value()) ->
-                             {ok, value()} | delete | noop).
--type update_result() :: ok
-                       | deleted
-                       | noop
-                       | {error, cas_exhausted}.
+-type node_id() :: pos_integer().
+-type key() :: binary().
+-type value() :: term().
+-type policy() :: exact | prefix | wildcard.
+-type leaf() :: {key(), policy(), value()}.
+-type update_fun() :: fun(
+    (undefined | value()) -> {ok, value()} | delete | noop
+).
+-type update_result() ::
+    ok
+    | deleted
+    | noop
+    | {error, cas_exhausted}.
 
 %% Adaptive child-container shapes. Path copying allocates a
 %% fresh node on every mutation, so "adaptive sizing" collapses to:
@@ -108,11 +106,12 @@ under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
 %% A future optimization (PART's n48) inserts a 256-byte index table +
 %% 48-slot child array between these two to save memory on medium-wide
 %% nodes. Skipped here for simplicity.
--type child_ptr()   ::  {node, node_id()}.
--type children()    ::  {n_small, #{byte() => child_ptr()}}
-                      | {n256,    tuple()}.
+-type child_ptr() :: {node, node_id()}.
+-type children() ::
+    {n_small, #{byte() => child_ptr()}}
+    | {n256, tuple()}.
 
--opaque handle()    ::  #handle{}.
+-opaque handle() :: #handle{}.
 
 -export_type([handle/0]).
 -export_type([key/0]).
@@ -122,7 +121,6 @@ under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
 -export_type([node_id/0]).
 -export_type([update_fun/0]).
 -export_type([update_result/0]).
-
 
 %% =============================================================================
 %% EXPORTS
@@ -164,11 +162,9 @@ under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
 -export([epoch_tab_count/1]).
 -endif.
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc """
 Create a new ptrie handle identified by `Name`. The atom is used to name
@@ -184,29 +180,45 @@ terminates. Use `delete/1` to release them earlier.
 new(Name) when is_atom(Name) ->
     RootTab = ets:new(
         list_to_atom(atom_to_list(Name) ++ "_root"),
-        [set, public, {keypos, 1},
-         {read_concurrency, true},
-         {write_concurrency, true},
-         {decentralized_counters, true}]
+        [
+            set,
+            public,
+            {keypos, 1},
+            {read_concurrency, true},
+            {write_concurrency, true},
+            {decentralized_counters, true}
+        ]
     ),
     NodeTab = ets:new(
         list_to_atom(atom_to_list(Name) ++ "_nodes"),
-        [set, public, {keypos, #pnode.id},
-         {read_concurrency, true},
-         {write_concurrency, true},
-         {decentralized_counters, true}]
+        [
+            set,
+            public,
+            {keypos, #pnode.id},
+            {read_concurrency, true},
+            {write_concurrency, true},
+            {decentralized_counters, true}
+        ]
     ),
     RetireTab = ets:new(
         list_to_atom(atom_to_list(Name) ++ "_retire"),
-        [ordered_set, public, {keypos, 1},
-         {read_concurrency, true},
-         {write_concurrency, true}]
+        [
+            ordered_set,
+            public,
+            {keypos, 1},
+            {read_concurrency, true},
+            {write_concurrency, true}
+        ]
     ),
     EpochTab = ets:new(
         list_to_atom(atom_to_list(Name) ++ "_epochs"),
-        [set, public, {keypos, 1},
-         {read_concurrency, true},
-         {write_concurrency, true}]
+        [
+            set,
+            public,
+            {keypos, 1},
+            {read_concurrency, true},
+            {write_concurrency, true}
+        ]
     ),
     %% Single-slot monotonic counter. `add_get` on slot 1 is our epoch bump.
     CurrentEpoch = atomics:new(1, [{signed, false}]),
@@ -221,20 +233,22 @@ new(Name) when is_atom(Name) ->
     init_root(H),
     H.
 
-
 -doc """
 Delete the handle's ETS tables. Frees all storage.
 """.
 -spec delete(Handle :: handle()) -> ok.
 
-delete(#handle{root_tab = R, node_tab = N, retire_tab = Rt,
-               epoch_tab = E}) ->
+delete(#handle{
+    root_tab = R,
+    node_tab = N,
+    retire_tab = Rt,
+    epoch_tab = E
+}) ->
     ets:delete(R),
     ets:delete(N),
     ets:delete(Rt),
     ets:delete(E),
     ok.
-
 
 -doc """
 Insert `{Key, exact, Value}`. Convenience shim — equivalent to
@@ -245,7 +259,6 @@ Insert `{Key, exact, Value}`. Convenience shim — equivalent to
 
 insert(H, Key, Value) ->
     insert(H, Key, exact, Value).
-
 
 -doc """
 Insert `{Key, Policy, Value}` into the trie. If a leaf with the same
@@ -271,11 +284,14 @@ attempts are deleted before the retry.
     Value :: value()
 ) -> ok | {error, cas_exhausted}.
 
-insert(#handle{} = H, Key, Policy, Value)
-    when is_binary(Key) andalso ?IS_POLICY(Policy) ->
-    do_write(H, fun(Root) -> walk_insert(H, Root, Key, 0, Policy, Value) end,
-             ?DEFAULT_CAS_RETRIES).
-
+insert(#handle{} = H, Key, Policy, Value) when
+    is_binary(Key) andalso ?IS_POLICY(Policy)
+->
+    do_write(
+        H,
+        fun(Root) -> walk_insert(H, Root, Key, 0, Policy, Value) end,
+        ?DEFAULT_CAS_RETRIES
+    ).
 
 -doc """
 Remove the leaf with `{Key, exact}`. Shim — equivalent to
@@ -287,7 +303,6 @@ Remove the leaf with `{Key, exact}`. Shim — equivalent to
 remove(H, Key) ->
     remove(H, Key, exact).
 
-
 -doc """
 Remove the leaf with `{Key, Policy}`. Returns `ok` whether or not the
 leaf existed.
@@ -295,11 +310,14 @@ leaf existed.
 -spec remove(Handle :: handle(), Key :: key(), Policy :: policy()) ->
     ok | {error, cas_exhausted}.
 
-remove(#handle{} = H, Key, Policy)
-    when is_binary(Key) andalso ?IS_POLICY(Policy) ->
-    do_write(H, fun(Root) -> walk_remove(H, Root, Key, 0, Policy) end,
-             ?DEFAULT_CAS_RETRIES).
-
+remove(#handle{} = H, Key, Policy) when
+    is_binary(Key) andalso ?IS_POLICY(Policy)
+->
+    do_write(
+        H,
+        fun(Root) -> walk_remove(H, Root, Key, 0, Policy) end,
+        ?DEFAULT_CAS_RETRIES
+    ).
 
 -doc """
 Atomically read-modify-write the leaf at `{Key, Policy}`.
@@ -322,17 +340,17 @@ re-reads the current value before re-deciding. The function must be
 idempotent / safe under repeated calls.
 """.
 -spec update(
-    Handle    :: handle(),
-    Key       :: key(),
-    Policy    :: policy(),
+    Handle :: handle(),
+    Key :: key(),
+    Policy :: policy(),
     UpdateFun :: update_fun()
 ) -> update_result().
 
-update(#handle{} = H, Key, Policy, UpdateFun)
-    when is_binary(Key) andalso ?IS_POLICY(Policy)
-    andalso is_function(UpdateFun, 1) ->
+update(#handle{} = H, Key, Policy, UpdateFun) when
+    is_binary(Key) andalso ?IS_POLICY(Policy) andalso
+        is_function(UpdateFun, 1)
+->
     do_update(H, Key, Policy, UpdateFun, ?DEFAULT_CAS_RETRIES).
-
 
 -doc """
 Lookup the value for `Key`. Returns `{ok, Value}` if present, `error`
@@ -344,7 +362,6 @@ otherwise. This is the reader path and takes no locks.
 lookup(H, Key) ->
     lookup(H, Key, exact).
 
-
 -doc """
 Lookup the value for `{Key, Policy}`. Returns `{ok, Value}` if the leaf
 exists, `error` otherwise. This does NOT do wildcard-style matching — use
@@ -353,8 +370,9 @@ exists, `error` otherwise. This does NOT do wildcard-style matching — use
 -spec lookup(Handle :: handle(), Key :: key(), Policy :: policy()) ->
     {ok, value()} | error.
 
-lookup(#handle{} = H, Key, Policy)
-    when is_binary(Key) andalso ?IS_POLICY(Policy) ->
+lookup(#handle{} = H, Key, Policy) when
+    is_binary(Key) andalso ?IS_POLICY(Policy)
+->
     with_epoch(H, fun() ->
         {RootId, _V} = read_root(H),
         case ets:lookup(H#handle.node_tab, RootId) of
@@ -362,7 +380,6 @@ lookup(#handle{} = H, Key, Policy)
             [Root] -> walk_lookup(H#handle.node_tab, Root, Key, 0, Policy)
         end
     end).
-
 
 -doc """
 Match `Target` against all leaves in the trie. Returns every leaf whose
@@ -388,11 +405,9 @@ match(#handle{} = H, Target) when is_binary(Target) ->
         {RootId, _V} = read_root(H),
         case ets:lookup(H#handle.node_tab, RootId) of
             [] -> [];
-            [Root] ->
-                match_walk(H#handle.node_tab, Root, Target, [], [])
+            [Root] -> match_walk(H#handle.node_tab, Root, Target, [], [])
         end
     end).
-
 
 -doc """
 Fold `Fun(Key, Value, Acc)` over all `{Key, Value}` pairs in insertion order
@@ -413,7 +428,6 @@ fold(#handle{} = H, Fun, Acc0) when is_function(Fun, 3) ->
         end
     end).
 
-
 -doc """
 Number of leaves in the trie. O(trie) — counts via fold. Each
 `{Key, Policy}` pair is counted separately even when the keys are
@@ -423,7 +437,6 @@ identical.
 
 size(#handle{} = H) ->
     fold(H, fun(_, _, N) -> N + 1 end, 0).
-
 
 -doc """
 Atomically replace the trie with a fresh, empty one. All old nodes become
@@ -435,9 +448,11 @@ Concurrent-safe: uses CAS on the root row, same protocol as insert/delete.
 -spec truncate(Handle :: handle()) -> ok | {error, cas_exhausted}.
 
 truncate(#handle{} = H) ->
-    do_write(H, fun(OldRoot) -> walk_truncate(H, OldRoot) end,
-             ?DEFAULT_CAS_RETRIES).
-
+    do_write(
+        H,
+        fun(OldRoot) -> walk_truncate(H, OldRoot) end,
+        ?DEFAULT_CAS_RETRIES
+    ).
 
 %% @private
 %% Returns {NewEmptyRootId, [AllReachableNodeIds], [NewEmptyRootId]}.
@@ -455,7 +470,6 @@ walk_truncate(H, OldRoot) ->
     ReachableIds = collect_reachable(H#handle.node_tab, OldRoot, []),
     {NewId, ReachableIds, [NewId]}.
 
-
 %% @private
 collect_reachable(Tab, Node, Acc0) ->
     Acc = [Node#pnode.id | Acc0],
@@ -469,7 +483,6 @@ collect_reachable(Tab, Node, Acc0) ->
         Acc,
         Node#pnode.children
     ).
-
 
 -doc """
 Return implementation-level metrics about the handle. Intended for
@@ -489,11 +502,9 @@ info(#handle{} = H) ->
         retire_count => ets:info(H#handle.retire_tab, size)
     }.
 
-
 %% =============================================================================
 %% RECLAMATION API
 %% =============================================================================
-
 
 -doc """
 Reclaim retired nodes that no active reader can reach. Returns the number
@@ -527,7 +538,6 @@ reclaim(#handle{} = H) ->
     ),
     length(Reclaimable).
 
-
 -doc """
 Current epoch value. Strictly increases on every successful write.
 """.
@@ -535,7 +545,6 @@ Current epoch value. Strictly increases on every successful write.
 
 current_epoch(#handle{current_epoch = E}) ->
     atomics:get(E, 1).
-
 
 -doc """
 Minimum epoch pinned by any active reader, or `infinity` if there are no
@@ -550,27 +559,26 @@ min_active_epoch(#handle{epoch_tab = E}) ->
     %% concurrent readers)); for very large populations an ordered_set with
     %% {Epoch, Ref} keying would give O(1) min, but the tradeoff is per-op
     %% cost during reader registration. Kept simple for the prototype.
-    case ets:foldl(
-        fun({_Ref, Ep}, Min) -> min(Ep, Min) end,
-        infinity,
-        E
-    ) of
+    case
+        ets:foldl(
+            fun({_Ref, Ep}, Min) -> min(Ep, Min) end,
+            infinity,
+            E
+        )
+    of
         infinity -> infinity;
         Value -> Value
     end.
-
 
 -doc false.
 -spec retire_tab(Handle :: handle()) -> ets:tab().
 
 retire_tab(#handle{retire_tab = R}) -> R.
 
-
 -doc false.
 -spec node_tab(Handle :: handle()) -> ets:tab().
 
 node_tab(#handle{node_tab = N}) -> N.
-
 
 %% =============================================================================
 %% TEST HELPERS
@@ -595,11 +603,9 @@ epoch_tab_count(#handle{} = H) ->
 
 -endif.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 init_root(#handle{} = H) ->
@@ -614,17 +620,14 @@ init_root(#handle{} = H) ->
     true = ets:insert(H#handle.root_tab, {?ROOT_KEY, RootId, 0}),
     ok.
 
-
 %% @private
 read_root(#handle{root_tab = R}) ->
     [{?ROOT_KEY, RootId, V}] = ets:lookup(R, ?ROOT_KEY),
     {RootId, V}.
 
-
 %% @private
 fresh_id() ->
     erlang:unique_integer([positive, monotonic]).
-
 
 %% @private
 %% Retire a list of node IDs, tagging each with the post-bump epoch. The
@@ -636,7 +639,6 @@ retire(#handle{retire_tab = R, current_epoch = E}, NodeIds) ->
     Rows = [{Id, NewEpoch} || Id <- NodeIds],
     ets:insert(R, Rows),
     NewEpoch.
-
 
 %% @private
 %% Compute the largest tag such that reclaiming everything with tag < this
@@ -654,7 +656,6 @@ safe_reclaim_epoch(#handle{} = H) ->
         MinActive -> MinActive
     end.
 
-
 %% @private
 %% Reader wrapper that pins the current epoch for the duration of Fun.
 %%
@@ -671,7 +672,6 @@ with_epoch(#handle{epoch_tab = ET, current_epoch = CE}, Fun) ->
     after
         ets:delete(ET, Ref)
     end.
-
 
 %% @private
 %% Core write loop: walk (path-copy), CAS on root, discard + retry on loss.
@@ -699,14 +699,23 @@ do_write(#handle{} = H, Walk, N) ->
             end
     end.
 
-
 %% @private
-publish(#handle{root_tab = RT} = H, OldRootId, V, NewRootId, Retired, Fresh,
-        Walk, N) ->
+publish(
+    #handle{root_tab = RT} = H,
+    OldRootId,
+    V,
+    NewRootId,
+    Retired,
+    Fresh,
+    Walk,
+    N
+) ->
     NewVersion = V + 1,
-    Match = [{{?ROOT_KEY, OldRootId, V},
-              [],
-              [{const, {?ROOT_KEY, NewRootId, NewVersion}}]}],
+    Match = [
+        {{?ROOT_KEY, OldRootId, V}, [], [
+            {const, {?ROOT_KEY, NewRootId, NewVersion}}
+        ]}
+    ],
     case ets:select_replace(RT, Match) of
         1 ->
             %% CAS succeeded → the retired nodes are now unreachable from
@@ -724,11 +733,9 @@ publish(#handle{root_tab = RT} = H, OldRootId, V, NewRootId, Retired, Fresh,
             do_write(H, Walk, N - 1)
     end.
 
-
 %% @private
 discard_fresh(#handle{node_tab = T}, FreshIds) ->
     lists:foreach(fun(Id) -> ets:delete(T, Id) end, FreshIds).
-
 
 %% @private
 %% Update loop: reads the leaf's current value, applies UpdateFun,
@@ -746,7 +753,7 @@ do_update(#handle{} = H, Key, Policy, UpdateFun, N) ->
             CurrentVal =
                 case walk_lookup(H#handle.node_tab, OldRoot, Key, 0, Policy) of
                     {ok, Val} -> Val;
-                    error     -> undefined
+                    error -> undefined
                 end,
             case UpdateFun(CurrentVal) of
                 noop ->
@@ -754,9 +761,19 @@ do_update(#handle{} = H, Key, Policy, UpdateFun, N) ->
                 {ok, NewValue} ->
                     {NewRootId, Retired, Fresh} =
                         walk_insert(H, OldRoot, Key, 0, Policy, NewValue),
-                    finalize_update(H, Key, Policy, UpdateFun, N,
-                                    OldRootId, V,
-                                    NewRootId, Retired, Fresh, ok);
+                    finalize_update(
+                        H,
+                        Key,
+                        Policy,
+                        UpdateFun,
+                        N,
+                        OldRootId,
+                        V,
+                        NewRootId,
+                        Retired,
+                        Fresh,
+                        ok
+                    );
                 delete when CurrentVal =:= undefined ->
                     noop;
                 delete ->
@@ -766,22 +783,43 @@ do_update(#handle{} = H, Key, Policy, UpdateFun, N) ->
                         true ->
                             noop;
                         false ->
-                            finalize_update(H, Key, Policy, UpdateFun, N,
-                                            OldRootId, V,
-                                            NewRootId, Retired, Fresh,
-                                            deleted)
+                            finalize_update(
+                                H,
+                                Key,
+                                Policy,
+                                UpdateFun,
+                                N,
+                                OldRootId,
+                                V,
+                                NewRootId,
+                                Retired,
+                                Fresh,
+                                deleted
+                            )
                     end
             end
     end.
 
-
 %% @private
-finalize_update(#handle{root_tab = RT} = H, Key, Policy, UpdateFun, N,
-                OldRootId, V, NewRootId, Retired, Fresh, Outcome) ->
+finalize_update(
+    #handle{root_tab = RT} = H,
+    Key,
+    Policy,
+    UpdateFun,
+    N,
+    OldRootId,
+    V,
+    NewRootId,
+    Retired,
+    Fresh,
+    Outcome
+) ->
     NewVersion = V + 1,
-    Match = [{{?ROOT_KEY, OldRootId, V},
-              [],
-              [{const, {?ROOT_KEY, NewRootId, NewVersion}}]}],
+    Match = [
+        {{?ROOT_KEY, OldRootId, V}, [], [
+            {const, {?ROOT_KEY, NewRootId, NewVersion}}
+        ]}
+    ],
     case ets:select_replace(RT, Match) of
         1 ->
             _ = retire(H, Retired),
@@ -792,11 +830,9 @@ finalize_update(#handle{root_tab = RT} = H, Key, Policy, UpdateFun, N,
             do_update(H, Key, Policy, UpdateFun, N - 1)
     end.
 
-
 %% -----------------------------------------------------------------------------
 %% CHILDREN — adaptive-sized container operations
 %% -----------------------------------------------------------------------------
-
 
 %% @private
 %% Fetch the child pointer stored under `Byte`. Returns `undefined` if
@@ -806,7 +842,6 @@ child_get(Byte, {n_small, Map}) ->
 child_get(Byte, {n256, Tuple}) ->
     element(Byte + 1, Tuple).
 
-
 %% @private
 %% Store `Ptr` under `Byte`. Promotes `n_small` to `n256` when the map
 %% crosses the threshold. Path copying already allocates a fresh node per
@@ -815,11 +850,10 @@ child_set(Byte, Ptr, {n_small, Map}) ->
     Map1 = maps:put(Byte, Ptr, Map),
     case map_size(Map1) of
         N when N =< ?N_SMALL_CAPACITY -> {n_small, Map1};
-        _                             -> {n256, small_to_tuple(Map1)}
+        _ -> {n256, small_to_tuple(Map1)}
     end;
 child_set(Byte, Ptr, {n256, Tuple}) ->
     {n256, setelement(Byte + 1, Tuple, Ptr)}.
-
 
 %% @private
 %% Remove the child stored under `Byte`. Demotes `n256` back to `n_small`
@@ -831,9 +865,8 @@ child_delete(Byte, {n256, Tuple}) ->
     Tuple1 = setelement(Byte + 1, Tuple, undefined),
     case n256_count(Tuple1, 1, 0, ?N_SMALL_CAPACITY + 1) of
         over -> {n256, Tuple1};
-        _N   -> {n_small, tuple_to_small(Tuple1)}
+        _N -> {n_small, tuple_to_small(Tuple1)}
     end.
-
 
 %% @private
 small_to_tuple(Map) ->
@@ -844,7 +877,6 @@ small_to_tuple(Map) ->
         Map
     ).
 
-
 %% @private
 tuple_to_small(Tuple) ->
     tuple_to_small(Tuple, 1, #{}).
@@ -854,9 +886,8 @@ tuple_to_small(_Tuple, I, Acc) when I > ?CHILDREN_ARITY ->
 tuple_to_small(Tuple, I, Acc) ->
     case element(I, Tuple) of
         undefined -> tuple_to_small(Tuple, I + 1, Acc);
-        C         -> tuple_to_small(Tuple, I + 1, maps:put(I - 1, C, Acc))
+        C -> tuple_to_small(Tuple, I + 1, maps:put(I - 1, C, Acc))
     end.
-
 
 %% @private
 %% Count non-undefined slots in an n256 tuple, short-circuiting at `Limit`
@@ -869,15 +900,13 @@ n256_count(_Tuple, _I, N, Limit) when N >= Limit ->
 n256_count(Tuple, I, N, Limit) ->
     case element(I, Tuple) of
         undefined -> n256_count(Tuple, I + 1, N, Limit);
-        _         -> n256_count(Tuple, I + 1, N + 1, Limit)
+        _ -> n256_count(Tuple, I + 1, N + 1, Limit)
     end.
-
 
 %% @private
 %% True iff the container has no children at all.
 children_is_empty({n_small, Map}) -> map_size(Map) =:= 0;
-children_is_empty({n256, T})      -> n256_count(T, 1, 0, 1) =:= 0.
-
+children_is_empty({n256, T}) -> n256_count(T, 1, 0, 1) =:= 0.
 
 %% @private
 %% Fold Fun(Byte, ChildPtr, Acc) over all children in ascending byte
@@ -889,15 +918,12 @@ children_fold(Fun, Acc0, {n_small, Map}) ->
 children_fold(Fun, Acc0, {n256, Tuple}) ->
     tuple_fold_children(Fun, Acc0, Tuple, 1).
 
-
 %% @private
 small_map_fold_ordered(Fun, Acc, Iter) ->
     case maps:next(Iter) of
         none -> Acc;
-        {B, C, Iter1} ->
-            small_map_fold_ordered(Fun, Fun(B, C, Acc), Iter1)
+        {B, C, Iter1} -> small_map_fold_ordered(Fun, Fun(B, C, Acc), Iter1)
     end.
-
 
 %% @private
 tuple_fold_children(_Fun, Acc, _Tuple, I) when I > ?CHILDREN_ARITY ->
@@ -905,14 +931,12 @@ tuple_fold_children(_Fun, Acc, _Tuple, I) when I > ?CHILDREN_ARITY ->
 tuple_fold_children(Fun, Acc, Tuple, I) ->
     case element(I, Tuple) of
         undefined -> tuple_fold_children(Fun, Acc, Tuple, I + 1);
-        C         -> tuple_fold_children(Fun, Fun(I - 1, C, Acc), Tuple, I + 1)
+        C -> tuple_fold_children(Fun, Fun(I - 1, C, Acc), Tuple, I + 1)
     end.
-
 
 %% -----------------------------------------------------------------------------
 %% INSERT
 %% -----------------------------------------------------------------------------
-
 
 %% @private
 %% walk_insert/6 — path-copy insert.
@@ -934,7 +958,6 @@ walk_insert(H, Node, Key, Depth, Policy, Value) ->
             split_node(H, Node, Key, Depth, CommonLen, Policy, Value)
     end.
 
-
 %% @private
 %% prefix_compare(NodePrefix, Remaining) returns how many leading bytes of
 %% NodePrefix match Remaining.
@@ -946,10 +969,10 @@ prefix_compare(NodePrefix, Remaining) ->
     N = common_prefix(NodePrefix, Remaining, 0),
     if
         N =:= NPSize -> {match, NPSize};
-        true         -> {mismatch, N}  %% covers both "Remaining shorter"
-                                       %% and "diverged mid-way"
+        %% covers both "Remaining shorter"
+        true -> {mismatch, N}
+        %% and "diverged mid-way"
     end.
-
 
 %% @private
 %% Count matching leading bytes by binary-pattern-match walk. Avoids the
@@ -958,7 +981,6 @@ common_prefix(<<B, At/binary>>, <<B, Bt/binary>>, N) ->
     common_prefix(At, Bt, N + 1);
 common_prefix(_, _, N) ->
     N.
-
 
 %% @private
 %% Store a leaf directly on this node. Because `store_leaf` is only
@@ -972,7 +994,6 @@ store_leaf(H, Node, _Key, Policy, Value) ->
     NewNode = Node#pnode{id = NewId, leaves = NewLeaves},
     true = ets:insert(H#handle.node_tab, NewNode),
     {NewId, [Node#pnode.id], [NewId]}.
-
 
 %% @private
 %% Descend into the child keyed by the next byte of Key.
@@ -989,8 +1010,11 @@ insert_into_child(H, Node, Key, Depth, Policy, Value) ->
                 leaves = #{Policy => Value}
             },
             true = ets:insert(H#handle.node_tab, NewChild),
-            NewChildren = child_set(Byte, {node, NewChildId},
-                                    Node#pnode.children),
+            NewChildren = child_set(
+                Byte,
+                {node, NewChildId},
+                Node#pnode.children
+            ),
             NewId = fresh_id(),
             NewNode = Node#pnode{id = NewId, children = NewChildren},
             true = ets:insert(H#handle.node_tab, NewNode),
@@ -999,16 +1023,16 @@ insert_into_child(H, Node, Key, Depth, Policy, Value) ->
             [Child] = ets:lookup(H#handle.node_tab, ChildId),
             {NewChildId, RetiredBelow, FreshBelow} =
                 walk_insert(H, Child, Key, Depth + 1, Policy, Value),
-            NewChildren = child_set(Byte, {node, NewChildId},
-                                    Node#pnode.children),
+            NewChildren = child_set(
+                Byte,
+                {node, NewChildId},
+                Node#pnode.children
+            ),
             NewId = fresh_id(),
             NewNode = Node#pnode{id = NewId, children = NewChildren},
             true = ets:insert(H#handle.node_tab, NewNode),
-            {NewId,
-             [Node#pnode.id | RetiredBelow],
-             [NewId | FreshBelow]}
+            {NewId, [Node#pnode.id | RetiredBelow], [NewId | FreshBelow]}
     end.
-
 
 %% @private
 %% Node's prefix diverges from Remaining at position CommonLen. Build a new
@@ -1019,8 +1043,11 @@ split_node(H, Node, Key, Depth, CommonLen, Policy, Value) ->
     OldPrefix = Node#pnode.prefix,
     Remaining = binary_part(Key, Depth, byte_size(Key) - Depth),
     CommonPart = binary_part(OldPrefix, 0, CommonLen),
-    OldTail = binary_part(OldPrefix, CommonLen,
-                          byte_size(OldPrefix) - CommonLen),
+    OldTail = binary_part(
+        OldPrefix,
+        CommonLen,
+        byte_size(OldPrefix) - CommonLen
+    ),
 
     OldTailByte = binary:at(OldTail, 0),
     OldTailRest = binary_part(OldTail, 1, byte_size(OldTail) - 1),
@@ -1028,8 +1055,11 @@ split_node(H, Node, Key, Depth, CommonLen, Policy, Value) ->
     OldTrimmed = Node#pnode{id = OldTrimmedId, prefix = OldTailRest},
     true = ets:insert(H#handle.node_tab, OldTrimmed),
 
-    InnerChildren1 = child_set(OldTailByte, {node, OldTrimmedId},
-                               ?EMPTY_CHILDREN),
+    InnerChildren1 = child_set(
+        OldTailByte,
+        {node, OldTrimmedId},
+        ?EMPTY_CHILDREN
+    ),
 
     case byte_size(Remaining) == CommonLen of
         true ->
@@ -1044,9 +1074,11 @@ split_node(H, Node, Key, Depth, CommonLen, Policy, Value) ->
             {InnerId, [Node#pnode.id], [InnerId, OldTrimmedId]};
         false ->
             NewKeyTailByte = binary:at(Remaining, CommonLen),
-            NewKeyTailRest = binary_part(Remaining,
-                                         CommonLen + 1,
-                                         byte_size(Remaining) - CommonLen - 1),
+            NewKeyTailRest = binary_part(
+                Remaining,
+                CommonLen + 1,
+                byte_size(Remaining) - CommonLen - 1
+            ),
             NewLeafId = fresh_id(),
             NewLeafNode = #pnode{
                 id = NewLeafId,
@@ -1055,8 +1087,11 @@ split_node(H, Node, Key, Depth, CommonLen, Policy, Value) ->
                 leaves = #{Policy => Value}
             },
             true = ets:insert(H#handle.node_tab, NewLeafNode),
-            InnerChildren2 = child_set(NewKeyTailByte, {node, NewLeafId},
-                                       InnerChildren1),
+            InnerChildren2 = child_set(
+                NewKeyTailByte,
+                {node, NewLeafId},
+                InnerChildren1
+            ),
             InnerId = fresh_id(),
             Inner = #pnode{
                 id = InnerId,
@@ -1065,18 +1100,12 @@ split_node(H, Node, Key, Depth, CommonLen, Policy, Value) ->
                 leaves = #{}
             },
             true = ets:insert(H#handle.node_tab, Inner),
-            {InnerId,
-             [Node#pnode.id],
-             [InnerId, NewLeafId, OldTrimmedId]}
+            {InnerId, [Node#pnode.id], [InnerId, NewLeafId, OldTrimmedId]}
     end.
-
-
-
 
 %% -----------------------------------------------------------------------------
 %% REMOVE
 %% -----------------------------------------------------------------------------
-
 
 %% @private
 %% walk_remove/5 — path-copy delete. Same 3-tuple contract as walk_insert/6.
@@ -1096,7 +1125,6 @@ walk_remove(H, Node, Key, Depth, Policy) ->
             {Node#pnode.id, [], []}
     end.
 
-
 %% @private
 remove_leaf_here(H, Node, _Key, Policy) ->
     case maps:is_key(Policy, Node#pnode.leaves) of
@@ -1109,7 +1137,6 @@ remove_leaf_here(H, Node, _Key, Policy) ->
             true = ets:insert(H#handle.node_tab, NewNode),
             {NewId, [Node#pnode.id], [NewId]}
     end.
-
 
 %% @private
 remove_from_child(H, Node, Key, Depth, Policy) ->
@@ -1130,26 +1157,30 @@ remove_from_child(H, Node, Key, Depth, Policy) ->
                         case is_child_empty(NewChild) of
                             true ->
                                 ets:delete(H#handle.node_tab, NewChildId),
-                                {child_delete(Byte, Node#pnode.children),
-                                 [],
-                                 lists:delete(NewChildId, FreshBelow)};
+                                {
+                                    child_delete(Byte, Node#pnode.children),
+                                    [],
+                                    lists:delete(NewChildId, FreshBelow)
+                                };
                             false ->
-                                {child_set(Byte, {node, NewChildId},
-                                           Node#pnode.children),
-                                 [],
-                                 FreshBelow}
+                                {
+                                    child_set(
+                                        Byte,
+                                        {node, NewChildId},
+                                        Node#pnode.children
+                                    ),
+                                    [],
+                                    FreshBelow
+                                }
                         end,
                     NewId = fresh_id(),
                     NewNode = Node#pnode{id = NewId, children = NewChildren},
                     true = ets:insert(H#handle.node_tab, NewNode),
-                    {NewId,
-                     [Node#pnode.id | RetiredBelow ++ ExtraRetired],
-                     [NewId | ExtraFresh]}
+                    {NewId, [Node#pnode.id | RetiredBelow ++ ExtraRetired], [
+                        NewId | ExtraFresh
+                    ]}
             end
     end.
-
-
-
 
 %% @private
 is_child_empty(#pnode{leaves = L, children = C}) when map_size(L) =:= 0 ->
@@ -1157,11 +1188,9 @@ is_child_empty(#pnode{leaves = L, children = C}) when map_size(L) =:= 0 ->
 is_child_empty(_) ->
     false.
 
-
 %% -----------------------------------------------------------------------------
 %% LOOKUP / FOLD
 %% -----------------------------------------------------------------------------
-
 
 %% @private
 walk_lookup(Tab, Node, Key, Depth, Policy) ->
@@ -1172,19 +1201,25 @@ walk_lookup(Tab, Node, Key, Depth, Policy) ->
         {match, Consumed} ->
             Byte = binary:at(Key, Depth + Consumed),
             case child_get(Byte, Node#pnode.children) of
-                undefined -> error;
+                undefined ->
+                    error;
                 {node, ChildId} ->
                     case ets:lookup(Tab, ChildId) of
-                        [] -> error;
+                        [] ->
+                            error;
                         [Child] ->
-                            walk_lookup(Tab, Child, Key,
-                                        Depth + Consumed + 1, Policy)
+                            walk_lookup(
+                                Tab,
+                                Child,
+                                Key,
+                                Depth + Consumed + 1,
+                                Policy
+                            )
                     end
             end;
         {mismatch, _} ->
             error
     end.
-
 
 %% @private
 %% `Path0` is an iolist of the stored bytes walked so far (root → this
@@ -1194,17 +1229,19 @@ walk_lookup(Tab, Node, Key, Depth, Policy) ->
 %% per-node cost is zero allocations.
 fold_node(Tab, #pnode{prefix = P, leaves = L, children = C}, Path0, Fun, Acc0) ->
     PathHere = [Path0, P],
-    Acc1 = case map_size(L) of
-        0 ->
-            Acc0;
-        _ ->
-            Key = iolist_to_binary(PathHere),
-            maps:fold(fun(_Policy, V, A) -> Fun(Key, V, A) end, Acc0, L)
-    end,
+    Acc1 =
+        case map_size(L) of
+            0 ->
+                Acc0;
+            _ ->
+                Key = iolist_to_binary(PathHere),
+                maps:fold(fun(_Policy, V, A) -> Fun(Key, V, A) end, Acc0, L)
+        end,
     children_fold(
         fun(Byte, {node, ChildId}, A) ->
             case ets:lookup(Tab, ChildId) of
-                [] -> A;
+                [] ->
+                    A;
                 [Child] ->
                     ChildPath = [PathHere, Byte],
                     fold_node(Tab, Child, ChildPath, Fun, A)
@@ -1214,11 +1251,9 @@ fold_node(Tab, #pnode{prefix = P, leaves = L, children = C}, Path0, Fun, Acc0) -
         C
     ).
 
-
 %% -----------------------------------------------------------------------------
 %% MATCH
 %% -----------------------------------------------------------------------------
-
 
 %% @private
 %% Walk the trie against Target, collecting every leaf whose stored key
@@ -1249,11 +1284,14 @@ match_walk(Tab, Node, TargetRest, Path0, Acc0) ->
             Acc0;
         {match, NewTargetRest} ->
             PathHere = [Path0, Node#pnode.prefix],
-            Acc1 = collect_leaves_for_match(Node, PathHere,
-                                            NewTargetRest, Acc0),
+            Acc1 = collect_leaves_for_match(
+                Node,
+                PathHere,
+                NewTargetRest,
+                Acc0
+            ),
             descend_match(Tab, Node, NewTargetRest, PathHere, Acc1)
     end.
-
 
 %% @private
 collect_leaves_for_match(#pnode{leaves = L}, PathHere, TargetRest, Acc0) ->
@@ -1267,9 +1305,10 @@ collect_leaves_for_match(#pnode{leaves = L}, PathHere, TargetRest, Acc0) ->
                 fun
                     (prefix, V, A) ->
                         [{Key, prefix, V} | A];
-                    (Policy, V, A)
-                        when (Policy =:= exact orelse Policy =:= wildcard)
-                        andalso TargetFullyConsumed ->
+                    (Policy, V, A) when
+                        (Policy =:= exact orelse Policy =:= wildcard) andalso
+                            TargetFullyConsumed
+                    ->
                         [{Key, Policy, V} | A];
                     (_, _, A) ->
                         A
@@ -1279,47 +1318,53 @@ collect_leaves_for_match(#pnode{leaves = L}, PathHere, TargetRest, Acc0) ->
             )
     end.
 
-
 %% @private
 descend_match(_Tab, _Node, <<>>, _PathHere, Acc) ->
     Acc;
-descend_match(Tab, Node, <<TargetByte, RestAfter/binary>> = TargetRest,
-              PathHere, Acc0) ->
+descend_match(
+    Tab,
+    Node,
+    <<TargetByte, RestAfter/binary>> = TargetRest,
+    PathHere,
+    Acc0
+) ->
     Acc1 = descend_literal(Tab, Node, TargetByte, RestAfter, PathHere, Acc0),
     descend_wildcard(Tab, Node, TargetRest, PathHere, Acc1).
-
 
 %% @private
 descend_literal(Tab, Node, TargetByte, RestAfter, PathHere, Acc) ->
     case child_get(TargetByte, Node#pnode.children) of
-        undefined -> Acc;
+        undefined ->
+            Acc;
         {node, ChildId} ->
             case ets:lookup(Tab, ChildId) of
-                [] -> Acc;
+                [] ->
+                    Acc;
                 [Child] ->
                     ChildPath = [PathHere, TargetByte],
                     match_walk(Tab, Child, RestAfter, ChildPath, Acc)
             end
     end.
 
-
 %% @private
 descend_wildcard(Tab, Node, TargetRest, PathHere, Acc) ->
     case child_get(?WILDCARD_BYTE, Node#pnode.children) of
-        undefined -> Acc;
+        undefined ->
+            Acc;
         {node, ChildId} ->
             case skip_segment(TargetRest) of
-                end_of_target -> Acc;
+                end_of_target ->
+                    Acc;
                 {ok, NewRest} ->
                     case ets:lookup(Tab, ChildId) of
-                        [] -> Acc;
+                        [] ->
+                            Acc;
                         [Child] ->
                             ChildPath = [PathHere, ?WILDCARD_BYTE],
                             match_walk(Tab, Child, NewRest, ChildPath, Acc)
                     end
             end
     end.
-
 
 %% @private
 %% Walk `Prefix` against `TargetRest`, consuming bytes as we go. On a `\0`
@@ -1339,7 +1384,6 @@ walk_prefix_bytes(<<B, RestPrefix/binary>>, <<B, RestTarget/binary>>) ->
     walk_prefix_bytes(RestPrefix, RestTarget);
 walk_prefix_bytes(_, _) ->
     no_match.
-
 
 %% @private
 %% Advance past the current target URI segment. The segment must be
@@ -1363,11 +1407,9 @@ skip_segment(<<?SEGMENT_SEP, _/binary>>, 0) ->
 skip_segment(<<_, Rest/binary>>, Count) ->
     skip_segment(Rest, Count + 1).
 
-
 %% -----------------------------------------------------------------------------
 %% WAMP PATTERN ENCODING
 %% -----------------------------------------------------------------------------
-
 
 -doc """
 Encode a WAMP wildcard-pattern URI for insertion as a `wildcard` leaf.
@@ -1385,12 +1427,14 @@ wildcard positions.
 
 encode_pattern(URI) when is_binary(URI) ->
     Parts = binary:split(URI, <<?SEGMENT_SEP>>, [global]),
-    Encoded = [case P of
-                   <<>> -> <<?WILDCARD_BYTE>>;
-                   _ -> P
-               end || P <- Parts],
+    Encoded = [
+        case P of
+            <<>> -> <<?WILDCARD_BYTE>>;
+            _ -> P
+        end
+     || P <- Parts
+    ],
     iolist_to_binary(lists:join(<<?SEGMENT_SEP>>, Encoded)).
-
 
 -doc """
 Decode a wildcard-encoded key back to its WAMP URI form, replacing each
@@ -1403,8 +1447,11 @@ for any valid wildcard URI.
 
 decode_pattern(Encoded) when is_binary(Encoded) ->
     Parts = binary:split(Encoded, <<?SEGMENT_SEP>>, [global]),
-    Decoded = [case P of
-                   <<?WILDCARD_BYTE>> -> <<>>;
-                   _ -> P
-               end || P <- Parts],
+    Decoded = [
+        case P of
+            <<?WILDCARD_BYTE>> -> <<>>;
+            _ -> P
+        end
+     || P <- Parts
+    ],
     iolist_to_binary(lists:join(<<?SEGMENT_SEP>>, Decoded)).

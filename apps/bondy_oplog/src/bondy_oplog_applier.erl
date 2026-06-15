@@ -944,8 +944,12 @@ resolve_cell_apply_ctx(Opts) ->
         {NS, Index, Shard} = Key ->
             case bondy_oplog_core_registry:lookup(NS, Index, Shard) of
                 {ok, Entry} ->
-                    FoldMod = bondy_oplog_core_registry:entry_fold_module(Entry),
-                    CrdtMod = bondy_oplog_core_registry:entry_crdt_module(Entry),
+                    FoldMod = bondy_oplog_core_registry:entry_fold_module(
+                        Entry
+                    ),
+                    CrdtMod = bondy_oplog_core_registry:entry_crdt_module(
+                        Entry
+                    ),
                     CausalTier =
                         bondy_oplog_core_registry:entry_causal_tier(Entry),
                     {ok, #{
@@ -960,7 +964,7 @@ resolve_cell_apply_ctx(Opts) ->
                             ),
                         fold_module => FoldMod,
                         crdt_module => CrdtMod,
-                                            %% The CRDT's declared causal tier (default tier_0).
+                        %% The CRDT's declared causal tier (default tier_0).
                         %% Recorded here; the tier_2 context-stamp gates on
                         %% `causal_tier := tier_2`.
                         causal_tier => CausalTier,
@@ -972,11 +976,15 @@ resolve_cell_apply_ctx(Opts) ->
                                 FoldMod, CrdtMod
                             ),
                         cache_adapter =>
-                            bondy_oplog_core_registry:entry_cache_adapter(Entry),
+                            bondy_oplog_core_registry:entry_cache_adapter(
+                                Entry
+                            ),
                         cache_handle =>
                             bondy_oplog_core_registry:entry_cache_handle(Entry),
                         high_water_ref =>
-                            bondy_oplog_core_registry:entry_high_water_ref(Entry),
+                            bondy_oplog_core_registry:entry_high_water_ref(
+                                Entry
+                            ),
                         secondary_indexes =>
                             maps:get(secondary_indexes, Opts, []),
                         %% A3 — applier-private OldValue frame-cache (or
@@ -1948,11 +1956,17 @@ do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
 %% projection rather than replaying events. Dispatch bypasses the
 %% back-pressure cap so the full working set lands in one pass even when a
 %% prior saturation left the cap tripped.
-reindex_from_projection(#{adapter := Adapter, handle := Handle, kernel := Kernel}, Id, SecIdx) ->
+reindex_from_projection(
+    #{adapter := Adapter, handle := Handle, kernel := Kernel}, Id, SecIdx
+) ->
     CellKeys = primary_cell_directory(Adapter, Handle, Id),
     {IdxAcc, MaxHlc} = lists:foldl(
         fun({Bucket, Key}, {IAcc, HAcc}) ->
-            case reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) of
+            case
+                reindex_one_cell(
+                    Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key
+                )
+            of
                 {ok, IdxOps, Hlc} ->
                     {
                         bondy_oplog_cell_apply:merge_idx_ops(IAcc, IdxOps),

@@ -25,17 +25,12 @@ subscribers used by `bondy_broker`.
 -export([start_subscriber/5]).
 -export([terminate_subscriber/1]).
 
-
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec start_subscriber(id(), uri(), map(), uri(), map() | function()) ->
     {ok, pid()} | {error, any()}.
@@ -43,27 +38,23 @@ subscribers used by `bondy_broker`.
 start_subscriber(Id, RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     supervisor:start_child(?MODULE, [Id, RealmUri, Opts, Topic, Fun]).
 
-
-terminate_subscriber(Subscriber) when is_pid(Subscriber)->
+terminate_subscriber(Subscriber) when is_pid(Subscriber) ->
     supervisor:terminate_child(?MODULE, Subscriber).
-
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     SupFlags = #{
         strategy => simple_one_for_one,
-        intensity => 5, % max restarts
-        period => 10, % seconds
+        % max restarts
+        intensity => 5,
+        % seconds
+        period => 10,
         auto_shutdown => never
     },
     Children = [
@@ -72,11 +63,6 @@ init([]) ->
 
     {ok, {SupFlags, Children}}.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-

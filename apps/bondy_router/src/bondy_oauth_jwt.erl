@@ -12,24 +12,21 @@ signatures and expiry.
 -include_lib("kernel/include/logger.hrl").
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_SECS, 2 * 60). % 2 mins
+% 2 mins
+-define(LEEWAY_SECS, 2 * 60).
 -define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
 
 -type claims() :: map().
--type error()  :: oauth2_invalid_grant | any().
+-type error() :: oauth2_invalid_grant | any().
 
 -export([encode/2]).
 -export([decode/1]).
 -export([verify/2]).
 -export([verify/3]).
 
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -spec encode(claims(), PrivKey :: binary()) -> binary().
 
@@ -37,23 +34,18 @@ encode(Claims, PrivKey) ->
     {_, JWT} = jose_jws:compact(jose_jwt:sign(PrivKey, Claims)),
     JWT.
 
-
 -spec decode(binary()) -> claims().
 
 decode(JWT) when is_binary(JWT) andalso byte_size(JWT) >= 32 ->
     {jose_jwt, Map} = jose_jwt:peek(JWT),
     Map;
-
 decode(Term) ->
     error({badarg, [Term]}).
-
-
 
 -spec verify(binary(), binary()) -> {ok, map()} | {error, error()}.
 
 verify(RealmUri, JWT) ->
     verify(RealmUri, JWT, #{}).
-
 
 -spec verify(RealmUri :: binary(), JWT :: binary(), MatchSpec :: map()) ->
     {ok, claims()} | {error, error()}.
@@ -61,12 +53,9 @@ verify(RealmUri, JWT) ->
 verify(RealmUri, JWT, MatchSpec) ->
     maybe_expired(do_verify(RealmUri, JWT, MatchSpec), JWT).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 authscope(RealmUri, Claims) ->
@@ -77,7 +66,6 @@ authscope(RealmUri, Claims) ->
                 [~"meta", ~"client_device_id"], Claims, all
             ),
             bondy_auth_scope:new(RealmUri, all, DeviceId);
-
         Auth ->
             %% V1.1 Token
             Scope = key_value:get(~"scope", Auth, #{}),
@@ -86,7 +74,6 @@ authscope(RealmUri, Claims) ->
             DeviceId = maps:get(~"device_id", Scope, all),
             bondy_auth_scope:new(ScopeRealm, ClientId, DeviceId)
     end.
-
 
 %% @private
 matches(RealmUri, Claims, Spec) ->
@@ -100,13 +87,10 @@ matches(RealmUri, Claims, Spec) ->
             maps_utils:collect(Keys, Claims) =:=
             maps_utils:collect(Keys, Spec),
         {ok, Claims}
-
     else
         false ->
             {error, oauth2_invalid_grant}
     end.
-
-
 
 %% @private
 -spec do_verify(Realm :: binary(), binary(), map()) ->
@@ -126,12 +110,10 @@ do_verify(RealmUri, JWT, Spec) ->
         case bondy_realm:get_public_key(AuthRealm, Kid) of
             undefined ->
                 {error, oauth2_invalid_grant};
-
             JWK ->
                 case jose_jwt:verify(JWK, JWT) of
                     {true, {jose_jwt, Claims}, _} ->
                         matches(RealmUri, Claims, Spec);
-
                     {false, {jose_jwt, _Claims}, _} ->
                         {error, oauth2_invalid_grant}
                 end
@@ -139,13 +121,10 @@ do_verify(RealmUri, JWT, Spec) ->
     catch
         throw:Reason ->
             {error, Reason};
-
         error:{not_found, Uri} ->
             {error, {no_such_realm, Uri}};
-
         error:{no_such_realm, _} = Reason ->
             {error, Reason};
-
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 class => Class,
@@ -155,16 +134,13 @@ do_verify(RealmUri, JWT, Spec) ->
             {error, internal_error}
     end.
 
-
 %% @private
 maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, _JWT) ->
     case ?EXPIRY_TIME_SECS(Ts, Secs) =< ?NOW of
         true ->
             {error, oauth2_invalid_grant};
-
         false ->
             {ok, Claims}
     end;
-
 maybe_expired(Error, _) ->
     Error.

@@ -63,12 +63,11 @@ init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.security">>,
     Realm = add_realm(RealmUri),
-    [{realm_uri, RealmUri}, {realm, Realm} |Config].
+    [{realm_uri, RealmUri}, {realm, Realm} | Config].
 
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
     {save_config, Config}.
-
 
 add_realm(RealmUri) ->
     Config = #{
@@ -123,7 +122,6 @@ add_realm(RealmUri) ->
     },
     bondy_realm:create(Config).
 
-
 security_toggle(Config) ->
     R = ?config(realm, Config),
     Uri = bondy_realm:uri(R),
@@ -141,8 +139,6 @@ security_toggle(Config) ->
 
     {save_config, Config}.
 
-
-
 %% =============================================================================
 %% API CLIENT
 %% =============================================================================
@@ -159,7 +155,8 @@ create_groups(Config) ->
     ),
 
     ?assertMatch(
-        #{type := group, name := Name, groups := [], meta := #{}}, bondy_rbac_group:lookup(Uri, Name)
+        #{type := group, name := Name, groups := [], meta := #{}},
+        bondy_rbac_group:lookup(Uri, Name)
     ),
     ?assertEqual(N + 1, length(bondy_rbac_group:list(Uri))),
 
@@ -200,7 +197,6 @@ api_client_add(Config) ->
     ),
 
     {save_config, [{client_id, ClientId}, {client_secret, Secret} | Prev]}.
-
 
 api_client_auth1(Config) ->
     {api_client_add, Prev} = ?config(saved_config, Config),
@@ -253,22 +249,16 @@ api_client_auth2(Config) ->
 
     {save_config, Prev}.
 
-
-
 api_client_delete(Config) ->
     {api_client_auth2, Prev} = ?config(saved_config, Config),
     ok = bondy_oauth2_client:remove(
-        ?config(realm_uri, Config), ?config(client_id, Prev)),
+        ?config(realm_uri, Config), ?config(client_id, Prev)
+    ),
     {save_config, Prev}.
-
-
-
 
 %% =============================================================================
 %% RESOURCE OWNER
 %% =============================================================================
-
-
 
 resource_owner_add(Config) ->
     Username = <<"AlE">>,
@@ -328,13 +318,13 @@ resource_owner_change_password(Config) ->
     {ok, User1} = bondy_rbac_user:lookup(RealmUri, Username),
     NewPass = <<"New-Password2">>,
     ok = bondy_rbac_user:change_password(
-        RealmUri, Username, NewPass, OldPass),
+        RealmUri, Username, NewPass, OldPass
+    ),
     %% Validate that we have only changed the password
     {ok, User2} = bondy_rbac_user:lookup(RealmUri, Username),
     %% error([User1, User2]),
     true = User1 =/= User2,
-    {save_config,
-        lists:keyreplace(password, 1, Prev, {password, NewPass})}.
+    {save_config, lists:keyreplace(password, 1, Prev, {password, NewPass})}.
 
 resource_owner_auth2(Config) ->
     {resource_owner_change_password, Prev} = ?config(saved_config, Config),
@@ -356,17 +346,13 @@ resource_owner_auth3(Config) ->
 resource_owner_delete(Config) ->
     {resource_owner_auth3, Prev} = ?config(saved_config, Config),
     ok = bondy_oauth2_resource_owner:remove(
-        ?config(realm_uri, Config), ?config(username, Prev)),
+        ?config(realm_uri, Config), ?config(username, Prev)
+    ),
     {save_config, Prev}.
-
-
-
 
 %% =============================================================================
 %% USER
 %% =============================================================================
-
-
 
 user_add(Config) ->
     In = #{
@@ -412,7 +398,8 @@ user_add(Config) ->
     ),
 
     {save_config, [
-        {username, <<"AlE2">>}, {password, <<"ale123456">>}
+        {username, <<"AlE2">>},
+        {password, <<"ale123456">>}
         | Config
     ]}.
 
@@ -446,8 +433,7 @@ user_update(Config) ->
             forward_credentials => true
         }
     ),
-    {save_config,
-        lists:keyreplace(password, 1, Prev, {password, Pass})}.
+    {save_config, lists:keyreplace(password, 1, Prev, {password, Pass})}.
 
 user_auth2(Config) ->
     {user_update, Prev} = ?config(saved_config, Config),
@@ -469,15 +455,13 @@ user_auth3(Config) ->
 user_delete(Config) ->
     {user_auth3, Prev} = ?config(saved_config, Config),
     ok = bondy_rbac_user:remove(
-        ?config(realm_uri, Config), ?config(username, Prev)),
+        ?config(realm_uri, Config), ?config(username, Prev)
+    ),
     {save_config, Prev}.
-
-
 
 %% =============================================================================
 %% OAUTH
 %% =============================================================================
-
 
 password_token_crud_1(Config) ->
     Uri = ?config(realm_uri, Config),
@@ -497,7 +481,6 @@ password_token_crud_1(Config) ->
     },
     {ok, _} = bondy_oauth2_resource_owner:add(Uri, R),
 
-
     SessionId = bondy_session_id:new(),
     SourceIP = {127, 0, 0, 1},
     {ok, AuthCtxt} = bondy_auth:init(SessionId, Uri, U, Roles, SourceIP),
@@ -507,13 +490,13 @@ password_token_crud_1(Config) ->
     RToken0 = bondy_oauth_token:to_refresh_token(Token0),
     Ts0 = maps:get(issued_at, Token0),
 
-
     ?assertEqual(
         {ok, Token0},
         bondy_oauth_token:lookup(Uri, RToken0)
     ),
 
-    timer:sleep(2000), % issued_at is seconds
+    % issued_at is seconds
+    timer:sleep(2000),
 
     {ok, Token1} = bondy_oauth_token:refresh(Uri, RToken0),
     RToken1 = bondy_oauth_token:to_refresh_token(Token1),
@@ -533,13 +516,10 @@ password_token_crud_1(Config) ->
         bondy_oauth_token:lookup(Uri, U, Scope1)
     ),
 
-
     ?assertEqual(
         {ok, Token1},
         bondy_oauth_token:lookup(Uri, RToken1)
     ),
-
-
 
     ?assertEqual(
         ok,
@@ -570,7 +550,6 @@ password_token_crud_1(Config) ->
 
     {save_config, [{client_id, ClientId}, {username, U} | Config]}.
 
-
 issue_revoke_by_device_id(Config) ->
     {password_token_crud_1, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Prev),
@@ -578,7 +557,6 @@ issue_revoke_by_device_id(Config) ->
     U = ?config(username, Prev),
     D = <<"1">>,
     Roles = [],
-
 
     SessionId = bondy_session_id:new(),
     SourceIP = {127, 0, 0, 1},
@@ -594,13 +572,11 @@ issue_revoke_by_device_id(Config) ->
 
     ok = bondy_oauth_token:revoke(Uri, RToken0),
 
-
     ?assertEqual(
         {error, not_found},
         bondy_oauth_token:lookup(Uri, RToken0)
     ),
     {save_config, [{client_id, C}, {username, U} | Config]}.
-
 
 issue_refresh_revoke_by_device_id(Config) ->
     {issue_revoke_by_device_id, Prev} = ?config(saved_config, Config),
@@ -626,17 +602,15 @@ issue_refresh_revoke_by_device_id(Config) ->
         bondy_oauth_token:lookup(Uri, RToken1)
     ).
 
-
 authenticate(Uri, Username, Secret) ->
     Result = do_authenticate(Uri, Username, Secret),
     ?assertMatch({ok, _, _}, Result),
     ok.
 
-
 do_authenticate(Uri, Username, Secret) ->
     SessionId = bondy_session_id:new(),
     Roles = [],
-    SourceIP = {127,0,0,1},
+    SourceIP = {127, 0, 0, 1},
 
     {ok, AuthCtxt} = bondy_auth:init(SessionId, Uri, Username, Roles, SourceIP),
 

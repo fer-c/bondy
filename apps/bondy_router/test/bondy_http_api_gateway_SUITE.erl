@@ -7,7 +7,6 @@
 -include_lib("common_test/include/ct.hrl").
 -compile([nowarn_export_all, export_all]).
 
-
 all() ->
     bondy_ct:all().
 
@@ -36,7 +35,7 @@ simple_1_test(_) ->
             <<"security">> => <<"{{variables.oauth2}}">>,
             <<"schemes">> => <<"{{variables.schemes}}">>
         },
-        <<"versions">> =>  #{
+        <<"versions">> => #{
             <<"1.0.0">> => #{
                 <<"base_path">> => <<"/v1.0">>,
                 <<"variables">> => #{
@@ -56,7 +55,8 @@ simple_1_test(_) ->
                         <<"get">> => #{
                             <<"action">> => #{
                                 <<"type">> => <<"wamp_call">>,
-                                <<"procedure">> => <<"com.magenta.things.list">>,
+                                <<"procedure">> =>
+                                    <<"com.magenta.things.list">>,
                                 <<"options">> => #{},
                                 <<"args">> => [
                                     <<"{{request.query_params}}">>
@@ -64,11 +64,9 @@ simple_1_test(_) ->
                                 <<"kwargs">> => #{}
                             },
                             <<"response">> => #{
-                                <<"on_error">> => #{
-
-                                },
+                                <<"on_error">> => #{},
                                 <<"on_result">> => #{
-                                  <<"body">> => <<"{{action.result}}">>
+                                    <<"body">> => <<"{{action.result}}">>
                                 }
                             }
                         }
@@ -84,12 +82,8 @@ simple_1_test(_) ->
                                 <<"kwargs">> => #{}
                             },
                             <<"response">> => #{
-                                <<"on_error">> => #{
-
-                                },
-                                <<"on_result">> => #{
-
-                                }
+                                <<"on_error">> => #{},
+                                <<"on_result">> => #{}
                             }
                         }
                     }
@@ -98,7 +92,6 @@ simple_1_test(_) ->
         }
     },
     bondy_http_gateway_api_spec_parser:parse(Spec).
-
 
 %% png() ->
 %%     <<137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,1,194,

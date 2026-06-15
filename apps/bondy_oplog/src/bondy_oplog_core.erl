@@ -546,7 +546,9 @@ freshness(NS) when is_atom(NS) ->
     maps:from_list(
         [
             begin
-                {_NS, Index, Shard} = bondy_oplog_core_registry:entry_key(Entry),
+                {_NS, Index, Shard} = bondy_oplog_core_registry:entry_key(
+                    Entry
+                ),
                 Ae = bondy_oplog_core_registry:entry_ae_atomics(Entry),
                 {{Index, Shard}, Now - atomics:get(Ae, 1)}
             end
@@ -1071,7 +1073,9 @@ check_consistency_class(Reads, eventual) ->
     NSs = lists:usort([NS || {NS, _Idx, _B, _K} <- Reads]),
     case
         lists:dropwhile(
-            fun(NS) -> bondy_oplog_core_registry:consistency_class(NS) =/= cp end,
+            fun(NS) ->
+                bondy_oplog_core_registry:consistency_class(NS) =/= cp
+            end,
             NSs
         )
     of

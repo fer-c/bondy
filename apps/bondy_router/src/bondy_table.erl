@@ -14,18 +14,19 @@ Provides `new/3`, `get/2,3`, `find/2`, `put/3`, `delete/2` and
 
 -define(TAB, ?MODULE).
 
--type update_op()   ::  integer()
-                        | {
-                            Incr :: integer(),
-                            Threshold :: integer(),
-                            SetValue :: integer()
-                        }
-                        | {
-                            Incr :: integer(),
-                            Threshold :: integer(),
-                            SetValue :: integer(),
-                            Init :: integer()
-                        }.
+-type update_op() ::
+    integer()
+    | {
+        Incr :: integer(),
+        Threshold :: integer(),
+        SetValue :: integer()
+    }
+    | {
+        Incr :: integer(),
+        Threshold :: integer(),
+        SetValue :: integer(),
+        Init :: integer()
+    }.
 -export([delete/2]).
 -export([find/2]).
 -export([get/2]).
@@ -34,16 +35,15 @@ Provides `new/3`, `get/2,3`, `find/2`, `put/3`, `delete/2` and
 -export([put/3]).
 -export([update_counter/3]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
 -spec new(Name :: atom(), Access :: ets:access(), Managed :: boolean()) -> ok.
 
-new(Name, Access, Managed)
-when is_atom(Name), is_atom(Access), is_boolean(Managed) ->
+new(Name, Access, Managed) when
+    is_atom(Name), is_atom(Access), is_boolean(Managed)
+->
     lists:member(Access, [public, protected, private]) orelse error(badarg),
 
     Opts = [
@@ -64,10 +64,9 @@ when is_atom(Name), is_atom(Access), is_boolean(Managed) ->
             ets:new(Name, Opts)
     end.
 
-
 -spec get(Key :: term(), Table :: atom()) -> term() | no_return().
 
-get(Key, Table) when is_atom(Table)  ->
+get(Key, Table) when is_atom(Table) ->
     try
         ets:lookup_element(Table, Key, 2)
     catch
@@ -75,11 +74,10 @@ get(Key, Table) when is_atom(Table)  ->
             error(error_reason(Stacktrace))
     end.
 
-
 -spec get(Key :: term(), Table :: atom(), Default :: term()) ->
     term() | no_return().
 
-get(Key, Table, Default) when is_atom(Table)  ->
+get(Key, Table, Default) when is_atom(Table) ->
     try
         ets:lookup_element(Table, Key, 2)
     catch
@@ -89,10 +87,9 @@ get(Key, Table, Default) when is_atom(Table)  ->
             Default
     end.
 
-
 -spec find(Key :: term(), Table :: atom()) -> {ok, term()} | error.
 
-find(Key, Table) when is_atom(Table)  ->
+find(Key, Table) when is_atom(Table) ->
     try
         {ok, get(Key, Table)}
     catch
@@ -100,10 +97,9 @@ find(Key, Table) when is_atom(Table)  ->
             error
     end.
 
-
 -spec put(Key :: term(), Value :: term(), Table :: atom()) -> ok.
 
-put(Key, Value, Table) when is_atom(Table)  ->
+put(Key, Value, Table) when is_atom(Table) ->
     try
         true = ets:insert(Table, {Key, Value}),
         ok
@@ -111,7 +107,6 @@ put(Key, Value, Table) when is_atom(Table)  ->
         error:badarg ->
             error(badtable)
     end.
-
 
 -spec delete(Key :: term(), Table :: atom()) -> ok.
 
@@ -124,7 +119,6 @@ delete(Key, Table) when is_atom(Table) ->
             error(badtable)
     end.
 
-
 -spec update_counter(Key :: term(), Incr :: update_op(), Table :: atom()) ->
     Result :: integer().
 
@@ -135,16 +129,15 @@ update_counter(Key, Incr, Table) when is_integer(Incr), is_atom(Table) ->
         error:badarg:Stacktrace ->
             error(error_reason(Stacktrace))
     end;
-
-update_counter(Key, {Incr, Threshold, SetValue}, Table)  ->
+update_counter(Key, {Incr, Threshold, SetValue}, Table) ->
     update_counter(Key, {Incr, Threshold, SetValue, 0}, Table);
-
-update_counter(Key, {Incr, Threshold, SetValue, Init}, Table)
-when is_integer(Incr),
-     is_integer(Threshold),
-     is_integer(SetValue),
-     is_integer(Init),
-     is_atom(Table) ->
+update_counter(Key, {Incr, Threshold, SetValue, Init}, Table) when
+    is_integer(Incr),
+    is_integer(Threshold),
+    is_integer(SetValue),
+    is_integer(Init),
+    is_atom(Table)
+->
     try
         ets:update_counter(Table, Key, {2, Incr, Threshold, SetValue})
     catch
@@ -152,13 +145,9 @@ when is_integer(Incr),
             error(error_reason(Stacktrace))
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 error_reason(Stacktrace) ->
@@ -170,11 +159,3 @@ error_reason(Stacktrace) ->
         _ ->
             badarg
     end.
-
-
-
-
-
-
-
-

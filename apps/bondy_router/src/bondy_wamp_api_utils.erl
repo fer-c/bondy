@@ -11,7 +11,6 @@ administrative call arguments and the construction of WAMP error messages.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
-
 -export([error/2]).
 -export([maybe_error/2]).
 -export([deprecated_procedure_error/1]).
@@ -26,33 +25,28 @@ administrative call arguments and the construction of WAMP error messages.
 
 -compile({no_auto_import, [error/2]}).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
 -spec node_spec() -> map().
 
 node_spec() ->
-    #{listen_addrs := Addrs0}  = NodeSpec = partisan:node_spec(),
+    #{listen_addrs := Addrs0} = NodeSpec = partisan:node_spec(),
 
     NodeSpec#{
         name => partisan:nodestring(),
         listen_addrs => [
             Addr#{ip => list_to_binary(inet:ntoa(IP))}
-            || #{ip := IP} = Addr <- Addrs0
+         || #{ip := IP} = Addr <- Addrs0
         ]
     }.
-
 
 -doc """
 Throws a `bondy_wamp_message:error()`.
 """.
 validate_call_args(Msg, Ctxt, Min) ->
     validate_call_args(Msg, Ctxt, Min, Min).
-
 
 -doc """
 Throws a `bondy_wamp_message:error()`.
@@ -61,13 +55,11 @@ validate_call_args(Msg, Ctxt, Min, Max) ->
     Len = args_len(args(Msg)),
     do_validate_call_args(Msg, Ctxt, Min, Max, Len, false).
 
-
 -doc """
 Throws a `bondy_wamp_message:error()`.
 """.
 validate_admin_call_args(Msg, Ctxt, Min) ->
     validate_admin_call_args(Msg, Ctxt, Min, Min).
-
 
 -doc """
 Throws a `bondy_wamp_message:error()`.
@@ -76,32 +68,23 @@ validate_admin_call_args(Msg, Ctxt, Min, Max) ->
     Len = args_len(args(Msg)),
     do_validate_call_args(Msg, Ctxt, Min, Max, Len, true).
 
-
-
 -doc """
 Returns a CALL RESULT or ERROR based on the first Argument.
 """.
 maybe_error(ok, M) ->
     bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{});
-
 maybe_error({ok, Val}, M) ->
     bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{}, [Val]);
-
 maybe_error({'EXIT', {Reason, _}}, M) ->
     maybe_error({error, Reason}, M);
-
 maybe_error(#error{} = Error, _) ->
     Error;
-
 maybe_error({error, #error{} = Error}, _) ->
     Error;
-
 maybe_error({error, Reason}, M) ->
     error(Reason, M);
-
 maybe_error(Val, M) ->
     bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{}, [Val]).
-
 
 error({not_authorized, Reason}, M) ->
     Map = bondy_error_utils:map(Reason),
@@ -112,7 +95,6 @@ error({not_authorized, Reason}, M) ->
         ?WAMP_NOT_AUTHORIZED,
         [Map]
     );
-
 error(Reason, #call{} = M) ->
     #{<<"code">> := Code} = Map = bondy_error_utils:map(Reason),
     Mssg = maps:get(<<"message">>, Map, <<>>),
@@ -126,25 +108,25 @@ error(Reason, #call{} = M) ->
 
 deprecated_procedure_error(#call{procedure_uri = Uri} = M) ->
     do_deprecated_procedure_error(M, Uri);
-
 deprecated_procedure_error(#invocation{details = #{procedure := Uri}} = M) ->
     do_deprecated_procedure_error(M, Uri).
-
 
 -doc """
 Creates a `wamp_error()` based on a `wamp_call()`.
 """.
 no_such_procedure_error(#call{procedure_uri = Uri} = M) ->
     no_such_procedure_error(Uri, ?CALL, M#call.request_id);
-
 no_such_procedure_error(#invocation{details = #{procedure := Uri}} = M) ->
     no_such_procedure_error(Uri, ?CALL, M#invocation.request_id).
-
 
 no_such_procedure_error(ProcUri, MType, ReqId) ->
     Mssg = <<
         "There are no registered procedures matching the uri",
-        $\s, $', ProcUri/binary, $', $.
+        $\s,
+        $',
+        ProcUri/binary,
+        $',
+        $.
     >>,
     bondy_wamp_message:error(
         MType,
@@ -154,7 +136,8 @@ no_such_procedure_error(ProcUri, MType, ReqId) ->
         [Mssg],
         #{
             message => Mssg,
-            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
+            description =>
+                <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
         }
     ).
 
@@ -167,13 +150,9 @@ no_such_registration_error(RegId) when is_integer(RegId) ->
         [<<"No registration exists for the supplied RegistrationId">>]
     ).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 -doc """
@@ -189,7 +168,8 @@ session's Realm or any other in case the session's realm is the root realm.
     MinArity :: pos_integer(),
     MaxArity :: pos_integer(),
     Len :: pos_integer(),
-    AdminOnly :: boolean()) -> Args :: list() | no_return().
+    AdminOnly :: boolean()
+) -> Args :: list() | no_return().
 
 do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
     E = bondy_wamp_message:error(
@@ -200,13 +180,11 @@ do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
         [<<"Invalid number of positional arguments.">>],
         #{
             description =>
-            <<"The procedure requires at least ",
-            (integer_to_binary(Min))/binary,
-            " positional arguments.">>
+                <<"The procedure requires at least ",
+                    (integer_to_binary(Min))/binary, " positional arguments.">>
         }
     ),
     error(E);
-
 do_validate_call_args(Msg, _, _, Max, Len, _) when Len > Max ->
     E = bondy_wamp_message:error(
         ?CALL,
@@ -216,13 +194,11 @@ do_validate_call_args(Msg, _, _, Max, Len, _) when Len > Max ->
         [<<"Invalid number of positional arguments.">>],
         #{
             description =>
-            <<"The procedure accepts at most ",
-            (integer_to_binary(Max))/binary,
-            " positional arguments.">>
+                <<"The procedure accepts at most ",
+                    (integer_to_binary(Max))/binary, " positional arguments.">>
         }
     ),
     error(E);
-
 do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
     %% We are missing the RealmUri argument, we default to the session's Realm
     case bondy_context:realm_uri(Ctxt) of
@@ -235,10 +211,11 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
         _ ->
             error(unauthorized(Msg, Ctxt))
     end;
-
 do_validate_call_args(
-    #call{args = [Uri|_]} = Msg, Ctxt, Min, _, Len, AdminOnly)
-    when Len >= Min ->
+    #call{args = [Uri | _]} = Msg, Ctxt, Min, _, Len, AdminOnly
+) when
+    Len >= Min
+->
     %% A call can only proceed if the session's Realm matches the one passed in
     %% the arguments, unless the session's Realm is the Root Realm which allows
     %% operations on other realms
@@ -252,7 +229,6 @@ do_validate_call_args(
         _ ->
             error(unauthorized(Msg, Ctxt))
     end;
-
 do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len + 1 >= Min ->
     %% We are missing the RealmUri argument, we default to the session's Realm
     %% A call can only proceed if the session's Realm matches the one passed in
@@ -267,29 +243,22 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len + 1 >= Min ->
             error(unauthorized(Msg, Ctxt))
     end.
 
-
 %% @private
 unauthorized(#subscribe{} = M, Ctxt) ->
     unauthorized(?SUBSCRIBE, M#subscribe.request_id, Ctxt);
-
 unauthorized(#unsubscribe{} = M, Ctxt) ->
     unauthorized(?UNSUBSCRIBE, M#unsubscribe.request_id, Ctxt);
-
 unauthorized(#register{} = M, Ctxt) ->
     unauthorized(?REGISTER, M#register.request_id, Ctxt);
-
 unauthorized(#unregister{} = M, Ctxt) ->
-    unauthorized(?REGISTER, M#unregister.request_id), Ctxt;
-
+    unauthorized(?REGISTER, M#unregister.request_id),
+    Ctxt;
 unauthorized(#call{} = M, Ctxt) ->
     unauthorized(?CALL, M#call.request_id, Ctxt);
-
 unauthorized(#invocation{} = M, Ctxt) ->
     unauthorized(?INVOCATION, M#invocation.request_id, Ctxt);
-
 unauthorized(#cancel{} = M, Ctxt) ->
     unauthorized(?CANCEL, M#cancel.request_id, Ctxt).
-
 
 %% @private
 unauthorized(Type, ReqId, Ctxt) ->
@@ -299,10 +268,22 @@ unauthorized(Type, ReqId, Ctxt) ->
     >>,
     Description = <<
         "The operation you've requested is targeting a realm ",
-        $\s, $(, $", Uri/binary, $", $), $,,
+        $\s,
+        $(,
+        $",
+        Uri/binary,
+        $",
+        $),
+        $,,
         " that is not your session's realm or the operation is only "
         "supported when performed by a session on the Bondy Master Realm.",
-        $\s, $(, $", (?MASTER_REALM_URI)/binary, $", $), $.
+        $\s,
+        $(,
+        $",
+        (?MASTER_REALM_URI)/binary,
+        $",
+        $),
+        $.
     >>,
     bondy_wamp_message:error(
         Type,
@@ -313,22 +294,17 @@ unauthorized(Type, ReqId, Ctxt) ->
         #{description => Description}
     ).
 
-
 %% @private
 args(#call{args = Args}) -> Args;
 args(#invocation{args = Args}) -> Args.
-
 
 %% @private
 args_len(undefined) -> 0;
 args_len(L) when is_list(L) -> length(L).
 
-
 %% @private
 to_list(undefined) -> [];
 to_list(L) when is_list(L) -> L.
-
-
 
 do_deprecated_procedure_error(M, Uri) ->
     Reason = <<"The procedure '", Uri/binary, "' has been deprecated.">>,

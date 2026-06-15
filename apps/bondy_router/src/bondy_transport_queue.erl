@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_transport_queue).
 -moduledoc """
 A bounded, ETS-based message queue for HTTP-longpoll and SSE transports.
@@ -52,28 +51,26 @@ Three layers enforce bounds:
 %% persistent_term key for the meta table name
 -define(META_TAB, bondy_transport_queue_meta).
 
-
 -record(bondy_transport_queue_entry, {
-    key                     ::  bondy_transport_queue_key(),
-    message                 ::  wamp_message(),
-    enqueued_at             ::  pos_integer(),
-    size_bytes              ::  non_neg_integer()
+    key :: bondy_transport_queue_key(),
+    message :: wamp_message(),
+    enqueued_at :: pos_integer(),
+    size_bytes :: non_neg_integer()
 }).
 
 -record(bondy_transport_queue_meta, {
-    transport_id            ::  binary(),
-    atomics                 ::  atomics:atomics_ref(),
-    realm_uri               ::  uri(),
-    session_id              ::  bondy_session_id:t()
+    transport_id :: binary(),
+    atomics :: atomics:atomics_ref(),
+    realm_uri :: uri(),
+    session_id :: bondy_session_id:t()
 }).
 
-
--type bondy_transport_queue_key()   ::  {TransportId :: binary(),
-                                         Seq :: integer()}.
--type enqueue_opts()                ::  #{}.
+-type bondy_transport_queue_key() :: {
+    TransportId :: binary(), Seq :: integer()
+}.
+-type enqueue_opts() :: #{}.
 
 -export_type([enqueue_opts/0]).
-
 
 %% API
 -export([init/0]).
@@ -86,11 +83,9 @@ Three layers enforce bounds:
 -export([byte_size/1]).
 -export([tables/0]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc """
 Initialises the sharded queue tables and the metadata table.
@@ -162,7 +157,6 @@ init() ->
 
     ok.
 
-
 -doc """
 Initialises the queue metadata for a transport.
 
@@ -176,8 +170,9 @@ the first `enqueue/3` for this transport.
     SessionId :: bondy_session_id:t()
 ) -> ok | {error, already_exists}.
 
-init_transport(TransportId, RealmUri, SessionId)
-when is_binary(TransportId) andalso is_binary(RealmUri) ->
+init_transport(TransportId, RealmUri, SessionId) when
+    is_binary(TransportId) andalso is_binary(RealmUri)
+->
     AtomicsRef = atomics:new(3, [{signed, true}]),
     Meta = #bondy_transport_queue_meta{
         transport_id = TransportId,
@@ -192,7 +187,6 @@ when is_binary(TransportId) andalso is_binary(RealmUri) ->
             {error, already_exists}
     end.
 
-
 -doc """
 Removes all queue entries and the metadata entry for a transport.
 """.
@@ -202,20 +196,21 @@ delete_transport(TransportId) when is_binary(TransportId) ->
     Tab = locate_table(TransportId),
 
     %% Delete all entries for this transport using a match spec
-    MS = [{
-        #bondy_transport_queue_entry{
-            key = {TransportId, '_'},
-            _ = '_'
-        },
-        [],
-        [true]
-    }],
+    MS = [
+        {
+            #bondy_transport_queue_entry{
+                key = {TransportId, '_'},
+                _ = '_'
+            },
+            [],
+            [true]
+        }
+    ],
     _ = ets:select_delete(Tab, MS),
 
     %% Delete the metadata entry
     _ = ets:delete(?META_TAB, TransportId),
     ok.
-
 
 -doc """
 Enqueues a message for a transport.
@@ -229,8 +224,9 @@ Checks bounds before inserting and evicts oldest entries if the queue exceeds
     Opts :: enqueue_opts()
 ) -> ok | {error, Reason :: term()}.
 
-enqueue(TransportId, Message, _Opts)
-when is_binary(TransportId) ->
+enqueue(TransportId, Message, _Opts) when
+    is_binary(TransportId)
+->
     %% 1. Locate the metadata entry (cached atomics ref)
     case lookup_meta(TransportId) of
         {ok, Meta} ->
@@ -238,7 +234,6 @@ when is_binary(TransportId) ->
         error ->
             {error, transport_not_found}
     end.
-
 
 -doc """
 Dequeues up to `MaxN` non-expired messages for a transport.
@@ -252,15 +247,15 @@ and counters are decremented atomically.
     MaxN :: pos_integer()
 ) -> [wamp_message()].
 
-dequeue_batch(TransportId, MaxN)
-when is_binary(TransportId) andalso is_integer(MaxN) andalso MaxN > 0 ->
+dequeue_batch(TransportId, MaxN) when
+    is_binary(TransportId) andalso is_integer(MaxN) andalso MaxN > 0
+->
     case lookup_meta(TransportId) of
         {ok, Meta} ->
             do_dequeue_batch(TransportId, MaxN, Meta);
         error ->
             []
     end.
-
 
 -doc """
 Removes expired messages across all partitions.
@@ -279,7 +274,6 @@ evict_expired_all() ->
         Tables
     ).
 
-
 -doc """
 Returns the current message count for a transport.
 """.
@@ -292,7 +286,6 @@ count(TransportId) when is_binary(TransportId) ->
         error ->
             0
     end.
-
 
 -doc """
 Returns the current cumulative byte size for a transport.
@@ -307,7 +300,6 @@ byte_size(TransportId) when is_binary(TransportId) ->
             0
     end.
 
-
 -doc """
 Returns the list of all sharded queue table identifiers.
 """.
@@ -317,11 +309,9 @@ tables() ->
     Ring = persistent_term:get(?RING_KEY),
     maps:values(Ring).
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 do_enqueue(TransportId, Message, Meta) ->
@@ -363,7 +353,6 @@ do_enqueue(TransportId, Message, Meta) ->
     atomics:add(AtomicsRef, ?BYTES_SLOT, MsgSize),
     ok.
 
-
 %% @private
 evict_oldest(TransportId, AtomicsRef, _NeededBytes) ->
     Tab = locate_table(TransportId),
@@ -371,11 +360,13 @@ evict_oldest(TransportId, AtomicsRef, _NeededBytes) ->
     %% Select the oldest N entries for this transport using a match spec.
     %% Because the key is {TransportId, Seq} in an ordered_set, the
     %% smallest Seq values (oldest) appear first in iteration order.
-    MS = [{
-        #bondy_transport_queue_entry{key = {TransportId, '_'}, _ = '_'},
-        [],
-        ['$_']
-    }],
+    MS = [
+        {
+            #bondy_transport_queue_entry{key = {TransportId, '_'}, _ = '_'},
+            [],
+            ['$_']
+        }
+    ],
 
     %% Fetch a small batch of oldest entries
     case ets:select(Tab, MS, ?EVICTION_BATCH_SIZE) of
@@ -397,7 +388,6 @@ evict_oldest(TransportId, AtomicsRef, _NeededBytes) ->
             )
     end.
 
-
 %% @private
 do_dequeue_batch(TransportId, MaxN, Meta) ->
     Tab = locate_table(TransportId),
@@ -407,16 +397,18 @@ do_dequeue_batch(TransportId, MaxN, Meta) ->
     Now = erlang:system_time(millisecond),
     MessageTTL = bondy_config:get([transport_queue, message_ttl], 300000),
 
-    MS = [{
-        #bondy_transport_queue_entry{
-            key = {TransportId, '$1'},
-            enqueued_at = '$2',
-            message = '$3',
-            size_bytes = '$4'
-        },
-        [{'>', {'+', '$2', {const, MessageTTL}}, {const, Now}}],
-        [{{'$1', '$3', '$4'}}]
-    }],
+    MS = [
+        {
+            #bondy_transport_queue_entry{
+                key = {TransportId, '$1'},
+                enqueued_at = '$2',
+                message = '$3',
+                size_bytes = '$4'
+            },
+            [{'>', {'+', '$2', {const, MessageTTL}}, {const, Now}}],
+            [{{'$1', '$3', '$4'}}]
+        }
+    ],
 
     case ets:select(Tab, MS, MaxN) of
         '$end_of_table' ->
@@ -436,22 +428,23 @@ do_dequeue_batch(TransportId, MaxN, Meta) ->
             )
     end.
 
-
 %% @private
 evict_expired_partition(Tab, Now) ->
     MessageTTL = bondy_config:get([transport_queue, message_ttl], 300000),
 
     %% Match all entries where enqueued_at + TTL <= Now
-    MS = [{
-        #bondy_transport_queue_entry{
-            key = '$1',
-            enqueued_at = '$2',
-            size_bytes = '$3',
-            _ = '_'
-        },
-        [{'=<', {'+', '$2', {const, MessageTTL}}, {const, Now}}],
-        [{{'$1', '$3'}}]
-    }],
+    MS = [
+        {
+            #bondy_transport_queue_entry{
+                key = '$1',
+                enqueued_at = '$2',
+                size_bytes = '$3',
+                _ = '_'
+            },
+            [{'=<', {'+', '$2', {const, MessageTTL}}, {const, Now}}],
+            [{{'$1', '$3'}}]
+        }
+    ],
 
     case ets:select(Tab, MS, ?EVICTION_BATCH_SIZE) of
         '$end_of_table' ->
@@ -461,15 +454,12 @@ evict_expired_partition(Tab, Now) ->
             evict_expired_cont(Cont)
     end.
 
-
 %% @private
 evict_expired_cont('$end_of_table') ->
     ok;
-
 evict_expired_cont({Expired, Cont}) ->
     do_evict_expired_entries(Expired),
     evict_expired_cont(ets:select(Cont)).
-
 
 %% @private
 do_evict_expired_entries(Expired) ->
@@ -493,14 +483,12 @@ do_evict_expired_entries(Expired) ->
         Expired
     ).
 
-
 %% @private
 locate_table(TransportId) ->
     Ring = persistent_term:get(?RING_KEY),
     NumPartitions = maps:size(Ring),
     Bucket = bondy_consistent_hashing:bucket(TransportId, NumPartitions),
     maps:get(Bucket, Ring).
-
 
 %% @private
 lookup_meta(TransportId) ->
@@ -510,5 +498,3 @@ lookup_meta(TransportId) ->
         [] ->
             error
     end.
-
-

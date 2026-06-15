@@ -16,22 +16,19 @@ procedure calls that list registrations, subscriptions and callees for a realm.
 
 -export([handle_call/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -spec handle_call(
-    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()
+) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
 
 %% -----------------------------------------------------------------------------
@@ -43,24 +40,20 @@ handle_call(?BONDY_REGISTRATION_LIST, M, Ctxt) ->
         {ok, Result} ->
             R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
             {reply, R};
-
         {error, Reason} ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(?BONDY_REGISTRATION_CALLEE_LIST, M, Ctxt) ->
     Args = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1, 2),
     case list_callees(Args) of
         {ok, Result} ->
             R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
             {reply, R};
-
         {error, Reason} ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 %% -----------------------------------------------------------------------------
 %% bondy.subscription.*
 %% -----------------------------------------------------------------------------
@@ -70,28 +63,21 @@ handle_call(?BONDY_SUBSCRIPTION_LIST, M, Ctxt) ->
         {ok, Result} ->
             R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
             {reply, R};
-
         {error, Reason} ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-
 handle_call(_, M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
 %% @private
 list(Type, RealmUri) ->
     list(Type, RealmUri, fun bondy_registry_entry:to_external/1).
-
 
 list(Type, RealmUri, Fun) ->
     try
@@ -129,7 +115,6 @@ list_callees([RealmUri]) ->
             }),
             {error, Reason}
     end;
-
 list_callees([RealmUri, ProcedureUri]) ->
     try
         case bondy_dealer:callees(RealmUri, ProcedureUri) of

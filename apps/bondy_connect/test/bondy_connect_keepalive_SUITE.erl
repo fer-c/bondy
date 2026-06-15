@@ -19,7 +19,6 @@ extracted from the connection statem (review A2). No sockets, no processes.
 -define(TIMEOUT, 1000).
 -define(MAX, 3).
 
-
 all() ->
     [
         enabled_idle_pings,
@@ -29,12 +28,10 @@ all() ->
         disabled_is_all_noop
     ].
 
-
 %% An enabled keepalive answers the idle timer with a ping + its deadline.
 enabled_idle_pings(_) ->
     KA = bondy_connect_keepalive:new(enabled()),
     ?assertEqual({ping, ?TIMEOUT}, bondy_connect_keepalive:on_idle(KA)).
-
 
 %% Timer actions and payload reflect the config.
 enabled_actions_and_payload(_) ->
@@ -51,7 +48,6 @@ enabled_actions_and_payload(_) ->
     ?assert(is_binary(P)),
     ?assertEqual(12, byte_size(P)).
 
-
 %% Repeated unanswered ping deadlines eventually give up (reconnect) — and every
 %% step before that asks for another ping.
 ping_timeouts_exhaust_to_give_up(_) ->
@@ -63,7 +59,6 @@ ping_timeouts_exhaust_to_give_up(_) ->
     %% trigger) but still be bounded by the configured attempts.
     ?assert(length(Decisions) > 1),
     ?assert(length(Decisions) =< ?MAX + 2).
-
 
 %% Inbound activity resets the failure budget: after some failures, an
 %% on_activity restores the full budget before the next give-up.
@@ -80,7 +75,6 @@ activity_resets_budget(_) ->
     {DecisionsFresh, _} = drain_timeouts(KA0, 0),
     ?assertEqual(length(DecisionsFresh), length(Decisions)).
 
-
 %% A disabled keepalive is a no-op everywhere.
 disabled_is_all_noop(_) ->
     lists:foreach(
@@ -96,7 +90,6 @@ disabled_is_all_noop(_) ->
         [#{}, #{enabled => false}, #{enabled => false, idle_timeout => 1}]
     ).
 
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -108,7 +101,6 @@ enabled() ->
         timeout => ?TIMEOUT,
         max_attempts => ?MAX
     }.
-
 
 %% @private Fire ping-deadline timeouts until give_up, collecting the decision
 %% kind (`ping' | `give_up') at each step. Guarded against a runaway loop.

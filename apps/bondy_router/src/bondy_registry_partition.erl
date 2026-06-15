@@ -20,36 +20,34 @@
 -define(REGISTRY_REMOTE_IDX_KEY(Index), {?SERVER_NAME(Index), remote_tab}).
 -define(REGISTRY_STORE_KEY(Index), {?SERVER_NAME(Index), store}).
 
-
 -record(state, {
-    index               ::  integer(),
-    store               ::  bondy_registry_store:t(),
-    remote_tab          ::  bondy_registry_remote_index:t(),
+    index :: integer(),
+    store :: bondy_registry_store:t(),
+    remote_tab :: bondy_registry_remote_index:t(),
     %% One janitor per ptrie handle in the store. The map is keyed by pid
     %% so an `{'EXIT', Pid, _}` lookup tells us which handle to respawn
     %% against. The handle survives janitor crashes — its ETS tables are
     %% owned by this partition gen_server.
-    janitors            ::  #{pid() => bondy_registry_ptrie:handle()},
-    start_ts            ::  pos_integer()
+    janitors :: #{pid() => bondy_registry_ptrie:handle()},
+    start_ts :: pos_integer()
 }).
 
-
--type execute_fun()     ::  fun((bondy_registry_store:t()) -> execute_ret())
-                            | fun((...) -> execute_ret()).
--type execute_ret()     ::  any().
+-type execute_fun() ::
+    fun((bondy_registry_store:t()) -> execute_ret())
+    | fun((...) -> execute_ret()).
+-type execute_ret() :: any().
 
 %% Aliases
--type entry()               ::  bondy_registry_entry:t().
--type entry_type()          ::  bondy_registry_entry:entry_type().
--type entry_key()           ::  bondy_registry_entry:key().
--type continuation()        ::  bondy_registry_store:continuation().
--type wildcard(T)           ::  bondy_registry_store:wildcart(T).
--type eot()                 ::  bondy_registry_store:eot().
--type store()               ::  bondy_registry_store:t().
--type find_result()         ::  bondy_registry_store:find_result().
--type match_result()        ::  bondy_registry_store:match_result().
--type reg_match()           ::  bondy_registry_store:reg_match().
-
+-type entry() :: bondy_registry_entry:t().
+-type entry_type() :: bondy_registry_entry:entry_type().
+-type entry_key() :: bondy_registry_entry:key().
+-type continuation() :: bondy_registry_store:continuation().
+-type wildcard(T) :: bondy_registry_store:wildcart(T).
+-type eot() :: bondy_registry_store:eot().
+-type store() :: bondy_registry_store:t().
+-type find_result() :: bondy_registry_store:find_result().
+-type match_result() :: bondy_registry_store:match_result().
+-type reg_match() :: bondy_registry_store:reg_match().
 
 -export_type([continuation/0]).
 -export_type([eot/0]).
@@ -57,7 +55,6 @@
 -export_type([find_result/0]).
 -export_type([match_result/0]).
 -export_type([reg_match/0]).
-
 
 %% SERVER API
 -export([async_execute/2]).
@@ -97,7 +94,6 @@
 -export([find_matches/1]).
 -export([find_matches/5]).
 
-
 %% GEN_SERVER CALLBACKS
 -export([code_change/3]).
 -export([handle_call/3]).
@@ -106,12 +102,9 @@
 -export([init/1]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc "Starts the registry partition server".
 start_link(Index) ->
@@ -119,20 +112,17 @@ start_link(Index) ->
     ServerName = {via, gproc, bondy_gproc:local_name(?SERVER_NAME(Index))},
     gen_server:start_link(ServerName, ?MODULE, [Index], Opts).
 
-
 -doc "Returns the pid of the server in based on hashing `Arg`.".
 -spec pick(Arg :: binary() | entry()) -> pid().
 
 pick(Arg) when is_binary(Arg) ->
     gproc_pool:pick_worker(?REGISTRY_POOL, Arg);
-
-pick(Arg)  ->
-    bondy_registry_entry:is_entry(Arg)
-        orelse bondy_registry_entry:is_key(Arg)
-        orelse error(badarg),
+pick(Arg) ->
+    bondy_registry_entry:is_entry(Arg) orelse
+        bondy_registry_entry:is_key(Arg) orelse
+        error(badarg),
 
     pick(bondy_registry_entry:realm_uri(Arg)).
-
 
 -doc """
 Returns the underlying store the partition if `Arg` is a pid. Otherwise hashes
@@ -143,10 +133,8 @@ Returns the underlying store the partition if `Arg` is a pid. Otherwise hashes
 
 store(Pid) when is_pid(Pid) ->
     persistent_term:get(?REGISTRY_STORE_KEY(Pid), undefined);
-
 store(Arg) when is_binary(Arg) orelse is_tuple(Arg) ->
     store(pick(Arg)).
-
 
 -doc """
 Returns statistical information about the partition.
@@ -156,20 +144,15 @@ Returns statistical information about the partition.
 info(Partition) when is_pid(Partition) ->
     bondy_registry_store:info(store(Partition)).
 
-
 -spec remote_index(Arg :: pid() | nodestring() | node()) ->
     bondy_registry_remote_index:t() | undefined.
 
 remote_index(Pid) when is_pid(Pid) ->
     persistent_term:get(?REGISTRY_REMOTE_IDX_KEY(Pid), undefined);
-
 remote_index(Node) when is_atom(Node) ->
     remote_index(atom_to_binary(Node, utf8));
-
 remote_index(Arg) when is_binary(Arg) ->
     remote_index(pick(Arg)).
-
-
 
 -spec execute(Partition :: pid(), Fun :: execute_fun()) ->
     execute_ret() | {error, timeout}.
@@ -177,22 +160,22 @@ remote_index(Arg) when is_binary(Arg) ->
 execute(Partition, Fun) ->
     execute(Partition, Fun, []).
 
-
 -spec execute(Partition :: pid(), Fun :: execute_fun(), Args :: [any()]) ->
     {ok, execute_ret()} | {error, timeout}.
 
 execute(Partition, Fun, Args) ->
     execute(Partition, Fun, Args, 5_000).
 
-
 -spec execute(
     Partition :: pid(),
     Fun :: execute_fun(),
     Args :: [any()],
-    Timeout :: timeout()) -> {ok, execute_ret()} | {error, timeout}.
+    Timeout :: timeout()
+) -> {ok, execute_ret()} | {error, timeout}.
 
-execute(Partition, Fun, Args, Timeout)
-when is_pid(Partition), is_list(Args), is_function(Fun, length(Args)) ->
+execute(Partition, Fun, Args, Timeout) when
+    is_pid(Partition), is_list(Args), is_function(Fun, length(Args))
+->
     try
         gen_server:call(Partition, {execute, Fun, Args}, Timeout)
     catch
@@ -200,27 +183,22 @@ when is_pid(Partition), is_list(Args), is_function(Fun, length(Args)) ->
             {error, timeout}
     end.
 
-
 -spec async_execute(Partition :: pid(), Fun :: execute_fun()) -> ok.
 
 async_execute(Partition, Fun) ->
     async_execute(Partition, Fun, []).
 
-
 -spec async_execute(Partition :: pid(), Fun :: execute_fun(), Args :: [any()]) ->
     ok.
 
-async_execute(Partition, Fun, Args)
-when is_pid(Partition), is_list(Args), is_function(Fun, length(Args)) ->
+async_execute(Partition, Fun, Args) when
+    is_pid(Partition), is_list(Args), is_function(Fun, length(Args))
+->
     gen_server:cast(Partition, {execute, Fun, Args}).
-
-
 
 %% =============================================================================
 %% CRUD API
 %% =============================================================================
-
-
 
 -doc """
 Used for adding proxy entries only as it skips all checks.
@@ -234,9 +212,7 @@ add(Partition, Entry) when is_pid(Partition) ->
     resulto:then(Result, fun(Value) ->
         _ = add_remote_index(Entry),
         {ok, Value}
-
     end).
-
 
 -doc """
 The function inserts the indices for an entry.
@@ -263,14 +239,11 @@ add_indices(Partition, Entry) when is_pid(Partition) ->
         ok
     end).
 
-
 -doc "".
 -spec remove(Partition :: pid(), Entry :: entry()) -> ok.
 
 remove(Partition, Entry) when is_pid(Partition) ->
     remove(Partition, Entry, #{broadcast => true}).
-
-
 
 -doc """
 Removes a registration or subscription entry (`bondy_registry_entry:t()`) from
@@ -309,7 +282,6 @@ take(Partition, Entry) when is_pid(Partition) ->
         {ok, Value}
     end).
 
-
 -doc """
 WARNING: Never use this unless you know exactly what you are doing!
 We use this only when we want to remove a remote entry from the registry as
@@ -334,7 +306,6 @@ dirty_delete(Partition, Entry) when is_pid(Partition) ->
         {ok, Value}
     end).
 
-
 -doc """
 WARNING: Never use this unless you know exactly what you are doing!
 We use this only when we want to remove a remote entry from the registry as
@@ -351,7 +322,8 @@ the object is the same in all nodes. I think that comes naturally from
 doing (1) anyway, but we need to check, e.g. timestamp differences?
 """.
 -spec dirty_delete(
-    Partition :: pid(), Type :: entry_type(), EntryKey :: entry_key()) ->
+    Partition :: pid(), Type :: entry_type(), EntryKey :: entry_key()
+) ->
     {ok, entry()} | {error, not_found | any()}.
 
 dirty_delete(Partition, Type, EntryKey) when is_pid(Partition) ->
@@ -362,38 +334,36 @@ dirty_delete(Partition, Type, EntryKey) when is_pid(Partition) ->
         {ok, Entry}
     end).
 
-
 -doc "".
 -spec lookup(
-    Partition :: pid(), IndexEntry :: bondy_registry_store:index_entry()) ->
+    Partition :: pid(), IndexEntry :: bondy_registry_store:index_entry()
+) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
 lookup(Partition, IndexEntry) when is_pid(Partition) ->
     bondy_registry_store:lookup(store(Partition), IndexEntry).
 
-
 -doc "".
 -spec lookup(
-    Partition :: pid(), Type :: entry_type(), EntryKey :: entry_key()) ->
+    Partition :: pid(), Type :: entry_type(), EntryKey :: entry_key()
+) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
 lookup(Partition, Type, EntryKey) when is_pid(Partition) ->
     bondy_registry_store:lookup(store(Partition), Type, EntryKey).
-
 
 -doc "".
 -spec lookup(
     Partition :: pid(),
     Type :: entry_type(),
     RealmUri :: uri(),
-    EntryId :: id()) ->
+    EntryId :: id()
+) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
 lookup(Partition, Type, RealmUri, EntryId) when is_pid(Partition) ->
     Store = store(Partition),
     bondy_registry_store:lookup(Store, Type, RealmUri, EntryId, []).
-
-
 
 -doc "".
 -spec lookup(
@@ -401,20 +371,19 @@ lookup(Partition, Type, RealmUri, EntryId) when is_pid(Partition) ->
     Type :: entry_type(),
     RealmUri :: uri(),
     EntryId :: id(),
-    Opts :: key_value:t()) ->
+    Opts :: key_value:t()
+) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
 lookup(Partition, Type, RealmUri, EntryId, Opts) ->
     Store = store(Partition),
     bondy_registry_store:lookup(Store, Type, RealmUri, EntryId, Opts).
 
-
 -doc "".
 -spec find(continuation()) -> find_result().
 
 find(Cont) ->
     bondy_registry_store:find(Cont).
-
 
 -doc """
 Finds entries in the registry using a pattern.
@@ -426,7 +395,6 @@ and URI use the `match_` functions instead.
 
 find(Partition, Type, Pattern) when ?IS_TYPE(Type) ->
     bondy_registry_store:find(store(Partition), Type, Pattern).
-
 
 -doc """
 Finds entries in the registry using a pattern.
@@ -440,18 +408,17 @@ and URI use the `match_` functions instead.
 find(Partition, Type, Pattern, Opts) when ?IS_TYPE(Type) ->
     bondy_registry_store:find(store(Partition), Type, Pattern, Opts).
 
-
 -doc "".
 -spec fold(
     Partition :: pid(),
     Fun :: plum_db:fold_fun(),
     Acc :: any(),
-    Cont :: continuation()) ->
+    Cont :: continuation()
+) ->
     any() | {any(), continuation() | eot()}.
 
 fold(Partition, Fun, Acc, Cont) ->
     bondy_registry_store:fold(store(Partition), Fun, Acc, Cont).
-
 
 -doc "".
 -spec fold(
@@ -459,12 +426,12 @@ fold(Partition, Fun, Acc, Cont) ->
     Fun :: plum_db:fold_fun(),
     Acc :: any(),
     Cont :: continuation(),
-    Opts :: plum_db:fold_opts()) ->
+    Opts :: plum_db:fold_opts()
+) ->
     any() | {any(), continuation() | eot()}.
 
 fold(Partition, Fun, Acc, Cont, Opts) ->
     bondy_registry_store:fold(store(Partition), Fun, Acc, Cont, Opts).
-
 
 -doc "".
 -spec fold(
@@ -473,12 +440,12 @@ fold(Partition, Fun, Acc, Cont, Opts) ->
     RealmUri :: wildcard(uri()),
     Fun :: plum_db:fold_fun(),
     Acc :: any(),
-    Opts :: plum_db:fold_opts()) ->
+    Opts :: plum_db:fold_opts()
+) ->
     any() | {any(), continuation() | eot()}.
 
 fold(Partition, Type, RealmUri, Fun, Acc, Opts) ->
     bondy_registry_store:fold(store(Partition), Type, RealmUri, Fun, Acc, Opts).
-
 
 -doc "".
 -spec continuation_info(continuation()) ->
@@ -487,12 +454,9 @@ fold(Partition, Type, RealmUri, Fun, Acc, Opts) ->
 continuation_info(Cont) ->
     bondy_registry_store:continuation_info(Cont).
 
-
-
 %% =============================================================================
 %% INDEX-BASED APIS
 %% =============================================================================
-
 
 -doc """
 Continues a match started with `match/5'. The next chunk of the size
@@ -505,8 +469,6 @@ When there are no more objects in the table, '$end_of_table' is returned.
 
 match(Cont) ->
     bondy_registry_store:match(Cont).
-
-
 
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri`.
@@ -521,13 +483,10 @@ through a gen_server.
     RealmUri :: uri(),
     Uri :: uri(),
     Opts :: map()
-    ) -> match_result().
-
+) -> match_result().
 
 match(Partition, Type, RealmUri, Uri, Opts) when is_pid(Partition) ->
     bondy_registry_store:match(store(Partition), Type, RealmUri, Uri, Opts).
-
-
 
 -doc """
 Continues a find started with `find_matches/5'. The next chunk of the size
@@ -540,7 +499,6 @@ When there are no more objects in the table, '$end_of_table' is returned.
 
 find_matches(Cont) ->
     bondy_registry_store:find_matches(Cont).
-
 
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri`.
@@ -555,21 +513,16 @@ through a gen_server.
     RealmUri :: uri(),
     Uri :: uri(),
     Opts :: map()
-    ) -> match_result().
-
+) -> match_result().
 
 find_matches(Partition, Type, RealmUri, Uri, Opts) when is_pid(Partition) ->
     bondy_registry_store:find_matches(
         store(Partition), Type, RealmUri, Uri, Opts
     ).
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init([Index]) ->
     %% Trap exits otherwise terminate/2 won't be called when shutdown by
@@ -598,11 +551,9 @@ init([Index]) ->
     },
     {ok, State}.
 
-
 handle_call({execute, Fun, Args}, _From, State) ->
     Result = do_execute(State, Fun, Args),
     {reply, Result, State};
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -611,12 +562,9 @@ handle_call(Event, From, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-
-
 handle_cast({execute, Fun, Args}, State) ->
     _ = do_execute(State, Fun, Args),
     {noreply, State};
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -624,13 +572,10 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
-
 handle_info({'ETS-TRANSFER', _, _, _}, State) ->
     %% The store and remote_index ets tables use bondy_table_manager.
     %% We ignore as tables are named.
     {noreply, State};
-
 handle_info({'EXIT', Pid, Reason}, #state{janitors = Js} = State) ->
     case maps:take(Pid, Js) of
         {Handle, Js1} ->
@@ -654,7 +599,6 @@ handle_info({'EXIT', Pid, Reason}, #state{janitors = Js} = State) ->
             }),
             {noreply, State}
     end;
-
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
         reason => unexpected_event,
@@ -662,31 +606,21 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(normal, State) ->
     cleanup(State);
-
 terminate(shutdown, State) ->
     cleanup(State);
-
 terminate({shutdown, _}, State) ->
     cleanup(State);
-
 terminate(_Reason, State) ->
     cleanup(State).
-
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 cleanup(#state{janitors = Js}) ->
     _ = persistent_term:erase(?REGISTRY_STORE_KEY(self())),
@@ -703,7 +637,6 @@ cleanup(#state{janitors = Js}) ->
     ),
     ok.
 
-
 %% @private
 start_janitors(Handles) ->
     lists:foldl(
@@ -714,12 +647,10 @@ start_janitors(Handles) ->
         Handles
     ).
 
-
 %% @private
 start_janitor(Handle) ->
     {ok, Pid} = bondy_registry_ptrie_janitor:start_link(Handle, #{}),
     Pid.
-
 
 do_execute(_State, Fun, []) ->
     try
@@ -736,7 +667,6 @@ do_execute(_State, Fun, []) ->
             }),
             {error, Reason}
     end;
-
 do_execute(_State, Fun, Args) ->
     try
         resulto:flatten(
@@ -760,7 +690,6 @@ add_remote_index(Entry) ->
         _:_ ->
             ok
     end.
-
 
 delete_remote_index(Entry) ->
     try

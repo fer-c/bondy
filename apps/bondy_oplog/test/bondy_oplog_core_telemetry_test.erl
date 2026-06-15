@@ -133,7 +133,9 @@ range_event_counts_entries() ->
     seed_projection(PH, <<"k2">>, 2, {set, <<"v2">>, 2}),
     with_handler(?EVENTS, fun() ->
         {ok, Rows} =
-            bondy_oplog_core:range(NS, primary, {<<"k">>, <<"l">>}, #{shard => 0}),
+            bondy_oplog_core:range(NS, primary, {<<"k">>, <<"l">>}, #{
+                shard => 0
+            }),
         2 = length(Rows)
     end),
     {Meas, Meta} = expect_event([bondy_oplog_core, range]),

@@ -12,8 +12,6 @@
 
 -compile([nowarn_export_all, export_all]).
 
-
-
 all() ->
     [
         start_and_stop,
@@ -26,15 +24,12 @@ all() ->
         session_record_transport_fields
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 init_per_testcase(_TestCase, Config) ->
     %% Set test defaults
@@ -44,17 +39,12 @@ init_per_testcase(_TestCase, Config) ->
     bondy_config:set([transport_queue, transport_ttl], 3600000),
     Config.
 
-
 end_per_testcase(_TestCase, _Config) ->
     ok.
-
-
 
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 start_and_stop(_Config) ->
     TransportId = make_transport_id(),
@@ -92,7 +82,6 @@ start_and_stop(_Config) ->
         bondy_transport_queue:enqueue(TransportId, make_event(1), #{})
     ).
 
-
 whereis_lookup(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<"com.test.realm">>,
@@ -115,7 +104,6 @@ whereis_lookup(_Config) ->
     ?assertEqual(
         undefined, bondy_http_transport_session:whereis(TransportId)
     ).
-
 
 inactivity_timeout(_Config) ->
     TransportId = make_transport_id(),
@@ -146,7 +134,6 @@ inactivity_timeout(_Config) ->
     ?assertEqual(
         undefined, bondy_http_transport_session:whereis(TransportId)
     ).
-
 
 touch_extends_lifetime(_Config) ->
     TransportId = make_transport_id(),
@@ -184,7 +171,6 @@ touch_extends_lifetime(_Config) ->
         ct:fail("Transport session did not auto-close after touch stopped")
     end.
 
-
 queue_integration(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<"com.test.realm">>,
@@ -217,7 +203,6 @@ queue_integration(_Config) ->
 
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
-
 
 maybe_enqueue_http_transport(_Config) ->
     TransportId = make_transport_id(),
@@ -272,7 +257,6 @@ maybe_enqueue_http_transport(_Config) ->
     bondy_session:close(StoredSession, undefined),
     ok = bondy_http_transport_session:close(TransportId).
 
-
 maybe_enqueue_websocket(_Config) ->
     RealmUri = <<"com.leapsight.test.ws_session">>,
     SessionId = bondy_session_id:new(),
@@ -305,7 +289,6 @@ maybe_enqueue_websocket(_Config) ->
 
     %% Cleanup
     bondy_session:close(StoredSession, undefined).
-
 
 session_record_transport_fields(_Config) ->
     RealmUri = <<"com.leapsight.test.transport_fields">>,
@@ -385,19 +368,14 @@ session_record_transport_fields(_Config) ->
     ?assertEqual(undefined, bondy_session:transport_type(Session5)),
     ?assertEqual(undefined, bondy_session:transport_id(Session5)).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 make_transport_id() ->
     Bin = integer_to_binary(erlang:unique_integer([positive])),
     <<"test-http-transport-", Bin/binary>>.
-
 
 %% @private
 make_event(N) ->

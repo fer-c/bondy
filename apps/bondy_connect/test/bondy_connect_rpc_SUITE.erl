@@ -23,7 +23,6 @@ per-call timeouts, and unregistration.
 -define(HOST, "127.0.0.1").
 -define(PORT, 18082).
 
-
 all() ->
     [
         register_and_call,
@@ -35,7 +34,6 @@ all() ->
         load_rejection_under_burst
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     {ok, _} = application:ensure_all_started(bondy_connect),
@@ -45,13 +43,9 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 register_and_call(_) ->
     Callee = connect(),
@@ -68,14 +62,15 @@ register_and_call(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
 call_async_token_reply(_) ->
     Callee = connect(),
     Echo = fun(Args, _KWArgs, _Details) -> {reply, Args} end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.async">>, Echo),
 
     Caller = connect(),
-    {ok, Token} = bondy_connect:call_async(Caller, <<"com.example.async">>, [<<"x">>]),
+    {ok, Token} = bondy_connect:call_async(Caller, <<"com.example.async">>, [
+        <<"x">>
+    ]),
     ?assert(is_reference(Token)),
     receive
         {bondy_connect, Token, Reply} ->
@@ -87,11 +82,12 @@ call_async_token_reply(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
 unregister_stops_routing(_) ->
     Callee = connect(),
     Echo = fun(Args, _, _) -> {reply, Args} end,
-    {ok, RegId} = bondy_connect:register(Callee, <<"com.example.transient">>, Echo),
+    {ok, RegId} = bondy_connect:register(
+        Callee, <<"com.example.transient">>, Echo
+    ),
     ok = bondy_connect:unregister(Callee, RegId),
 
     Caller = connect(),
@@ -100,7 +96,6 @@ unregister_stops_routing(_) ->
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
-
 
 handler_error_propagates(_) ->
     Callee = connect(),
@@ -115,7 +110,6 @@ handler_error_propagates(_) ->
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
-
 
 handler_crash_isolation(_) ->
     Callee = connect(),
@@ -133,16 +127,20 @@ handler_crash_isolation(_) ->
     ?assertEqual(established, bondy_connect:status(Callee)),
     Ok = fun(Args, _, _) -> {reply, Args} end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.still_ok">>, Ok),
-    {ok, R2} = bondy_connect:call(Caller, <<"com.example.still_ok">>, [<<"alive">>]),
+    {ok, R2} = bondy_connect:call(Caller, <<"com.example.still_ok">>, [
+        <<"alive">>
+    ]),
     ?assertEqual([<<"alive">>], maps:get(args, R2)),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
 per_call_timeout(_) ->
     Callee = connect(),
-    Slow = fun(_, _, _) -> timer:sleep(2000), {reply, []} end,
+    Slow = fun(_, _, _) ->
+        timer:sleep(2000),
+        {reply, []}
+    end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.slow">>, Slow),
 
     Caller = connect(),
@@ -154,8 +152,6 @@ per_call_timeout(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
-
 %% A callee capped at a single in-flight invocation rejects concurrent
 %% invocations at admission with ERROR(wamp.error.unavailable) — the
 %% `bondy_connect_load' backpressure arm (Decision 5), relayed by the router to
@@ -164,24 +160,35 @@ per_call_timeout(_) ->
 %% reachable through the public connect spec.
 load_rejection_under_burst(_) ->
     Proc = <<"com.example.capped">>,
-    {ok, Callee} = bondy_connect:connect(spec(#{handler => #{max_concurrency => 1}})),
+    {ok, Callee} = bondy_connect:connect(
+        spec(#{handler => #{max_concurrency => 1}})
+    ),
     %% Holds the only slot long enough for the burst to pile up behind it (well
     %% under the 30s default call timeout, so the admitted call still succeeds).
-    Slow = fun(_, _, _) -> timer:sleep(1500), {reply, [<<"done">>]} end,
+    Slow = fun(_, _, _) ->
+        timer:sleep(1500),
+        {reply, [<<"done">>]}
+    end,
     {ok, _} = bondy_connect:register(Callee, Proc, Slow),
 
     Caller = connect(),
     %% Burst of three concurrent calls: one takes the slot, the other two are
     %% rejected immediately while it is in flight.
     Tokens = [
-        begin {ok, T} = bondy_connect:call_async(Caller, Proc, []), T end
-        || _ <- lists:seq(1, 3)
+        begin
+            {ok, T} = bondy_connect:call_async(Caller, Proc, []),
+            T
+        end
+     || _ <- lists:seq(1, 3)
     ],
     %% Selective receive per (bound) token collects every reply regardless of
     %% arrival order — the admitted reply lands ~1.5s after the two rejections.
     Replies = [
-        receive {bondy_connect, Tk, R} -> R after 5000 -> ct:fail(no_reply) end
-        || Tk <- Tokens
+        receive
+            {bondy_connect, Tk, R} -> R
+        after 5000 -> ct:fail(no_reply)
+        end
+     || Tk <- Tokens
     ],
     Oks = [R || {ok, _} = R <- Replies],
     Unavail =
@@ -192,24 +199,18 @@ load_rejection_under_burst(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 connect() ->
     {ok, Conn} = bondy_connect:connect(spec()),
     Conn.
 
-
 %% @private
 spec() ->
     spec(#{}).
-
 
 %% @private
 spec(Extra) when is_map(Extra) ->
@@ -221,7 +222,6 @@ spec(Extra) when is_map(Extra) ->
         serializers => [json]
     },
     maps:merge(Base, Extra).
-
 
 %% @private
 add_anon_realm(RealmUri) ->

@@ -12,14 +12,14 @@
 %% WAMP authentication method identifiers. These mirror the constants in the
 %% router's `bondy_security.hrl' but are kept local so `bondy_connect' has no
 %% dependency on the `bondy' application.
--define(WAMP_ANON_AUTH,         <<"anonymous">>).
--define(WAMP_CRA_AUTH,          <<"wampcra">>).
--define(WAMP_CRYPTOSIGN_AUTH,   <<"cryptosign">>).
--define(WAMP_TICKET_AUTH,       <<"ticket">>).
+-define(WAMP_ANON_AUTH, <<"anonymous">>).
+-define(WAMP_CRA_AUTH, <<"wampcra">>).
+-define(WAMP_CRYPTOSIGN_AUTH, <<"cryptosign">>).
+-define(WAMP_TICKET_AUTH, <<"ticket">>).
 
 %% Error URI returned to the caller when a local callee handler crashes or
 %% returns an unexpected value. Kept local so `bondy_connect' has no dependency
 %% on the `bondy' application.
--define(BONDY_CONNECT_INTERNAL_ERROR,   <<"wamp.error.internal_error">>).
+-define(BONDY_CONNECT_INTERNAL_ERROR, <<"wamp.error.internal_error">>).
 
 -endif.

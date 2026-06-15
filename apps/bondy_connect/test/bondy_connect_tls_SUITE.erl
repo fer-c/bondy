@@ -18,7 +18,6 @@ extraction.
 
 -compile([nowarn_export_all, export_all]).
 
-
 all() ->
     [
         defaults_are_secure,
@@ -31,14 +30,12 @@ all() ->
         sni_explicit_name
     ].
 
-
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(ssl),
     Config.
 
 end_per_suite(_) ->
     ok.
-
 
 defaults_are_secure(_) ->
     Opts = bondy_connect_tls:options("127.0.0.1", #{}),
@@ -49,8 +46,9 @@ defaults_are_secure(_) ->
     ?assert(is_list(proplists:get_value(cacerts, Opts))),
     %% Hostname verification enabled, SNI derived from the dialed host.
     ?assert(lists:keymember(customize_hostname_check, 1, Opts)),
-    ?assertEqual("127.0.0.1", proplists:get_value(server_name_indication, Opts)).
-
+    ?assertEqual(
+        "127.0.0.1", proplists:get_value(server_name_indication, Opts)
+    ).
 
 verify_none_disables_checks(_) ->
     Opts = bondy_connect_tls:options("127.0.0.1", #{verify => verify_none}),
@@ -59,18 +57,15 @@ verify_none_disables_checks(_) ->
     ?assertEqual(undefined, proplists:get_value(depth, Opts)),
     ?assertNot(lists:keymember(customize_hostname_check, 1, Opts)).
 
-
 cacertfile_is_honoured(_) ->
     Opts = bondy_connect_tls:options("h", #{cacertfile => "/tmp/ca.pem"}),
     ?assertEqual("/tmp/ca.pem", proplists:get_value(cacertfile, Opts)),
     ?assertEqual(undefined, proplists:get_value(cacerts, Opts)).
 
-
 cacerts_is_honoured(_) ->
     CAs = [<<"der1">>, <<"der2">>],
     Opts = bondy_connect_tls:options("h", #{cacerts => CAs}),
     ?assertEqual(CAs, proplists:get_value(cacerts, Opts)).
-
 
 %% D1 regression guard: the wss transport previously lacked client-cert/mTLS and
 %% ciphers. Both transports now build options via this module, so these knobs are
@@ -86,14 +81,16 @@ mutual_tls_and_ciphers_present(_) ->
     ?assertEqual("/tmp/client.pem", proplists:get_value(certfile, Opts)),
     ?assertEqual("/tmp/client.key", proplists:get_value(keyfile, Opts)),
     ?assertEqual("secret", proplists:get_value(password, Opts)),
-    ?assertEqual(["TLS_AES_256_GCM_SHA384"], proplists:get_value(ciphers, Opts)).
-
+    ?assertEqual(
+        ["TLS_AES_256_GCM_SHA384"], proplists:get_value(ciphers, Opts)
+    ).
 
 sni_default_uses_host(_) ->
     Opts = bondy_connect_tls:options("example.com", #{}),
-    ?assertEqual("example.com", proplists:get_value(server_name_indication, Opts)),
+    ?assertEqual(
+        "example.com", proplists:get_value(server_name_indication, Opts)
+    ),
     ?assert(lists:keymember(customize_hostname_check, 1, Opts)).
-
 
 sni_can_be_disabled(_) ->
     Opts = bondy_connect_tls:options(
@@ -102,10 +99,11 @@ sni_can_be_disabled(_) ->
     ?assertEqual(disable, proplists:get_value(server_name_indication, Opts)),
     ?assertNot(lists:keymember(customize_hostname_check, 1, Opts)).
 
-
 sni_explicit_name(_) ->
     Opts = bondy_connect_tls:options(
         {127, 0, 0, 1}, #{server_name_indication => "router.internal"}
     ),
-    ?assertEqual("router.internal", proplists:get_value(server_name_indication, Opts)),
+    ?assertEqual(
+        "router.internal", proplists:get_value(server_name_indication, Opts)
+    ),
     ?assert(lists:keymember(customize_hostname_check, 1, Opts)).

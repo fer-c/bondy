@@ -17,20 +17,15 @@ API lives in `bondy_connect`.
 -export([start/2]).
 -export([stop/1]).
 
-
-
 %% =============================================================================
 %% APPLICATION CALLBACKS
 %% =============================================================================
-
-
 
 -spec start(application:start_type(), term()) ->
     {ok, pid()} | {error, term()}.
 
 start(_StartType, _StartArgs) ->
     bondy_connect_sup:start_link().
-
 
 -spec stop(term()) -> ok.
 

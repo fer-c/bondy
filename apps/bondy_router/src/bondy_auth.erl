@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_auth).
 -moduledoc """
 This module provides the behaviour to be implemented by the authentication
@@ -20,7 +19,7 @@ system and the user's password capabilities.
 -include("bondy.hrl").
 -include("bondy_security.hrl").
 
--type context()         ::  #{
+-type context() :: #{
     realm_uri := uri(),
     sso_realm_uri := uri(),
     session_id := optional(bondy_session_id:t()),
@@ -43,14 +42,14 @@ system and the user's password capabilities.
 %     authorized_keys => #{required => boolean()},
 %     channel_binding => required => boolean(), types => list()}
 % }.
--type requirements()    ::  #{
+-type requirements() :: #{
     identification := boolean,
     password := {true, #{protocols := [cra | scram]}} | boolean(),
     authorized_keys := boolean(),
     any => requirements(),
     all => requirements()
 }.
--type opts()            ::  #{host => binary()}.
+-type opts() :: #{host => binary()}.
 
 -export_type([context/0]).
 -export_type([requirements/0]).
@@ -84,45 +83,33 @@ system and the user's password capabilities.
 -export([user/1]).
 -export([user_id/1]).
 
-
-
-
-
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
-
-
 
 -callback init(Ctxt :: context()) ->
     {ok, CBState :: term()}
     | {error, Reason :: any()}.
 
-
 -callback requirements() -> requirements().
-
 
 -callback challenge(DataIn :: map(), Ctxt :: context(), CBState :: term()) ->
     {false, CBState :: term()}
     | {true, ChallengeData :: map(), CBState :: term()}
     | {error, Reason :: any(), CBState :: term()}.
 
-
 -callback authenticate(
     Signature :: binary(),
     DataIn :: map(),
     Ctxt :: context(),
-    CBState :: term()) ->
+    CBState :: term()
+) ->
     {ok, DataOut :: map(), CBState :: term()}
     | {error, Reason :: any(), CBState :: term()}.
-
-
 
 %% =============================================================================
 %% BONDY_SENSITIVE CALLBACKS
 %% =============================================================================
-
-
 
 -spec format_status(Ctxt :: context()) -> context().
 
@@ -135,8 +122,6 @@ format_status(Ctxt) ->
         callback_mod_state => bondy_sensitive:wrap(CBModState)
     }.
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -147,18 +132,17 @@ Only valid for transport-level authentication e.g. cookie
 -spec init(
     SessionId :: bondy_session_id:t(),
     Realm :: bondy_realm:t() | uri(),
-    SourceIP :: inet:ip_address()) ->
+    SourceIP :: inet:ip_address()
+) ->
     {ok, context()}
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | {no_such_groups, [bondy_rbac_group:name()]}
-    }
+        | {no_such_groups, [bondy_rbac_group:name()]}}
     | no_return().
 
 init(SessionId, Uri, SourceIP) ->
     init(SessionId, Uri, SourceIP, #{}).
-
 
 -doc """
 Only valid for transport-level authentication e.g. cookie
@@ -167,27 +151,27 @@ Only valid for transport-level authentication e.g. cookie
     SessionId :: bondy_session_id:t(),
     Realm :: bondy_realm:t() | uri(),
     SourceIP :: inet:ip_address(),
-    Opts :: opts()) ->
+    Opts :: opts()
+) ->
     {ok, context()}
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | {no_such_groups, [bondy_rbac_group:name()]}
-    }
+        | {no_such_groups, [bondy_rbac_group:name()]}}
     | no_return().
 
-init(SessionId, Uri, SourceIP, Opts)
-when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
+init(SessionId, Uri, SourceIP, Opts) when
+    is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP)
+->
     case bondy_realm:lookup(string:casefold(Uri)) of
         {ok, Realm} ->
             init(SessionId, Realm, SourceIP, Opts);
-
         {error, not_found} ->
             {error, {no_such_realm, Uri}}
     end;
-
-init(SessionId, Realm, SourceIP, Opts)
-when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
+init(SessionId, Realm, SourceIP, Opts) when
+    is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts)
+->
     try
         RealmUri = bondy_realm:uri(Realm),
         SSORealmUri = bondy_realm:sso_realm_uri(Realm),
@@ -206,12 +190,10 @@ when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
         },
         Methods = compute_available_methods(Realm, Ctxt),
         {ok, maps:put(available_methods, Methods, Ctxt)}
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -doc """
 WAMP-level authentication.
@@ -221,18 +203,17 @@ WAMP-level authentication.
     Realm :: bondy_realm:t() | uri(),
     UserId :: binary() | anonymous | undefined,
     Roles :: all | binary() | [binary()] | undefined,
-    SourceIP :: inet:ip_address()) ->
+    SourceIP :: inet:ip_address()
+) ->
     {ok, context()}
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | {no_such_groups, [bondy_rbac_group:name()]}
-    }
+        | {no_such_groups, [bondy_rbac_group:name()]}}
     | no_return().
 
 init(SessionId, Uri, UserId, Roles, SourceIP) ->
     init(SessionId, Uri, UserId, Roles, SourceIP, #{}).
-
 
 -spec init(
     SessionId :: bondy_session_id:t(),
@@ -240,27 +221,27 @@ init(SessionId, Uri, UserId, Roles, SourceIP) ->
     UserId :: binary() | anonymous | undefined,
     Roles :: all | binary() | [binary()] | undefined,
     SourceIP :: inet:ip_address(),
-    Opts :: opts()) ->
+    Opts :: opts()
+) ->
     {ok, context()}
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | {no_such_groups, [bondy_rbac_group:name()]}
-    }
+        | {no_such_groups, [bondy_rbac_group:name()]}}
     | no_return().
 
-init(SessionId, Uri, UserId, Roles, SourceIP, Opts)
-when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
+init(SessionId, Uri, UserId, Roles, SourceIP, Opts) when
+    is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP)
+->
     case bondy_realm:lookup(string:casefold(Uri)) of
         {ok, Realm} ->
             init(SessionId, Realm, UserId, Roles, SourceIP, Opts);
-
         {error, not_found} ->
             {error, {no_such_realm, Uri}}
     end;
-
-init(SessionId, Realm, Username0, Roles0, SourceIP, Opts)
-when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
+init(SessionId, Realm, Username0, Roles0, SourceIP, Opts) when
+    is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts)
+->
     try
         RealmUri = bondy_realm:uri(Realm),
         SSORealmUri = bondy_realm:sso_realm_uri(Realm),
@@ -269,64 +250,67 @@ when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
             {ok, _Claims} ->
                 %% Transport-level auth with claims — tolerate missing user
                 init_from_claims(
-                    SessionId, Realm, RealmUri, SSORealmUri,
-                    Username0, Roles0, SourceIP, Opts
+                    SessionId,
+                    Realm,
+                    RealmUri,
+                    SSORealmUri,
+                    Username0,
+                    Roles0,
+                    SourceIP,
+                    Opts
                 );
             error ->
                 %% Standard WAMP auth — user lookup required
                 init_from_user(
-                    SessionId, Realm, RealmUri, SSORealmUri,
-                    Username0, Roles0, SourceIP, Opts
+                    SessionId,
+                    Realm,
+                    RealmUri,
+                    SSORealmUri,
+                    Username0,
+                    Roles0,
+                    SourceIP,
+                    Opts
                 )
         end
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -spec methods() -> [binary()].
 
 methods() ->
     maps:keys(?BONDY_AUTHMETHODS_INFO).
 
-
 -spec method_info() -> map().
 
 method_info() ->
     ?BONDY_AUTHMETHODS_INFO.
-
 
 -spec method_info(Method :: binary()) -> map() | no_return().
 
 method_info(Method) ->
     maps:get(Method, ?BONDY_AUTHMETHODS_INFO).
 
-
 -spec session_id(context()) -> bondy_session_id:t().
 
 session_id(#{session_id := Value}) ->
     Value.
-
 
 -spec user_id(context()) -> binary() | undefined.
 
 user_id(#{user_id := Value}) ->
     Value.
 
-
 -spec method(context()) -> [binary()].
 
 method(#{method := Value}) ->
     Value.
 
-
 -spec available_methods(context()) -> [binary()].
 
 available_methods(#{available_methods := Value}) ->
     Value.
-
 
 -doc """
 Returns the sublist of `List` containing only the available authentication
@@ -340,76 +324,62 @@ available_methods(List, #{available_methods := Available}) ->
         sets:intersection(sets:from_list(List), sets:from_list(Available))
     ).
 
-
 -spec provider(context()) -> [binary()].
 
 provider(#{provider := Value}) ->
     Value.
-
 
 -spec role(context()) -> binary().
 
 role(#{role := Value}) ->
     Value.
 
-
 -spec roles(context()) -> [binary()].
 
 roles(#{roles := Value}) ->
     Value.
 
-
 -spec user(context()) -> bondy_rbac_user:t() | undefined.
 
 user(#{user := Value}) ->
     Value;
-
 user(_) ->
     undefined.
-
 
 -spec realm_uri(context()) -> uri().
 
 realm_uri(#{realm_uri := Value}) ->
     Value.
 
-
 -spec sso_realm_uri(context()) -> uri().
 
 sso_realm_uri(#{sso_realm_uri := Value}) ->
     Value.
 
-
 -spec authrealm(context()) -> uri().
 
 authrealm(#{sso_realm_uri := undefined, realm_uri := Value}) ->
     Value;
-
 authrealm(#{sso_realm_uri := Value}) ->
     Value.
-
 
 -spec source_ip(context()) -> inet:ip_address().
 
 source_ip(#{source_ip := Value}) ->
     Value.
 
-
 -spec host(context()) -> optional(binary()).
 
 host(#{host := Value}) ->
     Value.
 
-
 -spec issuer(context()) -> binary().
 
 issuer(#{host := undefined} = T) ->
     authrealm(T);
-
 issuer(#{host := Host} = T) ->
     Uri = authrealm(T),
     <<Host/binary, "/", Uri/binary>>.
-
 
 -spec challenge(Method :: binary(), DataIn :: map(), Ctxt :: context()) ->
     {false, NewCtxt :: context()}
@@ -435,14 +405,12 @@ challenge(Method, DataIn, #{method := Method} = Ctxt0) ->
         throw:EReason ->
             {error, EReason}
     end;
-
 challenge(_, _, #{method := _}) ->
     %% This might happen when you init and call challenge twice with a
     %% different Method. The first call sets the context 'method',
     %% the second call in principle should never happen. We allow IFF the value
     %% for Method matches the context 'method'.
     {error, invalid_method};
-
 challenge(Method, DataIn, Ctxt0) ->
     try
         %% We check Method is one of the available methods and set it as the
@@ -456,12 +424,12 @@ challenge(Method, DataIn, Ctxt0) ->
             {error, Reason}
     end.
 
-
 -spec authenticate(
     Method :: binary(),
     Signature :: binary(),
     DataIn :: map(),
-    Ctxt :: context()) ->
+    Ctxt :: context()
+) ->
     {ok, ReturnExtra :: map(), NewCtxt :: context()}
     | {error, Reason :: any()}.
 
@@ -483,12 +451,10 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt0) ->
         throw:EReason ->
             {error, EReason}
     end;
-
 authenticate(_, _, _, #{method := _}) ->
     %% This might happen when you init and call challenge and authenticate with
     %% different Method values (or called authenticate twice).
     {error, invalid_method};
-
 authenticate(Method, Signature, DataIn, Ctxt) ->
     try
         %% No context 'method' defined yet as challenge was never called (not
@@ -501,14 +467,9 @@ authenticate(Method, Signature, DataIn, Ctxt) ->
             {error, Reason}
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
-
 
 -doc """
 Returns the requested role `Role` if user `User` is a member of that role,
@@ -518,36 +479,30 @@ undefined if the user is not a member of any group.
 """.
 -spec valid_roles(
     Role :: binary() | [binary()] | undefined,
-    User :: bondy_rbac_user:t()) ->
+    User :: bondy_rbac_user:t()
+) ->
     {Role :: binary() | undefined, Roles :: [binary()]}.
 
 valid_roles(_, undefined) ->
     {undefined, []};
-
 valid_roles([], _) ->
     {undefined, []};
-
 valid_roles(undefined, User) ->
     valid_roles(all, User);
-
 valid_roles(_, #{username := anonymous}) ->
     %% If anonymous (user) the only valid role (group) is anonymous
     %% so we drop the requested ones.
     %% We turn it to binary even though the group internally (in the db) is
     %% called 'anonymous', but the bondy_rbac_group accepts both for lookups.
     {<<"anonymous">>, [<<"anonymous">>]};
-
 valid_roles(<<"default">>, User) ->
     %% Clients might send "default" as opposed to NULL as WAMP does
     %% not actually support NULL.
     valid_roles(all, User);
-
 valid_roles(<<"all">>, User) ->
     valid_roles(all, User);
-
 valid_roles(all, User) ->
     {undefined, bondy_rbac_user:groups(User)};
-
 valid_roles(Role, User) when is_binary(Role) ->
     All = bondy_rbac_user:groups(User),
     case lists:member(Role, All) of
@@ -557,7 +512,6 @@ valid_roles(Role, User) when is_binary(Role) ->
         false ->
             throw({no_such_groups, [Role]})
     end;
-
 valid_roles(Roles, User) when is_list(Roles) ->
     RolesSet = sets:from_list(Roles),
     AllSet = sets:from_list(bondy_rbac_user:groups(User)),
@@ -570,14 +524,11 @@ valid_roles(Roles, User) when is_list(Roles) ->
             throw({no_such_groups, Unknown})
     end.
 
-
 %% @private
 casefold(anonymous) ->
     anonymous;
-
 casefold(Bin) when is_binary(Bin) ->
     string:casefold(Bin).
-
 
 %% @private
 callback_mod(Method) ->
@@ -593,7 +544,6 @@ callback_mod(Method, Fun) when is_function(Fun, 1) ->
             Fun(Mod)
     end.
 
-
 %% @private
 compute_available_methods(Realm, Ctxt) ->
     %% The allowed methods for the Realm
@@ -602,19 +552,16 @@ compute_available_methods(Realm, Ctxt) ->
     case bondy_realm:is_security_enabled(Realm) of
         true ->
             do_compute_available_methods(Ctxt, RealmAllowed);
-
         false ->
             %% We allow all methods in realm
             RealmAllowed
     end.
-
 
 %% @private
 
 do_compute_available_methods(#{user := undefined}, RealmAllowed) ->
     %% Not perfect, this is the case of cookies.
     RealmAllowed;
-
 do_compute_available_methods(#{user_id := UserId} = Ctxt, RealmAllowed) ->
     #{
         realm_uri := RealmUri,
@@ -648,8 +595,8 @@ do_compute_available_methods(#{user_id := UserId} = Ctxt, RealmAllowed) ->
 
     Filter = fun
         ({_, ?WAMP_ANON_AUTH = Method}) ->
-            true =:= bondy_config:get([security, allow_anonymous_user], true)
-                andalso matches_requirements(Method, Ctxt);
+            true =:= bondy_config:get([security, allow_anonymous_user], true) andalso
+                matches_requirements(Method, Ctxt);
         ({_Order, Method}) ->
             matches_requirements(Method, Ctxt)
     end,
@@ -658,8 +605,6 @@ do_compute_available_methods(#{user_id := UserId} = Ctxt, RealmAllowed) ->
 
     %% We remove the order attribute, returning only the list of methods
     [Method || {_, Method} <- Available].
-
-
 
 %% @private
 matches_requirements(Method, #{user_id := UserId, user := User}) ->
@@ -680,8 +625,8 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
             Match({password, true}) ->
                 Password =/= undefined;
             Match({password, {true, #{protocols := Ps}}}) ->
-                Password =/= undefined
-                andalso lists:member(bondy_password:protocol(Password), Ps);
+                Password =/= undefined andalso
+                    lists:member(bondy_password:protocol(Password), Ps);
             Match({any, Any}) ->
                 lists:any(Match, maps:to_list(Any));
             Match({all, All}) ->
@@ -692,18 +637,15 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
         Requirements
     ).
 
-
 %% @private
 get_user(_, _, undefined) ->
     undefined;
-
 get_user(RealmUri, SSORealmUri, UsernameOrAlias0) ->
     UsernameOrAlias = casefold(UsernameOrAlias0),
 
     case bondy_rbac_user:lookup(RealmUri, UsernameOrAlias) of
         {error, not_found} when SSORealmUri =:= undefined ->
             throw({no_such_user, UsernameOrAlias});
-
         {error, not_found} ->
             %% We try to find the user on the SSORealm
             SSOUser = get_user(SSORealmUri, undefined, UsernameOrAlias),
@@ -715,7 +657,6 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias0) ->
             %% than calling bondy_rbac_user:resolve/1 as we already fetched the
             %% SSOUser).
             bondy_rbac_user:resolve(User, SSOUser);
-
         {ok, User} ->
             bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
             %% We call resolve so that we merge the local user to the SSO user
@@ -726,25 +667,32 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias0) ->
             bondy_rbac_user:resolve(User)
     end.
 
-
 %% @private
 init_from_claims(
-    SessionId, Realm, RealmUri, SSORealmUri,
-    Username, Roles, SourceIP, Opts
+    SessionId,
+    Realm,
+    RealmUri,
+    SSORealmUri,
+    Username,
+    Roles,
+    SourceIP,
+    Opts
 ) ->
     %% Try to find the user but don't fail if not found
-    User = try
-        get_user(RealmUri, SSORealmUri, Username)
-    catch
-        throw:{no_such_user, _} -> undefined
-    end,
+    User =
+        try
+            get_user(RealmUri, SSORealmUri, Username)
+        catch
+            throw:{no_such_user, _} -> undefined
+        end,
 
-    {Role, ValidRoles} = case User of
-        undefined ->
-            {undefined, Roles};
-        _ ->
-            valid_roles(Roles, User)
-    end,
+    {Role, ValidRoles} =
+        case User of
+            undefined ->
+                {undefined, Roles};
+            _ ->
+                valid_roles(Roles, User)
+        end,
 
     Ctxt = #{
         provider => ?BONDY_AUTH_PROVIDER,
@@ -761,11 +709,16 @@ init_from_claims(
     Methods = compute_available_methods(Realm, Ctxt),
     {ok, maps:put(available_methods, Methods, Ctxt)}.
 
-
 %% @private
 init_from_user(
-    SessionId, Realm, RealmUri, SSORealmUri,
-    Username0, Roles0, SourceIP, Opts
+    SessionId,
+    Realm,
+    RealmUri,
+    SSORealmUri,
+    Username0,
+    Roles0,
+    SourceIP,
+    Opts
 ) ->
     %% Username0 can be an alias, undefined or anonymous
     User = get_user(RealmUri, SSORealmUri, Username0),
@@ -787,19 +740,17 @@ init_from_user(
     Methods = compute_available_methods(Realm, Ctxt),
     {ok, maps:put(available_methods, Methods, Ctxt)}.
 
-
 %% @private
 maybe_set_method(Method, #{method := Method} = Ctxt) ->
     Ctxt;
-
 maybe_set_method(_, #{method := _}) ->
     %% Method was already set and does not match the one requested
     throw(invalid_method);
-
 maybe_set_method(Method, Ctxt) ->
     Allowed = [Method] =:= available_methods([Method], Ctxt),
 
-    Mod = callback_mod(Method,
+    Mod = callback_mod(
+        Method,
         fun
             (Mod) when Allowed -> Mod;
             (_Mod) -> throw(method_not_allowed)
@@ -817,4 +768,3 @@ maybe_set_method(Method, Ctxt) ->
         {error, Reason} ->
             throw(Reason)
     end.
-

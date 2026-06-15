@@ -23,16 +23,17 @@ negotiates them independently per direction.
 """.
 
 -record(codec, {
-    encoding        ::  bondy_connect_framing:serializer(),
-    send_max_len    ::  pos_integer(),
-    recv_max_len    ::  pos_integer(),
-    buffer = <<>>   ::  binary()
+    encoding :: bondy_connect_framing:serializer(),
+    send_max_len :: pos_integer(),
+    recv_max_len :: pos_integer(),
+    buffer = <<>> :: binary()
 }).
 
--opaque t()         ::  #codec{}.
--type inbound()     ::  bondy_wamp_message:t()
-                        | {ping, binary()}
-                        | {pong, binary()}.
+-opaque t() :: #codec{}.
+-type inbound() ::
+    bondy_wamp_message:t()
+    | {ping, binary()}
+    | {pong, binary()}.
 
 -export_type([t/0]).
 -export_type([inbound/0]).
@@ -42,37 +43,37 @@ negotiates them independently per direction.
 -export([encode/2]).
 -export([decode/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Create a codec for an encoding and the negotiated per-direction limits.".
 -spec new(
     Encoding :: bondy_connect_framing:serializer(),
     SendMaxLen :: pos_integer(),
-    RecvMaxLen :: pos_integer()) -> t().
+    RecvMaxLen :: pos_integer()
+) -> t().
 
-new(Encoding, SendMaxLen, RecvMaxLen)
-when is_integer(SendMaxLen), SendMaxLen > 0,
-     is_integer(RecvMaxLen), RecvMaxLen > 0 ->
+new(Encoding, SendMaxLen, RecvMaxLen) when
+    is_integer(SendMaxLen),
+    SendMaxLen > 0,
+    is_integer(RecvMaxLen),
+    RecvMaxLen > 0
+->
     #codec{
         encoding = Encoding,
         send_max_len = SendMaxLen,
         recv_max_len = RecvMaxLen
     }.
 
-
 -spec encoding(t()) -> bondy_connect_framing:serializer().
 encoding(#codec{encoding = Enc}) -> Enc.
 
-
 -doc "Serialize and frame a WAMP record, enforcing the send-side max length.".
 -spec encode(Msg :: bondy_wamp_message:t(), t()) ->
-    {ok, binary()} | {error, {message_too_large, Size :: non_neg_integer(), Max :: pos_integer()}}.
+    {ok, binary()}
+    | {error,
+        {message_too_large, Size :: non_neg_integer(), Max :: pos_integer()}}.
 
 encode(Msg, #codec{encoding = Enc, send_max_len = Max}) ->
     Payload = bondy_wamp_encoding:encode(Msg, Enc),
@@ -83,7 +84,6 @@ encode(Msg, #codec{encoding = Enc, send_max_len = Max}) ->
         false ->
             {error, {message_too_large, Size, Max}}
     end.
-
 
 -doc """
 Append `Data` to the buffer and decode every complete frame. Returns the
@@ -98,13 +98,9 @@ frame/payload (the buffer is dropped).
 decode(Data, #codec{buffer = Buffer, recv_max_len = Max} = Codec) ->
     decode_loop(<<Buffer/binary, Data/binary>>, Max, Codec, []).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 decode_loop(Buffer, Max, Codec, Acc) ->
@@ -118,7 +114,6 @@ decode_loop(Buffer, Max, Codec, Acc) ->
         {ok, {Type, Payload}, Rest} ->
             decode_loop(Rest, Max, Codec, [{Type, Payload} | Acc])
     end.
-
 
 %% @private
 decode_message(Payload, Rest, Max, #codec{encoding = Enc} = Codec, Acc) ->
@@ -134,7 +129,6 @@ decode_message(Payload, Rest, Max, #codec{encoding = Enc} = Codec, Acc) ->
             decode_loop(Rest, Max, Codec, lists:reverse(Msgs) ++ Acc)
     catch
         Class:Reason ->
-            {error,
-                {protocol_error, {decode_failed, Class, Reason}},
+            {error, {protocol_error, {decode_failed, Class, Reason}},
                 Codec#codec{buffer = <<>>}}
     end.

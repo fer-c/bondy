@@ -53,7 +53,6 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 
 -include("bondy_cbor.hrl").
 
-
 %% Cached decoder callbacks record for O(1) access during recursive calls.
 -record(dec_callbacks, {
     array_start :: array_start_decoder(term()),
@@ -65,7 +64,6 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
     null_value :: term(),
     undefined_value :: term()
 }).
-
 
 %%--------------------------------------------------------------------
 %% Types
@@ -86,9 +84,14 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 -type decode_value() ::
     integer()
     | float()
-    | infinity | neg_infinity | nan
+    | infinity
+    | neg_infinity
+    | nan
     | binary()
-    | true | false | null | undefined
+    | true
+    | false
+    | null
+    | undefined
     | list(decode_value())
     | #{decode_value() => decode_value()}
     | {tag, tag(), decode_value()}.
@@ -97,7 +100,9 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 
 -type decoder(Acc) :: fun((decode_value(), Acc) -> Acc).
 
--type array_start_decoder(Acc) :: fun((non_neg_integer() | indefinite, Acc) -> Acc).
+-type array_start_decoder(Acc) :: fun(
+    (non_neg_integer() | indefinite, Acc) -> Acc
+).
 -type array_push_decoder(Acc) :: fun((decode_value(), Acc) -> Acc).
 -type array_finish_decoder(Acc, Result) :: fun((Acc) -> {Result, Acc}).
 
@@ -127,7 +132,6 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
     Acc :: term(),
     Decoders :: decoders()
 }.
-
 
 -export_type([continuation_state/0]).
 -export_type([decode_value/0]).
@@ -172,7 +176,6 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 %%--------------------------------------------------------------------
 
 -export([format/1]).
-
 
 %%====================================================================
 %% Encoding API
@@ -263,41 +266,159 @@ encode_list([A, B, C], Enc) ->
 encode_list([A, B, C, D], Enc) ->
     [<<16#84>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc)];
 encode_list([A, B, C, D, E], Enc) ->
-    [<<16#85>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc)];
+    [
+        <<16#85>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc)
+    ];
 encode_list([A, B, C, D, E, F], Enc) ->
-    [<<16#86>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc)];
+    [
+        <<16#86>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G], Enc) ->
-    [<<16#87>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc)];
+    [
+        <<16#87>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H], Enc) ->
-    [<<16#88>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc)];
+    [
+        <<16#88>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I], Enc) ->
-    [<<16#89>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc)];
+    [
+        <<16#89>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J], Enc) ->
-    [<<16#8A>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc)];
+    [
+        <<16#8A>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K], Enc) ->
-    [<<16#8B>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc)];
+    [
+        <<16#8B>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L], Enc) ->
-    [<<16#8C>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc)];
+    [
+        <<16#8C>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L, M], Enc) ->
-    [<<16#8D>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc), Enc(M, Enc)];
+    [
+        <<16#8D>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc),
+        Enc(M, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L, M, N], Enc) ->
-    [<<16#8E>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc), Enc(M, Enc), Enc(N, Enc)];
+    [
+        <<16#8E>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc),
+        Enc(M, Enc),
+        Enc(N, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O], Enc) ->
-    [<<16#8F>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc), Enc(M, Enc), Enc(N, Enc), Enc(O, Enc)];
+    [
+        <<16#8F>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc),
+        Enc(M, Enc),
+        Enc(N, Enc),
+        Enc(O, Enc)
+    ];
 %% General case for larger arrays - use binary comprehension
 encode_list(List, Enc) when is_list(List), is_function(Enc, 2) ->
     Len = length(List),
@@ -324,12 +445,28 @@ encode_map(Map, Enc) when map_size(Map) =:= 2 ->
     [<<16#A2>>, Enc(K1, Enc), Enc(V1, Enc), Enc(K2, Enc), Enc(V2, Enc)];
 encode_map(Map, Enc) when map_size(Map) =:= 3 ->
     [{K1, V1}, {K2, V2}, {K3, V3}] = maps:to_list(Map),
-    [<<16#A3>>, Enc(K1, Enc), Enc(V1, Enc), Enc(K2, Enc), Enc(V2, Enc),
-     Enc(K3, Enc), Enc(V3, Enc)];
+    [
+        <<16#A3>>,
+        Enc(K1, Enc),
+        Enc(V1, Enc),
+        Enc(K2, Enc),
+        Enc(V2, Enc),
+        Enc(K3, Enc),
+        Enc(V3, Enc)
+    ];
 encode_map(Map, Enc) when map_size(Map) =:= 4 ->
     [{K1, V1}, {K2, V2}, {K3, V3}, {K4, V4}] = maps:to_list(Map),
-    [<<16#A4>>, Enc(K1, Enc), Enc(V1, Enc), Enc(K2, Enc), Enc(V2, Enc),
-     Enc(K3, Enc), Enc(V3, Enc), Enc(K4, Enc), Enc(V4, Enc)];
+    [
+        <<16#A4>>,
+        Enc(K1, Enc),
+        Enc(V1, Enc),
+        Enc(K2, Enc),
+        Enc(V2, Enc),
+        Enc(K3, Enc),
+        Enc(V3, Enc),
+        Enc(K4, Enc),
+        Enc(V4, Enc)
+    ];
 encode_map(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
     %% General case: use iterator for efficiency
     Size = map_size(Map),
@@ -338,8 +475,10 @@ encode_map(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
 %% @private Encode map pairs using iterator
 encode_map_pairs(Iter, Enc) ->
     case maps:next(Iter) of
-        none -> [];
-        {K, V, NextIter} -> [Enc(K, Enc), Enc(V, Enc) | encode_map_pairs(NextIter, Enc)]
+        none ->
+            [];
+        {K, V, NextIter} ->
+            [Enc(K, Enc), Enc(V, Enc) | encode_map_pairs(NextIter, Enc)]
     end.
 
 -doc """
@@ -354,20 +493,35 @@ encode_map_sorted(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
     %% Encode all key-value pairs, converting keys to binary for sorting
     %% Using maps:to_list is faster than maps:fold for this use case
     Pairs = maps:to_list(Map),
-    EncodedPairs = [{iolist_to_binary(Enc(K, Enc)), Enc(V, Enc)} || {K, V} <- Pairs],
+    EncodedPairs = [
+        {iolist_to_binary(Enc(K, Enc)), Enc(V, Enc)}
+     || {K, V} <- Pairs
+    ],
     %% Sort by encoded key bytes (CBOR deterministic requirement)
-    SortedPairs = lists:sort(fun({K1, _}, {K2, _}) -> K1 =< K2 end, EncodedPairs),
+    SortedPairs = lists:sort(
+        fun({K1, _}, {K2, _}) -> K1 =< K2 end, EncodedPairs
+    ),
     [encode_head(?MT_MAP, map_size(Map)) | [[K, V] || {K, V} <- SortedPairs]].
 
 -doc "Encode an atom as a CBOR text string.".
 -spec encode_atom(atom(), encoder()) -> iodata().
-encode_atom(true, _Encoder) -> ?CBOR_TRUE;
-encode_atom(false, _Encoder) -> ?CBOR_FALSE;
-encode_atom(null, _Encoder) -> ?CBOR_NULL;
-encode_atom(undefined, _Encoder) -> ?CBOR_UNDEFINED;
-encode_atom(infinity, _Encoder) -> <<16#F9, 16#7C, 16#00>>;      % Half-precision +Infinity
-encode_atom(neg_infinity, _Encoder) -> <<16#F9, 16#FC, 16#00>>; % Half-precision -Infinity
-encode_atom(nan, _Encoder) -> <<16#F9, 16#7E, 16#00>>;           % Half-precision NaN
+encode_atom(true, _Encoder) ->
+    ?CBOR_TRUE;
+encode_atom(false, _Encoder) ->
+    ?CBOR_FALSE;
+encode_atom(null, _Encoder) ->
+    ?CBOR_NULL;
+encode_atom(undefined, _Encoder) ->
+    ?CBOR_UNDEFINED;
+% Half-precision +Infinity
+encode_atom(infinity, _Encoder) ->
+    <<16#F9, 16#7C, 16#00>>;
+% Half-precision -Infinity
+encode_atom(neg_infinity, _Encoder) ->
+    <<16#F9, 16#FC, 16#00>>;
+% Half-precision NaN
+encode_atom(nan, _Encoder) ->
+    <<16#F9, 16#7E, 16#00>>;
 encode_atom(Atom, _Encoder) when is_atom(Atom) ->
     Bin = atom_to_binary(Atom, utf8),
     encode_string(Bin).
@@ -420,7 +574,9 @@ The list must contain 2-tuples {Key, Value}. Keys are not checked
 for duplicates.
 """.
 -spec encode_key_value_list([{term(), term()}], encoder()) -> iodata().
-encode_key_value_list(List, Encoder) when is_list(List), is_function(Encoder, 2) ->
+encode_key_value_list(List, Encoder) when
+    is_list(List), is_function(Encoder, 2)
+->
     Len = length(List),
     [encode_head(?MT_MAP, Len) | encode_kv_pairs(List, Encoder)].
 
@@ -430,7 +586,9 @@ Encode a key-value list (proplist) as a CBOR map, checking for duplicate keys.
 Raises {duplicate_key, Key} error if a duplicate key is found.
 """.
 -spec encode_key_value_list_checked([{term(), term()}], encoder()) -> iodata().
-encode_key_value_list_checked(List, Encoder) when is_list(List), is_function(Encoder, 2) ->
+encode_key_value_list_checked(List, Encoder) when
+    is_list(List), is_function(Encoder, 2)
+->
     check_duplicate_keys(List, #{}),
     encode_key_value_list(List, Encoder).
 
@@ -470,8 +628,8 @@ Decode a CBOR binary with custom decoders and accumulator.
 
 Returns `{Result, Acc, Rest}` where Rest is any unconsumed bytes.
 """.
--spec decode(binary(), Acc, decoders()) -> {decode_value(), Acc, binary()}
-    when Acc :: term().
+-spec decode(binary(), Acc, decoders()) -> {decode_value(), Acc, binary()} when
+    Acc :: term().
 decode(Binary, Acc, Decoders) when is_binary(Binary), is_map(Decoders) ->
     {Value, Rest, NewAcc} = decode_value_custom(Binary, Acc, Decoders),
     {Value, NewAcc, Rest}.
@@ -483,7 +641,8 @@ Returns either a complete result or a continuation state if more data is needed.
 """.
 -spec decode_start(binary(), Acc, decoders()) ->
     {decode_value(), Acc, binary()} | {continue, continuation_state()}
-    when Acc :: term().
+when
+    Acc :: term().
 decode_start(Binary, Acc, Decoders) when is_binary(Binary), is_map(Decoders) ->
     try
         {Value, Rest, NewAcc} = decode_value_custom(Binary, Acc, Decoders),
@@ -841,7 +1000,8 @@ decode_arg(27, <<V:64, Rest/binary>>) ->
 decode_arg(AI, _Bin) when AI >= 28, AI =< 30 ->
     error({invalid_ai, AI});
 decode_arg(31, _Bin) ->
-    {indefinite, <<>>};  % Handled specially by callers
+    % Handled specially by callers
+    {indefinite, <<>>};
 decode_arg(_, <<>>) ->
     error(incomplete).
 
@@ -986,7 +1146,8 @@ decode_tag(AI, Bin) ->
 
 %% @private
 %% Convert common tags to native types.
--spec decode_tagged(tag(), decode_value(), binary()) -> {decode_value(), binary()}.
+-spec decode_tagged(tag(), decode_value(), binary()) ->
+    {decode_value(), binary()}.
 decode_tagged(?TAG_POSITIVE_BIGNUM, Bytes, Rest) when is_binary(Bytes) ->
     {binary:decode_unsigned(Bytes), Rest};
 decode_tagged(?TAG_NEGATIVE_BIGNUM, Bytes, Rest) when is_binary(Bytes) ->
@@ -1000,10 +1161,14 @@ decode_tagged(Tag, Value, Rest) ->
 %% @private
 %% Decode simple values and floats (major type 7).
 -spec decode_simple(0..31, binary()) -> {decode_value(), binary()}.
-decode_simple(?SIMPLE_FALSE, Bin) -> {false, Bin};
-decode_simple(?SIMPLE_TRUE, Bin) -> {true, Bin};
-decode_simple(?SIMPLE_NULL, Bin) -> {null, Bin};
-decode_simple(?SIMPLE_UNDEFINED, Bin) -> {undefined, Bin};
+decode_simple(?SIMPLE_FALSE, Bin) ->
+    {false, Bin};
+decode_simple(?SIMPLE_TRUE, Bin) ->
+    {true, Bin};
+decode_simple(?SIMPLE_NULL, Bin) ->
+    {null, Bin};
+decode_simple(?SIMPLE_UNDEFINED, Bin) ->
+    {undefined, Bin};
 decode_simple(24, <<V, Rest/binary>>) when V >= 32 ->
     %% Simple value in following byte
     {{simple, V}, Rest};
@@ -1033,7 +1198,9 @@ extract_callbacks(Decoders) ->
     #dec_callbacks{
         array_start = maps:get(array_start, Decoders, fun(_, A) -> A end),
         array_push = maps:get(array_push, Decoders, fun(_, A) -> A end),
-        array_finish = maps:get(array_finish, Decoders, fun(A) -> {default, A} end),
+        array_finish = maps:get(array_finish, Decoders, fun(A) ->
+            {default, A}
+        end),
         map_start = maps:get(map_start, Decoders, fun(_, A) -> A end),
         map_push = maps:get(map_push, Decoders, fun(_, A) -> A end),
         map_finish = maps:get(map_finish, Decoders, fun(A) -> {default, A} end),
@@ -1043,7 +1210,9 @@ extract_callbacks(Decoders) ->
 
 %% @private
 -spec decode_value_custom(binary(), Acc, decoders()) ->
-    {decode_value(), binary(), Acc} when Acc :: term().
+    {decode_value(), binary(), Acc}
+when
+    Acc :: term().
 decode_value_custom(<<>>, _Acc, _Decoders) ->
     error(incomplete);
 decode_value_custom(<<IB, Rest/binary>>, Acc, Decoders) ->
@@ -1057,7 +1226,9 @@ decode_value_custom(<<IB, Rest/binary>>, Acc, Decoders) ->
 %% through all recursive calls, eliminating O(N) maps:get lookups for
 %% arrays/maps of N elements. Pattern inspired by OTP json.erl.
 -spec decode_value_cached(binary(), Acc, #dec_callbacks{}) ->
-    {decode_value(), binary(), Acc} when Acc :: term().
+    {decode_value(), binary(), Acc}
+when
+    Acc :: term().
 decode_value_cached(<<>>, _Acc, _Cbs) ->
     error(incomplete);
 decode_value_cached(<<IB, Rest/binary>>, Acc, Cbs) ->
@@ -1092,11 +1263,12 @@ decode_major_type_cached(?MT_TAG, AI, Bin, Acc, Cbs) ->
     end;
 decode_major_type_cached(?MT_SIMPLE, AI, Bin, Acc, Cbs) ->
     {Value, Rest} = decode_simple(AI, Bin),
-    Value2 = case Value of
-        null -> Cbs#dec_callbacks.null_value;
-        undefined -> Cbs#dec_callbacks.undefined_value;
-        _ -> Value
-    end,
+    Value2 =
+        case Value of
+            null -> Cbs#dec_callbacks.null_value;
+            undefined -> Cbs#dec_callbacks.undefined_value;
+            _ -> Value
+        end,
     {Value2, Rest, Acc}.
 
 %% @private
@@ -1117,10 +1289,11 @@ decode_array_cached(AI, Bin, Acc, Cbs) ->
 decode_array_n_cached(0, Bin, Items, Acc, Cbs) ->
     ArrayFinish = Cbs#dec_callbacks.array_finish,
     {Result, Acc2} = ArrayFinish(Acc),
-    Result2 = case Result of
-        default -> lists:reverse(Items);
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> lists:reverse(Items);
+            _ -> Result
+        end,
     {Result2, Bin, Acc2};
 decode_array_n_cached(N, Bin, Items, Acc, Cbs) ->
     {Value, Rest, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1133,10 +1306,11 @@ decode_array_n_cached(N, Bin, Items, Acc, Cbs) ->
 decode_array_indefinite_cached(<<16#FF, Rest/binary>>, Items, Acc, Cbs) ->
     ArrayFinish = Cbs#dec_callbacks.array_finish,
     {Result, Acc2} = ArrayFinish(Acc),
-    Result2 = case Result of
-        default -> lists:reverse(Items);
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> lists:reverse(Items);
+            _ -> Result
+        end,
     {Result2, Rest, Acc2};
 decode_array_indefinite_cached(Bin, Items, Acc, Cbs) ->
     {Value, Rest, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1164,10 +1338,11 @@ decode_map_cached(AI, Bin, Acc, Cbs) ->
 decode_map_n_cached(0, Bin, Pairs, Acc, Cbs) ->
     MapFinish = Cbs#dec_callbacks.map_finish,
     {Result, Acc2} = MapFinish(Acc),
-    Result2 = case Result of
-        default -> maps:from_list(lists:reverse(Pairs));
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> maps:from_list(lists:reverse(Pairs));
+            _ -> Result
+        end,
     {Result2, Bin, Acc2};
 decode_map_n_cached(N, Bin, Pairs, Acc, Cbs) ->
     {Key, Rest1, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1181,10 +1356,11 @@ decode_map_n_cached(N, Bin, Pairs, Acc, Cbs) ->
 decode_map_indefinite_cached(<<16#FF, Rest/binary>>, Pairs, Acc, Cbs) ->
     MapFinish = Cbs#dec_callbacks.map_finish,
     {Result, Acc2} = MapFinish(Acc),
-    Result2 = case Result of
-        default -> maps:from_list(lists:reverse(Pairs));
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> maps:from_list(lists:reverse(Pairs));
+            _ -> Result
+        end,
     {Result2, Rest, Acc2};
 decode_map_indefinite_cached(Bin, Pairs, Acc, Cbs) ->
     {Key, Rest1, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1192,7 +1368,6 @@ decode_map_indefinite_cached(Bin, Pairs, Acc, Cbs) ->
     MapPush = Cbs#dec_callbacks.map_push,
     Acc3 = MapPush({Key, Value}, Acc2),
     decode_map_indefinite_cached(Rest2, [{Key, Value} | Pairs], Acc3, Cbs).
-
 
 %% @private
 %% Continue decoding from a continuation state.
@@ -1245,11 +1420,13 @@ format_value({simple, N}) when is_integer(N) ->
 %% @private
 format_float(F) ->
     case F of
-        _ when F =/= F ->  % NaN check
+        % NaN check
+        _ when F =/= F ->
             "NaN";
         _ ->
             case is_float(F) andalso F > 0 andalso F * 2 =:= F of
-                true -> "Infinity";
+                true ->
+                    "Infinity";
                 false ->
                     case is_float(F) andalso F < 0 andalso F * 2 =:= F of
                         true -> "-Infinity";
@@ -1283,7 +1460,7 @@ format_map(Map) ->
 
 %% @private
 binary_to_hex(Bin) ->
-    << <<(hex_digit(H)), (hex_digit(L))>> || <<H:4, L:4>> <= Bin >>.
+    <<<<(hex_digit(H)), (hex_digit(L))>> || <<H:4, L:4>> <= Bin>>.
 
 %% @private
 hex_digit(N) when N < 10 -> $0 + N;

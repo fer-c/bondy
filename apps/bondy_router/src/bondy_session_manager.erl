@@ -18,20 +18,19 @@ individually or in bulk.
 -include("bondy_uris.hrl").
 -include("bondy.hrl").
 
-
 -record(state, {
-    name                :: atom(),
-    monitor_refs = #{}  :: #{id() => reference()}
+    name :: atom(),
+    monitor_refs = #{} :: #{id() => reference()}
 }).
 
--type close_opts()      ::  #{
-                                exclude => [bondy_session_id:t()]
-                            }.
--type pool()            :: #{
-                                name := term(),
-                                size := pos_integer(),
-                                algorithm := hash
-                            }.
+-type close_opts() :: #{
+    exclude => [bondy_session_id:t()]
+}.
+-type pool() :: #{
+    name := term(),
+    size := pos_integer(),
+    algorithm := hash
+}.
 
 %% API
 -export([start_link/2]).
@@ -44,7 +43,6 @@ individually or in bulk.
 -export([close_all/2]).
 -export([close_all/4]).
 
-
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
 -export([handle_info/2]).
@@ -53,33 +51,27 @@ individually or in bulk.
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 start_link(PoolName, WorkerName) ->
     gen_server:start_link(
         {local, WorkerName}, ?MODULE, [PoolName, WorkerName], []
     ).
 
-
 -spec pool() -> pool().
 
 pool() ->
     #{
         name => {?MODULE, pool},
-        size =>  bondy_config:get([session_manager_pool, size]),
+        size => bondy_config:get([session_manager_pool, size]),
         %% hash is the only valid algorithm as the worker will monitor the
         %% session owner (connection process) and we need to demonitor on close,
         %% so we need all calls for a given session to be send to the same
         %% worker deterministically.
         algorithm => hash
     }.
-
 
 -doc """
 Stores the session `Session` and sets up a monitor for the calling process
@@ -105,7 +97,6 @@ open(Session) ->
         bondy_session:id(Session)
     ).
 
-
 -doc """
 Creates a new session provided the RealmUri exists or can be dynamically
 created. It calls `bondy_session:new/4` which will fail with an exception if the
@@ -118,7 +109,8 @@ crashes it performs the cleanup of any session data that should not be retained.
 -spec open(
     bondy_session_id:t(),
     uri() | bondy_realm:t(),
-    bondy_session:properties()) ->
+    bondy_session:properties()
+) ->
     {ok, bondy_session:t()} | {error, timeout | any()}.
 
 open(Id, RealmOrUri, Opts) ->
@@ -150,7 +142,6 @@ close(Session) ->
         bondy_session:id(Session)
     ).
 
-
 -doc """
 Closes the session.
 
@@ -166,8 +157,6 @@ close(Session, ReasonUri) when is_binary(ReasonUri) ->
         bondy_session:id(Session)
     ).
 
-
-
 -doc """
 Closes all managed sessions in realm with URI `RealmUri`.
 
@@ -179,7 +168,6 @@ as result all sessions in all associated realms will be closed.
 
 close_all(RealmUri) ->
     close_all(RealmUri, ?WAMP_CLOSE_NORMAL).
-
 
 -doc """
 Closes all managed sessions in realm with URI `RealmUri`.
@@ -194,7 +182,6 @@ close_all(RealmUri, ReasonUri) when is_binary(ReasonUri) ->
     Bindings = #{realm_uri => RealmUri},
     do_close_all(Bindings, #{}, ReasonUri).
 
-
 -doc """
 Closes all sessions for user `Username` on realm `RealmUri` according to the
 options `Opts`.
@@ -207,25 +194,20 @@ as result all sessions in all associated realms will be closed.
     RealmUri :: uri(),
     Authid :: uri(),
     ReasonUri :: uri(),
-    Opts :: close_opts()) -> ok.
+    Opts :: close_opts()
+) -> ok.
 
 close_all(RealmUri, Authid, ReasonUri, Opts) ->
     Bindings = #{authrealm => RealmUri, authid => Authid},
     do_close_all(Bindings, Opts, ReasonUri).
 
-
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-
-
 init([PoolName, WorkerName]) ->
     true = gproc_pool:connect_worker(PoolName, WorkerName),
     {ok, #state{name = WorkerName}}.
-
 
 handle_call({open, Session0}, _From, State0) ->
     %% We store the session
@@ -258,9 +240,8 @@ handle_call({open, Session0}, _From, State0) ->
         ok = maybe_schedule_oidc_refresh(Session),
 
         {reply, {ok, Session}, State}
-
     catch
-          Class:Reason:Stacktrace ->
+        Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description =>
                     "Error while registering session 'get' procedure",
@@ -272,8 +253,6 @@ handle_call({open, Session0}, _From, State0) ->
             ok = cleanup(Session),
             {reply, {error, Reason}, State0}
     end;
-
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -282,11 +261,9 @@ handle_call(Event, From, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-
 handle_cast({close, Session, ReasonUri}, State0) ->
     State = do_close(State0, Session, ReasonUri),
     {noreply, State};
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -294,42 +271,39 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
 handle_info({'DOWN', Ref, _, _, _}, State0) ->
     %% The connection process has terminated
     Refs = State0#state.monitor_refs,
 
-    State = case maps:find(Ref, Refs) of
-        {ok, Id} ->
-            case bondy_session:lookup(Id) of
-                {ok, Session} ->
-                    ProtocolId = bondy_session:external_id(Session),
-                    ?LOG_DEBUG(#{
-                        description =>
-                            "Connection process for session terminated, "
-                            " cleaning up.",
-                        protocol_session_id => ProtocolId,
-                        session_id => Id
-                    }),
-                    cleanup(Session);
-                {error, not_found} ->
-                    ok
-            end,
-            State0#state{monitor_refs = maps:without([Ref, Id], Refs)};
-
-        error ->
-            State0#state{monitor_refs = maps:without([Ref], Refs)}
-    end,
+    State =
+        case maps:find(Ref, Refs) of
+            {ok, Id} ->
+                case bondy_session:lookup(Id) of
+                    {ok, Session} ->
+                        ProtocolId = bondy_session:external_id(Session),
+                        ?LOG_DEBUG(#{
+                            description =>
+                                "Connection process for session terminated, "
+                                " cleaning up.",
+                            protocol_session_id => ProtocolId,
+                            session_id => Id
+                        }),
+                        cleanup(Session);
+                    {error, not_found} ->
+                        ok
+                end,
+                State0#state{monitor_refs = maps:without([Ref, Id], Refs)};
+            error ->
+                State0#state{monitor_refs = maps:without([Ref], Refs)}
+        end,
 
     {noreply, State};
-
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Info
     }),
     {noreply, State}.
-
 
 terminate(_Reason, State) ->
     try
@@ -339,21 +313,15 @@ terminate(_Reason, State) ->
             ok
     end.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 register_procedures(Session) ->
-
     %% wamp.session.{ID}.get
     %% -------------------------------------------------------------------------
     %% The wamp.session.get implementation forwards the call to this dynamic
@@ -382,7 +350,6 @@ register_procedures(Session) ->
 
     ok.
 
-
 %% @private
 cleanup(Session) ->
     %% TODO We need a new API to be the underlying cleanup function behind
@@ -398,7 +365,6 @@ cleanup(Session) ->
     bondy_context:close(FakeCtxt, crash),
     ok.
 
-
 %% @private
 do_for_worker(Fun, Key) ->
     Pid = gproc_pool:pick_worker(maps:get(name, pool()), Key),
@@ -407,7 +373,6 @@ do_for_worker(Fun, Key) ->
         pid => Pid
     }),
     Fun(Pid).
-
 
 do_close(State0, Session, ReasonUri) ->
     Id = bondy_session:id(Session),
@@ -427,7 +392,6 @@ do_close(State0, Session, ReasonUri) ->
             {ok, Ref} ->
                 true = erlang:demonitor(Ref, [flush]),
                 State0#state{monitor_refs = maps:without([Id, Ref], Refs)};
-
             error ->
                 State0#state{monitor_refs = maps:without([Id], Refs)}
         end,
@@ -438,7 +402,6 @@ do_close(State0, Session, ReasonUri) ->
     _ = catch bondy_session:close(Session, ReasonUri),
 
     State.
-
 
 %% @private
 do_close_all(Bindings, Opts0, ReasonUri) ->
@@ -462,7 +425,6 @@ do_close_all(Bindings, Opts0, ReasonUri) ->
                     }),
                     []
             end;
-
         (Session) ->
             do_for_worker(
                 fun(ServerRef) ->
@@ -476,21 +438,19 @@ do_close_all(Bindings, Opts0, ReasonUri) ->
         Matches = bondy_session:match(Bindings, Opts),
         ok = bondy_utils:foreach(Fun, Matches)
     catch
-      Class:Reason:Stacktrace ->
-        ?LOG_ERROR(#{
-            description => "Error while closing all sessions",
-            class => Class,
-            reason => Reason,
-            stacktrace => Stacktrace
-        }),
-        ok
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while closing all sessions",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ok
     end.
-
 
 %% @private
 maybe_send_goodbye(_, undefined) ->
     ok;
-
 maybe_send_goodbye(Session, ReasonUri) ->
     RealmUri = bondy_session:realm_uri(Session),
     ProcRef = bondy_session:ref(Session),
@@ -502,8 +462,6 @@ maybe_send_goodbye(Session, ReasonUri) ->
     _ = catch bondy:send(RealmUri, ProcRef, Msg),
     ok.
 
-
-
 %% @private
 maybe_schedule_oidc_refresh(Session) ->
     case bondy_session:authmethod(Session) of
@@ -513,12 +471,12 @@ maybe_schedule_oidc_refresh(Session) ->
             ok
     end.
 
-
 %% @private
 do_schedule_oidc_refresh(Session) ->
     case bondy_session:authmethod_details(Session) of
-        #{oidc_provider := Provider, oidc_refresh_token := RT} = Details
-        when is_binary(Provider) andalso is_binary(RT) ->
+        #{oidc_provider := Provider, oidc_refresh_token := RT} = Details when
+            is_binary(Provider) andalso is_binary(RT)
+        ->
             RealmUri = bondy_session:realm_uri(Session),
             Authid = bondy_session:authid(Session),
             EntryId = bondy_utils:uuid(),
@@ -526,7 +484,10 @@ do_schedule_oidc_refresh(Session) ->
                 oidc_access_token_expires_in, Details, 0
             ),
             ok = bondy_oidc_refresh_worker:schedule_refresh(
-                EntryId, RealmUri, Authid, Provider,
+                EntryId,
+                RealmUri,
+                Authid,
+                Provider,
                 #{
                     refresh_token => RT,
                     access_token_expires_in => AccessExp

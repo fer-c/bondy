@@ -55,7 +55,6 @@ all() ->
         nonce_mismatch_rejected
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.auth_wamp_scram">>,
@@ -65,7 +64,6 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 add_realm(RealmUri) ->
     Config = #{
@@ -142,13 +140,9 @@ add_realm(RealmUri) ->
 
     ok.
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 client_signature(UserId, ClientNonce, ChallengeExtra) ->
@@ -182,7 +176,6 @@ client_signature(UserId, ClientNonce, ChallengeExtra) ->
 
     base64:encode(ClientProof).
 
-
 %% @private
 client_signature_with_password(UserId, Password, ClientNonce, ChallengeExtra) ->
     #{
@@ -215,7 +208,6 @@ client_signature_with_password(UserId, Password, ClientNonce, ChallengeExtra) ->
 
     base64:encode(ClientProof).
 
-
 %% @private
 do_challenge(RealmUri, Username) ->
     SessionId = bondy_session_id:new(),
@@ -223,21 +215,19 @@ do_challenge(RealmUri, Username) ->
         SessionId, RealmUri, Username, [], {127, 0, 0, 1}
     ),
     ClientNonce = crypto:strong_rand_bytes(16),
-    HelloDetails = #{authextra => #{
-        <<"nonce">> => base64:encode(ClientNonce)
-    }},
+    HelloDetails = #{
+        authextra => #{
+            <<"nonce">> => base64:encode(ClientNonce)
+        }
+    },
     {true, Extra, Ctxt1} = bondy_auth:challenge(
         ?WAMP_SCRAM_AUTH, HelloDetails, Ctxt0
     ),
     {Ctxt0, Ctxt1, Extra, ClientNonce}.
 
-
-
 %% =============================================================================
 %% ORIGINAL TEST (PRESERVED)
 %% =============================================================================
-
-
 
 missing_client_nonce(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -256,13 +246,9 @@ missing_client_nonce(Config) ->
         bondy_auth:challenge(?WAMP_SCRAM_AUTH, #{}, Ctxt1)
     ).
 
-
-
 %% =============================================================================
 %% FULL SCRAM FLOW
 %% =============================================================================
-
-
 
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -284,9 +270,11 @@ test_1(Config) ->
     ),
 
     ClientNonce = crypto:strong_rand_bytes(16),
-    HelloDetails = #{authextra => #{
-        <<"nonce">> => base64:encode(ClientNonce)
-    }},
+    HelloDetails = #{
+        authextra => #{
+            <<"nonce">> => base64:encode(ClientNonce)
+        }
+    },
     {true, ChallengeExtra, NewCtxt1} = bondy_auth:challenge(
         ?WAMP_SCRAM_AUTH, HelloDetails, Ctxt1
     ),
@@ -336,13 +324,9 @@ test_1(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% PASSWORD PROTOCOL VERIFICATION
 %% =============================================================================
-
-
 
 password_protocol_is_scram(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -352,13 +336,9 @@ password_protocol_is_scram(Config) ->
 
     ?assertEqual(scram, bondy_password:protocol(Password)).
 
-
-
 %% =============================================================================
 %% CHALLENGE EXTRA KEYS
 %% =============================================================================
-
-
 
 challenge_extra_has_required_keys(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -376,13 +356,9 @@ challenge_extra_has_required_keys(Config) ->
     ?assert(is_integer(maps:get(iterations, Extra))),
     ?assert(maps:get(iterations, Extra) > 0).
 
-
-
 %% =============================================================================
 %% WRONG SIGNATURES
 %% =============================================================================
-
-
 
 wrong_signature_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -404,13 +380,9 @@ wrong_signature_fails(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% CIDR FILTERING
 %% =============================================================================
-
-
 
 user1_allowed_from_any_ip(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -431,7 +403,6 @@ user1_allowed_from_any_ip(Config) ->
         IPs
     ).
 
-
 user2_rejected_outside_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -444,13 +415,9 @@ user2_rejected_outside_cidr(Config) ->
         lists:member(?WAMP_SCRAM_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% METHOD SELECTION
 %% =============================================================================
-
-
 
 method_mismatch_after_challenge(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -467,7 +434,6 @@ method_mismatch_after_challenge(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, AuthExtra, Ctxt1)
     ).
 
-
 invalid_method_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -482,13 +448,9 @@ invalid_method_rejected(Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% USER WITHOUT PASSWORD
 %% =============================================================================
-
-
 
 user_without_password_excluded(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -501,13 +463,9 @@ user_without_password_excluded(Config) ->
         lists:member(?WAMP_SCRAM_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% SERVER VERIFIER
 %% =============================================================================
-
-
 
 server_verifier_in_auth_extra(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -529,13 +487,9 @@ server_verifier_in_auth_extra(Config) ->
     Verifier = maps:get(verifier, AuthExtra),
     ?assertMatch(<<"v=", _/binary>>, Verifier).
 
-
-
 %% =============================================================================
 %% ERROR CASES
 %% =============================================================================
-
-
 
 nonexistent_user_error(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -546,13 +500,9 @@ nonexistent_user_error(Config) ->
         bondy_auth:init(SessionId, RealmUri, <<"ghost">>, [], {127, 0, 0, 1})
     ).
 
-
-
 %% =============================================================================
 %% NONCE VALIDATION
 %% =============================================================================
-
-
 
 nonce_mismatch_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),

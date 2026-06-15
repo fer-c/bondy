@@ -180,7 +180,9 @@ bump_ae_with_explicit_now_writes_supplied_timestamp() ->
 
 last_ae_at_unknown_shard_returns_not_found() ->
     NS = mk_ns(),
-    ?assertEqual(not_found, bondy_oplog_core_registry:last_ae_at(NS, primary, 0)).
+    ?assertEqual(
+        not_found, bondy_oplog_core_registry:last_ae_at(NS, primary, 0)
+    ).
 
 owner_down_removes_registration() ->
     %% A shard registered by a process that subsequently exits must be

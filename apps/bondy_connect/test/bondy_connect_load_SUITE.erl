@@ -18,7 +18,6 @@ token-bucket lifecycle (reuse on reconnect, free on teardown — review B4).
 %% The bondy_regulator rate-limiter's (public, named) ETS table.
 -define(REG_TAB, bondy_regulator_rate_limit).
 
-
 all() ->
     [
         unlimited_by_default,
@@ -31,14 +30,12 @@ all() ->
         rate_bucket_reused_on_reset_and_freed_on_delete
     ].
 
-
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(bondy_regulator),
     Config.
 
 end_per_suite(_) ->
     ok.
-
 
 unlimited_by_default(_) ->
     L0 = bondy_connect_load:new(#{}),
@@ -52,19 +49,16 @@ unlimited_by_default(_) ->
     ),
     ?assertEqual(1000, bondy_connect_load:in_flight(L)).
 
-
 cap_admits_up_to_max(_) ->
     L0 = bondy_connect_load:new(#{max_concurrency => 2}),
     {ok, L1} = bondy_connect_load:admit(L0),
     {ok, L2} = bondy_connect_load:admit(L1),
     ?assertEqual(2, bondy_connect_load:in_flight(L2)).
 
-
 cap_rejects_over_max(_) ->
     L0 = bondy_connect_load:new(#{max_concurrency => 1}),
     {ok, L1} = bondy_connect_load:admit(L0),
     ?assertEqual({error, overloaded}, bondy_connect_load:admit(L1)).
-
 
 release_frees_a_slot(_) ->
     L0 = bondy_connect_load:new(#{max_concurrency => 1}),
@@ -74,12 +68,10 @@ release_frees_a_slot(_) ->
     ?assertEqual(0, bondy_connect_load:in_flight(L2)),
     ?assertMatch({ok, _}, bondy_connect_load:admit(L2)).
 
-
 release_floors_at_zero(_) ->
     L0 = bondy_connect_load:new(#{}),
     L1 = bondy_connect_load:release(L0),
     ?assertEqual(0, bondy_connect_load:in_flight(L1)).
-
 
 reset_zeroes_in_flight(_) ->
     L0 = bondy_connect_load:new(#{}),
@@ -89,10 +81,8 @@ reset_zeroes_in_flight(_) ->
     L3 = bondy_connect_load:reset(L2),
     ?assertEqual(0, bondy_connect_load:in_flight(L3)).
 
-
 delete_without_rate_is_noop(_) ->
     ?assertEqual(ok, bondy_connect_load:delete(bondy_connect_load:new(#{}))).
-
 
 %% A rate-limited load reuses its token bucket across reconnects (`reset/1`)
 %% instead of orphaning a bondy_regulator ETS row each time, and frees it on

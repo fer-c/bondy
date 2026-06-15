@@ -25,26 +25,18 @@ The manager starts first so it is available before any connection is created.
 
 -define(SERVER, ?MODULE).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec start_link() -> supervisor:startlink_ret().
 
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
-
 
 -spec init([]) ->
     {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.

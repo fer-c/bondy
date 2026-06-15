@@ -18,29 +18,20 @@
     prop_salted_password_deterministic/0
 ]).
 
-
-
 %% =============================================================================
 %% GENERATORS
 %% =============================================================================
-
-
 
 %% Keep PBKDF2 cost low so the property suite stays fast.
 iterations() ->
     range(4096, 4196).
 
-
 secret() ->
     non_empty(binary()).
-
-
 
 %% =============================================================================
 %% PROPERTIES
 %% =============================================================================
-
-
 
 %% The client response/3 (raw password + CHALLENGE.Extra) equals the server
 %% response/2 (pre-salted password) for the same inputs.
@@ -65,7 +56,6 @@ prop_client_response_matches_server() ->
         end
     ).
 
-
 %% A response computed with the wrong password differs from the expected one.
 prop_wrong_password_response_differs() ->
     ?FORALL(
@@ -82,7 +72,6 @@ prop_wrong_password_response_differs() ->
             end
         )
     ).
-
 
 %% salted_password is a pure function of (password, salt, params).
 prop_salted_password_deterministic() ->

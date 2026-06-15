@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_message_id).
 -moduledoc """
 Generates WAMP message identifiers in the global, router and session scopes
@@ -14,8 +13,6 @@ as defined by the WAMP specification.
 
 -define(TAB, bondy_session_counter).
 
-
-
 -export([init/0]).
 -export([init_session/2]).
 -export([session/2]).
@@ -23,11 +20,9 @@ as defined by the WAMP specification.
 -export([global/0]).
 -export([router/1]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc """
 Initialises the ets table to support session-scoped identifiers.
@@ -48,20 +43,19 @@ init() ->
     {ok, ?TAB} = bondy_table_manager:add(?TAB, Opts),
     ok.
 
-
 -spec init_session(
     RealmUri :: uri(),
-    SessionOrId :: bondy_session:t() | bondy_session_id:t()) -> ok.
+    SessionOrId :: bondy_session:t() | bondy_session_id:t()
+) -> ok.
 
-init_session(RealmUri, SessionId)
-when is_binary(RealmUri) andalso is_binary(SessionId) ->
+init_session(RealmUri, SessionId) when
+    is_binary(RealmUri) andalso is_binary(SessionId)
+->
     Key = {RealmUri, SessionId},
     _ = ets:insert_new(?TAB, {Key, 0}),
     ok;
-
 init_session(RealmUri, Session) ->
     session(RealmUri, bondy_session:id(Session)).
-
 
 -doc """
 Generates a WAMP message id in the global scope.
@@ -73,7 +67,6 @@ distribution over the complete range `[0, 2^53]`.
 global() ->
     bondy_wamp_utils:rand_uniform().
 
-
 -doc """
 Generates a WAMP message id in the router scope.
 IDs in the router scope CAN be chosen freely by the specific router
@@ -83,7 +76,6 @@ implementation.
 
 router(_) ->
     global().
-
 
 -doc """
 Generates a WAMP message id in the session scope.
@@ -97,43 +89,40 @@ the function will return a random ID by calling `router/1`.
 """.
 -spec session(
     RealmUri :: uri(),
-    SessionOrId :: bondy_session:t() | bondy_session_id:t()) -> id().
+    SessionOrId :: bondy_session:t() | bondy_session_id:t()
+) -> id().
 
-session(RealmUri, SessionId)
-when is_binary(RealmUri) andalso is_binary(SessionId) ->
+session(RealmUri, SessionId) when
+    is_binary(RealmUri) andalso is_binary(SessionId)
+->
     try
         incr_session_counter(RealmUri, SessionId)
     catch
         error:badarg ->
             router(RealmUri)
     end;
-
 session(RealmUri, Session) ->
     session(RealmUri, bondy_session:id(Session)).
-
 
 -doc """
 Removes all counters associated with session identifier `SessionId`.
 """.
 -spec purge_session(
     RealmUri :: uri(),
-    SessionOrId :: bondy_session:t() | bondy_session_id:t()) -> ok.
+    SessionOrId :: bondy_session:t() | bondy_session_id:t()
+) -> ok.
 
-purge_session(RealmUri, SessionId)
-when is_binary(RealmUri) andalso is_binary(SessionId) ->
+purge_session(RealmUri, SessionId) when
+    is_binary(RealmUri) andalso is_binary(SessionId)
+->
     true = ets:match_delete(?TAB, {{RealmUri, SessionId}, '_'}),
     ok;
-
 purge_session(RealmUri, Session) when is_binary(RealmUri) ->
     purge_session(RealmUri, bondy_session:id(Session)).
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 -spec incr_session_counter(uri(), bondy_session_id:t()) ->
@@ -150,5 +139,3 @@ incr_session_counter(RealmUri, SessionId) when is_binary(SessionId) ->
     UpdateOp = {2, 1, ?MAX_ID, 0},
     Default = {Key, 0},
     ets:update_counter(?TAB, Key, UpdateOp, Default).
-
-

@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_http_longpoll_handler).
 -moduledoc """
 Cowboy handler for HTTP-Longpoll transport endpoints.
@@ -35,7 +34,6 @@ same identifiers as the WAMP spec. The handler determines the transport type
 -export([info/3]).
 -export([terminate/3]).
 
-
 %% Longpoll-supported client protocol identifiers.
 %% The client sends these in the /open body; we map them to internal tuples.
 -define(SUPPORTED_PROTOCOLS, [?WAMP2_JSON]).
@@ -49,13 +47,9 @@ same identifiers as the WAMP spec. The handler determines the transport type
 %% headers) that clients depend on.
 -define(DEFAULT_IDLE_TIMEOUT, timer:minutes(10)).
 
-
-
 %% =============================================================================
 %% COWBOY CALLBACKS
 %% =============================================================================
-
-
 
 init(Req0, State) ->
     CorsConfig = bondy_http_cors:config_from_req(Req0),
@@ -69,7 +63,6 @@ init(Req0, State) ->
             dispatch(Req, State)
     end.
 
-
 info({poll_result, {ok, {replies, [Bin | _]}}}, Req0, State) ->
     Req1 = cowboy_req:reply(
         ?HTTP_OK,
@@ -78,7 +71,6 @@ info({poll_result, {ok, {replies, [Bin | _]}}}, Req0, State) ->
         Req0
     ),
     {stop, Req1, State};
-
 info({poll_result, {ok, {messages, [Msg | _]}}}, Req0, State) ->
     Encoding = maps:get(encoding, State),
     Bin = bondy_wamp_encoding:encode(Msg, Encoding),
@@ -89,43 +81,31 @@ info({poll_result, {ok, {messages, [Msg | _]}}}, Req0, State) ->
         Req0
     ),
     {stop, Req1, State};
-
 info({poll_result, {ok, {messages, []}}}, Req0, State) ->
     Req1 = cowboy_req:reply(?HTTP_NO_CONTENT, #{}, <<>>, Req0),
     {stop, Req1, State};
-
 info({poll_result, {ok, {replies, []}}}, Req0, State) ->
     Req1 = cowboy_req:reply(?HTTP_NO_CONTENT, #{}, <<>>, Req0),
     {stop, Req1, State};
-
 info(_Msg, Req, State) ->
     {ok, Req, State}.
 
-
 terminate(_Reason, _Req, _State) ->
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 dispatch(Req0, #{action := open} = State) ->
     handle_open(Req0, State);
-
 dispatch(Req0, #{action := send} = State) ->
     handle_send(Req0, State);
-
 dispatch(Req0, #{action := receive_msgs} = State) ->
     handle_receive(Req0, State);
-
 dispatch(Req0, #{action := close} = State) ->
     handle_close(Req0, State).
-
 
 %% @private
 handle_open(Req0, State) ->
@@ -136,7 +116,6 @@ handle_open(Req0, State) ->
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, #{}, <<>>, Req0),
             {ok, Req1, State}
     end.
-
 
 %% @private
 do_handle_open(Req0, State) ->
@@ -149,7 +128,6 @@ do_handle_open(Req0, State) ->
         ok ->
             do_handle_open_body(Req0, State)
     end.
-
 
 %% @private
 do_handle_open_body(Req0, State) ->
@@ -188,7 +166,6 @@ do_handle_open_body(Req0, State) ->
             {ok, Req2, State}
     end.
 
-
 %% @private
 open_session(Protocol, Req0, State) ->
     TransportId = bondy_utils:uuid(),
@@ -198,18 +175,22 @@ open_session(Protocol, Req0, State) ->
     %% RealmUri is unknown at open time; it comes from the WAMP HELLO message.
     RealmUri = <<>>,
 
-    case bondy_http_transport_session_sup:start_child(
-        TransportId, RealmUri, SessionId
-    ) of
+    case
+        bondy_http_transport_session_sup:start_child(
+            TransportId, RealmUri, SessionId
+        )
+    of
         {ok, Pid} ->
             %% Map the client protocol to the internal longpoll subprotocol.
             %% The client sends "wamp.2.json" but we use {http_longpoll, text,
             %% json} internally to distinguish from WebSocket.
             Subprotocol = to_longpoll_subprotocol(Protocol),
             {ok, _} = bondy_wamp_protocol:validate_subprotocol(Subprotocol),
-            case bondy_http_transport_session:init_protocol(
-                Pid, Subprotocol, Peer
-            ) of
+            case
+                bondy_http_transport_session:init_protocol(
+                    Pid, Subprotocol, Peer
+                )
+            of
                 ok ->
                     %% Pass bondy_ticket cookie if present
                     ok = maybe_set_auth_ticket(Pid, Req0),
@@ -251,7 +232,6 @@ open_session(Protocol, Req0, State) ->
             {ok, Req1, State}
     end.
 
-
 %% @private
 handle_send(Req0, State) ->
     case cowboy_req:method(Req0) of
@@ -261,7 +241,6 @@ handle_send(Req0, State) ->
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, #{}, <<>>, Req0),
             {ok, Req1, State}
     end.
-
 
 %% @private
 do_handle_send(Req0, State) ->
@@ -275,14 +254,15 @@ do_handle_send(Req0, State) ->
             do_handle_send_body(Req0, State)
     end.
 
-
 %% @private
 do_handle_send_body(Req0, State) ->
     TransportId = cowboy_req:binding(transport_id, Req0),
 
     case bondy_http_transport_session:whereis(TransportId) of
         undefined ->
-            Req1 = reply_error(?HTTP_NOT_FOUND, <<"transport_not_found">>, Req0),
+            Req1 = reply_error(
+                ?HTTP_NOT_FOUND, <<"transport_not_found">>, Req0
+            ),
             {ok, Req1, State};
         Pid ->
             case validate_auth_ticket(Pid, Req0) of
@@ -295,9 +275,11 @@ do_handle_send_body(Req0, State) ->
                     {ok, Body, Req1} = cowboy_req:read_body(Req0),
                     bondy_http_transport_session:touch(Pid),
 
-                    case bondy_http_transport_session:handle_client_message(
-                        Pid, Body
-                    ) of
+                    case
+                        bondy_http_transport_session:handle_client_message(
+                            Pid, Body
+                        )
+                    of
                         ok ->
                             Req2 = cowboy_req:reply(
                                 ?HTTP_ACCEPTED, #{}, <<>>, Req1
@@ -320,7 +302,6 @@ do_handle_send_body(Req0, State) ->
             end
     end.
 
-
 %% @private
 handle_receive(Req0, State) ->
     case cowboy_req:method(Req0) of
@@ -331,14 +312,15 @@ handle_receive(Req0, State) ->
             {ok, Req1, State}
     end.
 
-
 %% @private
 do_handle_receive(Req0, State) ->
     TransportId = cowboy_req:binding(transport_id, Req0),
 
     case bondy_http_transport_session:whereis(TransportId) of
         undefined ->
-            Req1 = reply_error(?HTTP_NOT_FOUND, <<"transport_not_found">>, Req0),
+            Req1 = reply_error(
+                ?HTTP_NOT_FOUND, <<"transport_not_found">>, Req0
+            ),
             {ok, Req1, State};
         Pid ->
             case validate_auth_ticket(Pid, Req0) of
@@ -374,7 +356,6 @@ do_handle_receive(Req0, State) ->
             end
     end.
 
-
 %% @private
 handle_close(Req0, State) ->
     case cowboy_req:method(Req0) of
@@ -384,7 +365,6 @@ handle_close(Req0, State) ->
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, #{}, <<>>, Req0),
             {ok, Req1, State}
     end.
-
 
 %% @private
 do_handle_close(Req0, State) ->
@@ -397,7 +377,6 @@ do_handle_close(Req0, State) ->
         ok ->
             do_handle_close_body(Req0, State)
     end.
-
 
 %% @private
 do_handle_close_body(Req0, State) ->
@@ -428,7 +407,6 @@ do_handle_close_body(Req0, State) ->
             end
     end.
 
-
 %% @private
 select_protocol(ClientProtocols) when is_list(ClientProtocols) ->
     case [P || P <- ClientProtocols, lists:member(P, ?SUPPORTED_PROTOCOLS)] of
@@ -437,15 +415,12 @@ select_protocol(ClientProtocols) when is_list(ClientProtocols) ->
         [] ->
             {error, no_supported_protocol}
     end;
-
 select_protocol(_) ->
     {error, no_supported_protocol}.
-
 
 %% @private
 to_longpoll_subprotocol(?WAMP2_JSON) ->
     {http_longpoll, text, json}.
-
 
 %% @private
 maybe_set_auth_ticket(Pid, Req) ->
@@ -467,7 +442,6 @@ maybe_set_auth_ticket(Pid, Req) ->
             ok
     end.
 
-
 %% @private
 validate_csrf(Req) ->
     Cookies = cowboy_req:parse_cookies(Req),
@@ -478,22 +452,26 @@ validate_csrf(Req) ->
         {value, {Name, _}} ->
             %% Extract realm suffix and look up the matching CSRF cookie
             PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
-            RealmUri = binary:part(Name, PrefixLen, byte_size(Name) - PrefixLen),
+            RealmUri = binary:part(
+                Name, PrefixLen, byte_size(Name) - PrefixLen
+            ),
             CsrfName = <<?CSRF_COOKIE_PREFIX/binary, RealmUri/binary>>,
             CsrfHeader = cowboy_req:header(
                 <<"x-csrf-token">>, Req, undefined
             ),
-            CsrfCookie = case lists:keyfind(CsrfName, 1, Cookies) of
-                {_, V} -> V;
-                false -> undefined
-            end,
-            case is_binary(CsrfHeader) andalso is_binary(CsrfCookie)
-                    andalso CsrfHeader =:= CsrfCookie of
+            CsrfCookie =
+                case lists:keyfind(CsrfName, 1, Cookies) of
+                    {_, V} -> V;
+                    false -> undefined
+                end,
+            case
+                is_binary(CsrfHeader) andalso is_binary(CsrfCookie) andalso
+                    CsrfHeader =:= CsrfCookie
+            of
                 true -> ok;
                 false -> {error, forbidden}
             end
     end.
-
 
 %% @private
 validate_auth_ticket(Pid, Req) ->
@@ -516,8 +494,10 @@ validate_auth_ticket(Pid, Req) ->
                                 authid := ExpAuthid,
                                 authrealm := ExpAuthrealm
                             } = StoredClaims,
-                            case Authid =:= ExpAuthid
-                                    andalso Authrealm2 =:= ExpAuthrealm of
+                            case
+                                Authid =:= ExpAuthid andalso
+                                    Authrealm2 =:= ExpAuthrealm
+                            of
                                 true -> ok;
                                 false -> {error, unauthorized}
                             end;
@@ -527,7 +507,6 @@ validate_auth_ticket(Pid, Req) ->
             end
     end.
 
-
 %% @private
 %% Scans cookies for the first one matching the bondy_ticket_ prefix.
 find_ticket_cookie(Cookies) ->
@@ -535,13 +514,10 @@ find_ticket_cookie(Cookies) ->
         fun({Name, _}) ->
             PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
             byte_size(Name) > PrefixLen andalso
-            binary:part(Name, 0, PrefixLen) =:= ?TICKET_COOKIE_PREFIX
+                binary:part(Name, 0, PrefixLen) =:= ?TICKET_COOKIE_PREFIX
         end,
         Cookies
     ).
-
-
-
 
 %% @private
 reply_error(StatusCode, ErrorBin, Req) ->

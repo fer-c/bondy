@@ -17,8 +17,6 @@ credentials, resource owner password and refresh token grant flows.
 -include("bondy_security.hrl").
 -include("bondy_oauth.hrl").
 
-
-
 %% AUTH CODE GRANT FLOW
 % curl -v -X POST http://localhost/v1.0.0/oauth/token -d \
 % "grant_type=authorization_code&client_id=test&client_secret=test&redirect_uri=http://localhost&code=6nZNUuYeBM7dfD0k45VF8ZnVKTZJRe2C"
@@ -56,7 +54,6 @@ credentials, resource owner password and refresh token grant flows.
         datatype => binary
     }
 }).
-
 
 %% Resource Owner Password Credentials Grant
 %% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
@@ -165,32 +162,32 @@ credentials, resource owner password and refresh token grant flows.
         validator => fun bondy_wamp_uri:is_valid/1
     },
     client_id => #{
-        required  => false,
+        required => false,
         datatype => binary
     },
     token_path => #{
-        required  => true,
+        required => true,
         datatype => binary
     },
     revoke_path => #{
-        required  => true,
+        required => true,
         datatype => binary
     }
 }).
 
 -record(state, {
-    realm_uri           ::  binary(),
-    proxy_protocol      ::  bondy_http_proxy_protocol:t() | undefined,
-    source_ip           ::  inet:ip_address() | undefined,
-    client_auth_ctxt    ::  bondy_auth:context() | undefined,
-    owner_auth_ctxt     ::  bondy_auth:context() | undefined,
-    client_id           ::  binary() | undefined,
-    device_id           ::  binary() | undefined,
-    token_path          ::  binary(),
-    revoke_path         ::  binary()
+    realm_uri :: binary(),
+    proxy_protocol :: bondy_http_proxy_protocol:t() | undefined,
+    source_ip :: inet:ip_address() | undefined,
+    client_auth_ctxt :: bondy_auth:context() | undefined,
+    owner_auth_ctxt :: bondy_auth:context() | undefined,
+    client_id :: binary() | undefined,
+    device_id :: binary() | undefined,
+    token_path :: binary(),
+    revoke_path :: binary()
 }).
 
--type state()           ::  #state{}.
+-type state() :: #state{}.
 
 -export([accept/2]).
 -export([allowed_methods/2]).
@@ -205,13 +202,9 @@ credentials, resource owner password and refresh token grant flows.
 -export([resource_existed/2]).
 -export([resource_exists/2]).
 
-
-
 %% =============================================================================
 %% COWBOY CALLBACKS
 %% =============================================================================
-
-
 
 init(Req, Opts0) ->
     Opts1 = maps_utils:validate(Opts0, ?OPTS_SPEC),
@@ -223,10 +216,8 @@ init(Req, Opts0) ->
     },
     {cowboy_rest, Req, St}.
 
-
 allowed_methods(Req, St) ->
     {[<<"HEAD">>, <<"OPTIONS">>, <<"POST">>], Req, St}.
-
 
 content_types_accepted(Req, St) ->
     L = [
@@ -234,13 +225,11 @@ content_types_accepted(Req, St) ->
     ],
     {L, Req, St}.
 
-
 content_types_provided(Req, St) ->
     L = [
         {{<<"application">>, <<"json">>, '*'}, provide}
     ],
     {L, Req, St}.
-
 
 options(Req, State) ->
     CorsHeaders = bondy_http_cors:headers(
@@ -248,7 +237,6 @@ options(Req, State) ->
     ),
     Headers = maps:merge(?JSON_HEADERS, CorsHeaders),
     {ok, set_resp_headers(Headers, Req), State}.
-
 
 is_authorized(Req0, St0) ->
     ProxyProtocol = bondy_http_proxy_protocol:init(Req0),
@@ -266,7 +254,6 @@ is_authorized(Req0, St0) ->
                 _ ->
                     do_is_authorized(Req0, St)
             end;
-
         {error, {protocol_error, Message}} ->
             ?LOG_INFO(#{
                 description =>
@@ -280,25 +267,18 @@ is_authorized(Req0, St0) ->
             {stop, Req1, St1}
     end.
 
-
-
-
 forbidden(Req, St) ->
     {false, Req, St}.
-
 
 rate_limited(Req, St) ->
     %% Result :: false | {true, RetryAfter}
     {false, Req, St}.
 
-
 resource_exists(Req, St) ->
     {true, Req, St}.
 
-
 resource_existed(Req, St) ->
     {false, Req, St}.
-
 
 provide(Req, St) ->
     %% This is just to support OPTIONS
@@ -307,7 +287,6 @@ provide(Req, St) ->
     ),
     Headers = maps:merge(?JSON_HEADERS, CorsHeaders),
     {ok, set_resp_headers(Headers, Req), St}.
-
 
 accept(Req0, St) ->
     try
@@ -319,7 +298,6 @@ accept(Req0, St) ->
 
         Revoke = St#state.revoke_path,
         RevokeSize = byte_size(Revoke),
-
 
         case cowboy_req:path(Req1) of
             <<Token:TokenSize/binary, _/binary>> ->
@@ -333,7 +311,6 @@ accept(Req0, St) ->
         error:Error when is_map(Error) ->
             Req = prepare_request(Error, #{}, Req0),
             {false, Req, St};
-
         error:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 class => error,
@@ -345,13 +322,9 @@ accept(Req0, St) ->
             {false, Req, St}
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 do_is_authorized(Req0, St0) ->
     SourceIP = St0#state.source_ip,
@@ -359,14 +332,15 @@ do_is_authorized(Req0, St0) ->
     try
         Auth = bondy_http_utils:parse_authorization(Req0),
 
-        {ClientId, Password} = case Auth of
-            {basic, A, B} ->
-                {A, B};
-
-            _ ->
-                Msg = ~"The authorization header should use the 'basic' scheme",
-                throw({request_error, {header, ~"authorization"}, Msg})
-        end,
+        {ClientId, Password} =
+            case Auth of
+                {basic, A, B} ->
+                    {A, B};
+                _ ->
+                    Msg =
+                        ~"The authorization header should use the 'basic' scheme",
+                    throw({request_error, {header, ~"authorization"}, Msg})
+            end,
 
         RealmUri = St0#state.realm_uri,
         SessionId = bondy_session_id:new(),
@@ -383,11 +357,9 @@ do_is_authorized(Req0, St0) ->
                 %% can be used. Otherwise we should differentiate between the
                 %% flows on the auth method and RBAC source
                 {true, Req0, St2};
-
             {error, Reason} ->
                 throw(Reason)
         end
-
     catch
         throw:EReason ->
             ?LOG_INFO(#{
@@ -399,7 +371,6 @@ do_is_authorized(Req0, St0) ->
             }),
             Req1 = reply(oauth2_invalid_client, Req0),
             {stop, Req1, St0};
-
         _:{request_error, {header, H}, Desc} ->
             ?LOG_INFO(#{
                 description =>
@@ -414,7 +385,6 @@ do_is_authorized(Req0, St0) ->
             {stop, Req1, St0}
     end.
 
-
 %% @private
 authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
     %% Must be member of API_CLIENTS
@@ -422,8 +392,7 @@ authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
     NewCtxt = do_authenticate(Password, Roles, Ctxt),
     case lists:member(?API_CLIENTS, bondy_auth:roles(NewCtxt)) of
         true ->
-           St#state{client_auth_ctxt = NewCtxt};
-
+            St#state{client_auth_ctxt = NewCtxt};
         false ->
             throw(#{
                 code => invalid_client,
@@ -434,14 +403,12 @@ authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
                 >>
             })
     end;
-
 authenticate(resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
     %% Must be member of RESOURCE_OWNERS but we first authenticate
     NewCtxt = do_authenticate(Password, all, Ctxt),
     case lists:member(?RESOURCE_OWNERS, bondy_auth:roles(NewCtxt)) of
         true ->
-           St#state{owner_auth_ctxt = NewCtxt};
-
+            St#state{owner_auth_ctxt = NewCtxt};
         false ->
             throw(#{
                 code => invalid_resource_owner,
@@ -450,9 +417,8 @@ authenticate(resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
                     "To use the OAUTH2 Reource Owner Password Flow, ",
                     "your user account must have the 'resource_owners' role."
                 >>
-        })
+            })
     end.
-
 
 %% @private
 do_authenticate(Password, Roles, Ctxt) ->
@@ -463,20 +429,18 @@ do_authenticate(Password, Roles, Ctxt) ->
     case bondy_auth:authenticate(?PASSWORD_AUTH, Password, Roles, Ctxt) of
         {ok, _, NewCtxt} ->
             NewCtxt;
-
         {error, Reason} ->
             throw(Reason)
     end.
-
 
 %% @private
 token_flow(
     #{?GRANT_TYPE := <<"client_credentials">>},
     Req,
-    #state{client_auth_ctxt = Ctxt} = St) when Ctxt =/= undefined ->
+    #state{client_auth_ctxt = Ctxt} = St
+) when Ctxt =/= undefined ->
     %% The context was set during the is_authorized callback
     issue_token(client_credentials, Req, St);
-
 token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     %% Resource Owner Password Credentials Flow
     #{
@@ -501,14 +465,12 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
                 },
                 St2 = authenticate(resource_owner, Password, St1),
                 issue_token(password, Req0, St2);
-
             {error, Reason} ->
                 throw(Reason)
         end
     catch
         throw:Error when is_map(Error) ->
             {stop, reply(Error, Req0), St0};
-
         throw:EReason ->
             ?LOG_INFO(#{
                 description =>
@@ -520,7 +482,6 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
             }),
             {stop, reply(oauth2_invalid_grant, Req0), St0}
     end;
-
 token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
     %% According to RFC6749:
     %% The authorization server MAY issue a new refresh token, in which case
@@ -533,7 +494,7 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
     try maps_utils:validate(Map0, ?REFRESH_TOKEN_SPEC) of
         #{<<"refresh_token">> := Val} -> refresh_token(Val, Req0, St0)
     catch
-        error:Reason:Stacktrace->
+        error:Reason:Stacktrace ->
             ?LOG_INFO(#{
                 description => "Error while refreshing OAuth2 token",
                 reason => Reason,
@@ -541,14 +502,11 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
             }),
             error({oauth2_invalid_request, Map0})
     end;
-
 token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _) ->
     %% TODO
     error({oauth2_unsupported_grant_type, <<"authorization_code">>});
-
 token_flow(Map, _, _) ->
     error({oauth2_invalid_request, Map}).
-
 
 %% @private
 refresh_token(RefreshToken0, Req0, St) ->
@@ -560,21 +518,18 @@ refresh_token(RefreshToken0, Req0, St) ->
             Req1 = token_response(Token, Req0),
             ok = on_login(RealmUri, ClientId, #{}),
             {true, Req1, St};
-
         {error, Error} ->
             Req1 = reply(Error, Req0),
             {stop, Req1, St}
     end.
 
-
-- spec auth_context(TokenType :: client_credentials | password, state()) ->
+-spec auth_context(TokenType :: client_credentials | password, state()) ->
     bondy_auth:context().
 
 auth_context(client_credentials, #state{client_auth_ctxt = Val}) ->
     Val;
 auth_context(password, #state{owner_auth_ctxt = Val}) ->
     Val.
-
 
 %% @private
 issue_token(Type, Req0, St0) ->
@@ -589,7 +544,6 @@ issue_token(Type, Req0, St0) ->
         case device_id(St0, Type) of
             undefined ->
                 {Meta0, #{}};
-
             DeviceId ->
                 Meta1 = maps:put(~"client_device_id", DeviceId, Meta0),
                 {Meta1, #{device_id => DeviceId}}
@@ -605,12 +559,10 @@ issue_token(Type, Req0, St0) ->
             Req1 = token_response(Token, Req0),
             ok = on_login(RealmUri, Authid, Meta),
             {true, Req1, St0};
-
         {error, Reason} ->
             Req1 = reply(Reason, Req0),
             {stop, Req1, St0}
     end.
-
 
 %% @private
 revoke_token_flow(Data0, Req0, St) ->
@@ -622,7 +574,6 @@ revoke_token_flow(Data0, Req0, St) ->
         case maps:get(<<"token_type_hint">>, Data1) of
             refresh_token ->
                 bondy_oauth_token:revoke(RealmUri, Token);
-
             access_token ->
                 %% Not supported
                 ok
@@ -648,7 +599,6 @@ revoke_token_flow(Data0, Req0, St) ->
             {stop, reply(unsupported_token_type, Req0), St}
     end.
 
-
 jwks(Req0, St) ->
     RealmUri = St#state.realm_uri,
 
@@ -658,7 +608,6 @@ jwks(Req0, St) ->
             KeySet = #{keys => Keys},
             Req1 = prepare_request(KeySet, #{}, Req0),
             {true, Req1, St};
-
         {error, not_found} ->
             ErrorMap = maps:without(
                 [<<"status_code">>],
@@ -671,59 +620,47 @@ jwks(Req0, St) ->
             {stop, Req1, St}
     end.
 
-
 device_id(#state{device_id = DeviceId}, password) ->
     DeviceId;
-
 device_id(_, _) ->
     undefined.
-
 
 %% @private
 -spec reply(atom() | integer(), cowboy_req:req()) -> cowboy_req:req().
 
 reply({no_such_realm, _}, Req) ->
     reply(oauth2_invalid_client, Req);
-
 reply({no_such_user, _}, Req) ->
     reply(oauth2_invalid_client, Req);
-
 reply(missing_signature, Req) ->
     reply(oauth2_invalid_client, Req);
-
 reply(bad_signature, Req) ->
     reply(oauth2_invalid_client, Req);
-
 reply(unknown_source, Req) ->
     reply(oauth2_invalid_client, Req);
-
 reply(no_common_name, Req) ->
     reply(oauth2_invalid_client, Req);
-
 reply(common_name_mismatch, Req) ->
     reply(oauth2_invalid_client, Req);
-
 reply(oauth2_invalid_client = Error, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     ErrorMap = maps:without([<<"status_code">>], bondy_error_utils:map(Error)),
     cowboy_req:reply(
-        ?HTTP_UNAUTHORIZED, prepare_request(ErrorMap, Headers, Req));
-
+        ?HTTP_UNAUTHORIZED, prepare_request(ErrorMap, Headers, Req)
+    );
 reply(unsupported_token_type = Error, Req) ->
     {Code, Map} = maps:take(<<"status_code">>, bondy_error_utils:map(Error)),
     cowboy_req:reply(Code, prepare_request(Map, #{}, Req));
-
 reply(Error, Req) ->
     Map0 = bondy_error_utils:map(Error),
-    {Code, Map1} = case maps:take(<<"status_code">>, Map0) of
-        error ->
-            {?HTTP_BAD_REQUEST, Map0};
-        Res ->
-            Res
-    end,
+    {Code, Map1} =
+        case maps:take(<<"status_code">>, Map0) of
+            error ->
+                {?HTTP_BAD_REQUEST, Map0};
+            Res ->
+                Res
+        end,
     cowboy_req:reply(Code, prepare_request(Map1, #{}, Req)).
-
-
 
 %% @private
 -spec prepare_request(term(), map(), cowboy_req:req()) -> cowboy_req:req().
@@ -735,7 +672,6 @@ prepare_request(Body, Headers, Req0) ->
     AllHeaders = maps:merge(maps:merge(?JSON_HEADERS, CorsHeaders), Headers),
     Req1 = set_resp_headers(AllHeaders, Req0),
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
-
 
 %% @private
 token_response(Token, Req0) ->
@@ -751,14 +687,14 @@ token_response(Token, Req0) ->
         ~"expires_in" => ExpiresIn
     },
 
-    Body1 = case RefreshToken =:= undefined of
-        true ->
-            Body0;
-        false ->
-            Body0#{~"refresh_token" => RefreshToken}
-    end,
+    Body1 =
+        case RefreshToken =:= undefined of
+            true ->
+                Body0;
+            false ->
+                Body0#{~"refresh_token" => RefreshToken}
+        end,
     prepare_request(Body1, #{}, Req0).
-
 
 %% @private
 on_login(_RealmUri, _Username, _Meta) ->
@@ -766,11 +702,9 @@ on_login(_RealmUri, _Username, _Meta) ->
     %     {[bondy, user, logged_in], RealmUri, Username, Meta}).
     ok.
 
-
 set_resp_headers(Headers, Req0) ->
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
     bondy_http_utils:set_all_headers(Req1).
-
 
 %% reply(HTTPCode, Enc, Response, Req0) ->
 %%     %% We add the content-type since we are bypassing Cowboy by replying
@@ -787,4 +721,3 @@ set_resp_headers(Headers, Req0) ->
 %%     end,
 %%     Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
 %%     cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).
-

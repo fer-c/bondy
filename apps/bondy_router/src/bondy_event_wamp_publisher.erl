@@ -15,8 +15,6 @@ Bondy events.
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
-
-
 -record(state, {
     ref :: bondy_ref:t()
 }).
@@ -32,27 +30,20 @@ Bondy events.
 -export([terminate/2]).
 -export([code_change/3]).
 
-
-
 %% =============================================================================
 %% GEN_EVENT CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     State = #state{ref = bondy_ref:new(internal)},
     {ok, State}.
-
 
 handle_event(Event, State) ->
     %% handle_event is called by the even manager, so delegate this to jobs
     case async_handle_event(Event, State#state.ref) of
         ok ->
             {ok, State};
-
         {ok, {Fun, PartitionKey0}} ->
-
             PartitionKey = bondy_stdlib:lazy_or_else(
                 PartitionKey0,
                 fun bondy_wamp_utils:rand_uniform/0
@@ -61,7 +52,6 @@ handle_event(Event, State) ->
             case bondy_jobs:enqueue(Fun, PartitionKey) of
                 ok ->
                     ok;
-
                 {error, full} ->
                     ?LOG_DEBUG(#{
                         description =>
@@ -69,7 +59,6 @@ handle_event(Event, State) ->
                             "jobs queue at capacity",
                         event => Event
                     });
-
                 {error, Reason} ->
                     ?LOG_ERROR(#{
                         description => "Unexpected error while enqueuing job",
@@ -80,7 +69,6 @@ handle_event(Event, State) ->
             {ok, State}
     end.
 
-
 handle_call(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -88,30 +76,25 @@ handle_call(Event, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-
 handle_info(_Info, State) ->
     {ok, State}.
-
 
 terminate(_Reason, _State) ->
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
 -spec async_handle_event(event(), term()) ->
     ok | {ok, {function(), partition_key()}}.
 
-async_handle_event({[bondy, cluster, connection, Type], Node}, Ref)
-when Type == up; Type == down ->
+async_handle_event({[bondy, cluster, connection, Type], Node}, Ref) when
+    Type == up; Type == down
+->
     Fun = fun() ->
         %% We use a global ID as this is not a publishers request
         ReqId = bondy_message_id:global(),
@@ -125,9 +108,9 @@ when Type == up; Type == down ->
         bondy_broker:publish(ReqId, #{}, Topic, [MyNode, Node], #{}, Ctxt)
     end,
     {ok, {Fun, undefined}};
-
-async_handle_event({[bondy, realm, created, Type], Uri}, Ref)
-when Type == created; Type == updated; Type == deleted ->
+async_handle_event({[bondy, realm, created, Type], Uri}, Ref) when
+    Type == created; Type == updated; Type == deleted
+->
     Fun = fun() ->
         %% We use a global ID as this is not a publishers request
         ReqId = bondy_message_id:global(),
@@ -141,8 +124,6 @@ when Type == created; Type == updated; Type == deleted ->
         bondy_broker:publish(ReqId, #{}, Topic, [Uri], #{}, Ctxt)
     end,
     {ok, {Fun, Uri}};
-
-
 async_handle_event({[bondy, session, opened], Session}, Ref) ->
     SessionId = bondy_session:id(Session),
     Fun = fun() ->
@@ -158,7 +139,6 @@ async_handle_event({[bondy, session, opened], Session}, Ref) ->
         )
     end,
     {ok, {Fun, SessionId}};
-
 async_handle_event({[bondy, session, closed], Session, _DurationSecs}, Ref) ->
     SessionId = bondy_session:id(Session),
     Fun = fun() ->
@@ -178,9 +158,9 @@ async_handle_event({[bondy, session, closed], Session, _DurationSecs}, Ref) ->
         )
     end,
     {ok, {Fun, SessionId}};
-
-async_handle_event({[bondy, rbac, group, Type], RealmUri, Name}, Ref)
-when Type == added; Type == updated; Type == deleted ->
+async_handle_event({[bondy, rbac, group, Type], RealmUri, Name}, Ref) when
+    Type == added; Type == updated; Type == deleted
+->
     case Type =/= deleted orelse bondy_realm:exists(RealmUri) of
         true ->
             Fun = fun() ->
@@ -198,12 +178,10 @@ when Type == added; Type == updated; Type == deleted ->
                 )
             end,
             {ok, {Fun, RealmUri}};
-
         false ->
             %% Realm cascade delete, so we silence the event
             ok
     end;
-
 async_handle_event({[bondy, user, added], RealmUri, Username}, Ref) ->
     Fun = fun() ->
         %% We use a global ID as this is not a publishers request
@@ -215,9 +193,9 @@ async_handle_event({[bondy, user, added], RealmUri, Username}, Ref) ->
         )
     end,
     {ok, {Fun, RealmUri}};
-
-async_handle_event({[bondy, user, Type], RealmUri, Username}, Ref)
-when Type == updated; Type == deleted ->
+async_handle_event({[bondy, user, Type], RealmUri, Username}, Ref) when
+    Type == updated; Type == deleted
+->
     case Type =/= deleted orelse bondy_realm:exists(RealmUri) of
         true ->
             Fun = fun() ->
@@ -235,18 +213,17 @@ when Type == updated; Type == deleted ->
                 bondy_broker:publish(
                     ReqId, #{}, Topic, [RealmUri, Username], #{}, Ctxt
                 )
-                %% TODO Refresh any sessions' rbac_ctxt caches this user has in
-                %% this node for other realms.
+            %% TODO Refresh any sessions' rbac_ctxt caches this user has in
+            %% this node for other realms.
             end,
             {ok, {Fun, RealmUri}};
-
         false ->
             %% Realm cascade delete, so we silence the event
             ok
     end;
-
 async_handle_event(
-    {[bondy, user, credentials, updated], RealmUri, Username}, Ref) ->
+    {[bondy, user, credentials, updated], RealmUri, Username}, Ref
+) ->
     Fun = fun() ->
         ok = bondy_ticket:revoke_all(RealmUri, Username),
         ok = bondy_oauth_token:revoke_all(RealmUri, Username),
@@ -259,9 +236,9 @@ async_handle_event(
         bondy_broker:publish(ReqId, #{}, Topic, [RealmUri, Username], #{}, Ctxt)
     end,
     {ok, {Fun, RealmUri}};
-
 async_handle_event(
-    {[bondy, user, logged_in], RealmUri, Username, Meta}, Ref) ->
+    {[bondy, user, logged_in], RealmUri, Username, Meta}, Ref
+) ->
     Fun = fun() ->
         Topic = ?BONDY_USER_LOGGED_IN,
 
@@ -271,9 +248,9 @@ async_handle_event(
         bondy_broker:publish(ReqId, #{}, Topic, [Username, Meta], #{}, Ctxt)
     end,
     {ok, {Fun, RealmUri}};
-
-async_handle_event({[bondy, backup, Type], #{filename := File}}, Ref)
-when Type == start; Type == stop; Type == exception ->
+async_handle_event({[bondy, backup, Type], #{filename := File}}, Ref) when
+    Type == start; Type == stop; Type == exception
+->
     Fun = fun() ->
         %% We use a global ID as this is not a publishers request
         ReqId = bondy_message_id:global(),
@@ -287,9 +264,11 @@ when Type == start; Type == stop; Type == exception ->
         bondy_broker:publish(ReqId, #{}, Topic, [File], #{}, Ctxt)
     end,
     {ok, {Fun, undefined}};
-
-async_handle_event({[bondy, backup, restore, Type], #{filename := File}}, Ref)
-when Type == start; Type == stop; Type == exception ->
+async_handle_event(
+    {[bondy, backup, restore, Type], #{filename := File}}, Ref
+) when
+    Type == start; Type == stop; Type == exception
+->
     Fun = fun() ->
         %% We use a global ID as this is not a publishers request
         ReqId = bondy_message_id:global(),
@@ -303,11 +282,11 @@ when Type == start; Type == stop; Type == exception ->
         bondy_broker:publish(ReqId, #{}, Topic, [File], #{}, Ctxt)
     end,
     {ok, {Fun, undefined}};
-
 %% REGISTRATION META API
 
-async_handle_event({[bondy, dealer, registration, Type], Entry}, Ref)
-when Type == created; Type == added; Type == deleted; Type == removed ->
+async_handle_event({[bondy, dealer, registration, Type], Entry}, Ref) when
+    Type == created; Type == added; Type == deleted; Type == removed
+->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     SessionId = bondy_registry_entry:session_id(Entry),
 
@@ -325,7 +304,7 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
                     ];
                 false ->
                     [ExtSessionId, RegId]
-        end,
+            end,
         KWArgs = #{procedure => bondy_registry_entry:uri(Entry)},
         Topic =
             case Type of
@@ -339,12 +318,11 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
         bondy_broker:publish(ReqId, #{}, Topic, Args, KWArgs, Ctxt)
     end,
     {ok, {Fun, SessionId}};
-
-
 %% SUBSCRIPTION META API
 
-async_handle_event({[bondy, broker, subscription, Type], Entry}, Ref)
-when Type == created; Type == added; Type == deleted; Type == removed ->
+async_handle_event({[bondy, broker, subscription, Type], Entry}, Ref) when
+    Type == created; Type == added; Type == deleted; Type == removed
+->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     SessionId = bondy_registry_entry:session_id(Entry),
 
@@ -362,7 +340,7 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
                     ];
                 false ->
                     [ExtSessionId, RegId]
-        end,
+            end,
         %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
         KWArgs = #{topic => bondy_registry_entry:uri(Entry)},
         Topic =
@@ -377,9 +355,5 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
         bondy_broker:publish(ReqId, #{}, Topic, Args, KWArgs, Ctxt)
     end,
     {ok, {Fun, SessionId}};
-
 async_handle_event(_, _) ->
     ok.
-
-
-

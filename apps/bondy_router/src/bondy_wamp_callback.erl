@@ -18,32 +18,25 @@ callback targets.
 -export([validate_target/1]).
 -export([validate_target/2]).
 
-
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
 
-
-
 -callback handle_call(
     M :: bondy_wamp_message:call(),
-    Ctxt :: bondy_context:t()) ->
+    Ctxt :: bondy_context:t()
+) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
-        (Reason :: any()) -> wamp_error() | undefined)
-    }
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
     | {reply, wamp_result() | wamp_error()}.
-
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Returns true is module `Mod` conforms with this behaviour.
@@ -53,12 +46,10 @@ Returns true is module `Mod` conforms with this behaviour.
 conforms(Mod) ->
     erlang:function_exported(Mod, handle_call, 2).
 
-
 -spec validate_target({M :: module(), F :: atom()}) -> boolean().
 
 validate_target(MF) ->
     validate_target(MF, []).
-
 
 -spec validate_target({M :: module(), F :: atom()}, A :: optional([term()])) ->
     boolean().
@@ -76,15 +67,15 @@ validate_target({M, F}, A) when is_atom(M), is_atom(F), is_list(A) ->
             )
         ),
 
-    ArgsLen = case A of
-        undefined -> 0;
-        _ -> length(A)
-    end,
+    ArgsLen =
+        case A of
+            undefined -> 0;
+            _ -> length(A)
+        end,
 
     case Exports of
         [] ->
             false;
-
         [{F, Arities0}] ->
             %% All wamp handlers should have at least 1 + ArgsLen
             %% (Details ++ Args)
@@ -92,6 +83,5 @@ validate_target({M, F}, A) when is_atom(M), is_atom(F), is_list(A) ->
 
             length(Arities) >= 1
     end;
-
 validate_target(_, _) ->
     error(badarg).

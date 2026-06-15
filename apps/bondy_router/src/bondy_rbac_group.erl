@@ -15,8 +15,6 @@ input to lowercase use `string:casefold/1`.
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 
-
-
 -define(VALIDATOR, #{
     <<"name">> => #{
         alias => name,
@@ -68,38 +66,39 @@ input to lowercase use `string:casefold/1`.
     }
 }).
 
--define(ANONYMOUS, type_and_version(#{
-    name => anonymous,
-    groups => [],
-    meta => #{}
-})).
-
+-define(ANONYMOUS,
+    type_and_version(#{
+        name => anonymous,
+        groups => [],
+        meta => #{}
+    })
+).
 
 -define(TYPE, group).
 -define(VERSION, <<"1.1">>).
 -define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_GROUP_TAB, RealmUri}).
 -define(FOLD_OPTS, [{resolver, lww}]).
 
-
--type t()       ::  #{
-    type                :=  group,
-    version             :=  binary(),
-    name                :=  binary() | anonymous,
-    groups              :=  [binary()],
-    meta                =>  #{binary() => any()}
+-type t() :: #{
+    type := group,
+    version := binary(),
+    name := binary() | anonymous,
+    groups := [binary()],
+    meta => #{binary() => any()}
 }.
 
--type external()        ::  t().
--type name()            ::  binary() | anonymous | all.
--type add_opts()        ::  #{
-                                rebase => boolean(),
-                                actor_id => term(),
-                                if_exists => fail | update
-                            }.
--type add_error()       ::  {no_such_realm, uri()}
-                            | reserved_name
-                            | already_exists.
--type list_opts()       ::  #{limit => pos_integer()}.
+-type external() :: t().
+-type name() :: binary() | anonymous | all.
+-type add_opts() :: #{
+    rebase => boolean(),
+    actor_id => term(),
+    if_exists => fail | update
+}.
+-type add_error() ::
+    {no_such_realm, uri()}
+    | reserved_name
+    | already_exists.
+-type list_opts() :: #{limit => pos_integer()}.
 
 -export_type([t/0]).
 -export_type([external/0]).
@@ -130,7 +129,6 @@ input to lowercase use `string:casefold/1`.
 -export([unknown/2]).
 -export([update/3]).
 
-
 %% PLUM_DB PREFIX CALLBACKS
 -export([will_merge/3]).
 -export([on_merge/3]).
@@ -138,32 +136,24 @@ input to lowercase use `string:casefold/1`.
 -export([on_delete/2]).
 -export([on_erase/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec new(Data :: map()) -> Group :: t().
 
 new(Data) ->
     type_and_version(maps_utils:validate(Data, ?VALIDATOR)).
 
-
-
 -doc "Returns the group names the user's username.".
 -spec name(t()) -> name().
 
 name(#{name := Val}) -> Val.
 
-
 -doc "Returns the group names the user `User` is member of.".
 -spec groups(t()) -> [name()].
 
 groups(#{groups := Val}) -> Val.
-
 
 -doc """
 Returns `true` if group `Group` is a member of the group named `Name`.
@@ -175,18 +165,15 @@ is_member(Name0, #{type := ?TYPE, groups := Val}) ->
     Name = normalise_name(Name0),
     Name == all orelse lists:member(Name, Val).
 
-
 -doc "Returns the metadata map associated with the group `Group`.".
 -spec meta(Group :: t()) -> map().
 
 meta(#{type := ?TYPE, meta := Val}) -> Val.
 
-
 -spec add(uri(), t()) -> {ok, t()} | {error, any()}.
 
 add(RealmUri, Group) ->
     add(RealmUri, Group, #{}).
-
 
 -doc """
 Adds a new group or updates an existing one.
@@ -203,14 +190,11 @@ add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     catch
         throw:already_exists when IfExists == update ->
             update(RealmUri, Name, Group);
-
         throw:already_exists ->
             {error, already_exists};
-
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -doc """
 Name cannot be a reserved name. See `bondy_rbac:is_reserved_name/1`.
@@ -219,8 +203,8 @@ Name cannot be a reserved name. See `bondy_rbac:is_reserved_name/1`.
     {ok, NewGroup :: t()} | {error, any()}.
 
 update(RealmUri, Name, Data0) when is_binary(Name) ->
-     %% TODO validate that we are not updating a prototype group, if so raise a
-     %% {operation_not_allowed}
+    %% TODO validate that we are not updating a prototype group, if so raise a
+    %% {operation_not_allowed}
     try
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
 
@@ -241,13 +225,10 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
                 ok = plum_db:put(Prefix, Name, NewGroup),
                 {ok, NewGroup}
         end
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
-
 
 -doc """
 Adds group named `Groupname` to groups `Groups` in realm with uri `RealmUri`.
@@ -255,11 +236,11 @@ Adds group named `Groupname` to groups `Groups` in realm with uri `RealmUri`.
 -spec add_group(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
-    Groupname :: name()) -> ok.
+    Groupname :: name()
+) -> ok.
 
 add_group(RealmUri, Groups, Groupname) ->
     add_groups(RealmUri, Groups, [Groupname]).
-
 
 -doc """
 Adds groups `Groupnames` to groups `Groups` in realm with uri `RealmUri`.
@@ -267,11 +248,12 @@ Adds groups `Groupnames` to groups `Groups` in realm with uri `RealmUri`.
 -spec add_groups(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
-    Groupnames :: [name()]) -> ok.
+    Groupnames :: [name()]
+) -> ok.
 
-add_groups(RealmUri, Groups, Groupnames)  ->
+add_groups(RealmUri, Groups, Groupnames) ->
     Fun = fun(Current, ToAdd) ->
-         sets:to_list(
+        sets:to_list(
             sets:union(
                 sets:from_list(Current),
                 sets:from_list(ToAdd)
@@ -280,18 +262,17 @@ add_groups(RealmUri, Groups, Groupnames)  ->
     end,
     update_groups(RealmUri, Groups, Groupnames, Fun).
 
-
 -doc """
 Removes groups `Groupnames` from groups `Groups` in realm with uri `RealmUri`.
 """.
 -spec remove_group(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
-    Groupname :: name()) -> ok.
+    Groupname :: name()
+) -> ok.
 
 remove_group(RealmUri, Groups, Groupname) ->
     remove_groups(RealmUri, Groups, [Groupname]).
-
 
 -doc """
 Removes groups `Groupnames` from groups `Groups` in realm with uri `RealmUri`.
@@ -299,7 +280,8 @@ Removes groups `Groupnames` from groups `Groups` in realm with uri `RealmUri`.
 -spec remove_groups(
     RealmUri :: uri(),
     Groups :: all | t() | list(t()) | name() | list(name()),
-    Groupnames :: [name()]) -> ok.
+    Groupnames :: [name()]
+) -> ok.
 
 remove_groups(RealmUri, Groups, Groupnames) ->
     Fun = fun(Current, ToRemove) ->
@@ -307,20 +289,17 @@ remove_groups(RealmUri, Groups, Groupnames) ->
     end,
     update_groups(RealmUri, Groups, Groupnames, Fun).
 
-
 -spec remove(uri(), binary() | map()) ->
     ok | {error, unknown_group | reserved_name}.
 
 remove(RealmUri, Name) ->
     remove(RealmUri, Name, #{}).
 
-
 -spec remove(uri(), binary() | map(), map()) ->
     ok | {error, unknown_group | reserved_name}.
 
 remove(RealmUri, #{type := ?TYPE, name := Name}, Opts) ->
     remove(RealmUri, Name, Opts);
-
 remove(RealmUri, Name, _Opts) ->
     try
         ok = not_reserved_name_check(Name),
@@ -340,12 +319,10 @@ remove(RealmUri, Name, _Opts) ->
 
         %% We finally delete the group, on_delete/2 will be called by plum_db
         ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name)
-
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
 
 -doc """
 Removes all groups that beloong to realm `RealmUri`.
@@ -375,7 +352,6 @@ remove_all(RealmUri, Opts) ->
     ),
     ok.
 
-
 -spec lookup(uri(), list() | binary()) -> t() | {error, not_found}.
 
 lookup(RealmUri, Name0) ->
@@ -394,7 +370,6 @@ lookup(RealmUri, Name0) ->
             end
     end.
 
-
 -spec fetch(uri(), list() | binary()) -> t() | no_return().
 
 fetch(RealmUri, Name) ->
@@ -402,7 +377,6 @@ fetch(RealmUri, Name) ->
         {error, not_found} -> error(not_found);
         Group -> Group
     end.
-
 
 -spec exists(uri(), list() | binary()) -> boolean().
 
@@ -412,12 +386,10 @@ exists(RealmUri, Name) ->
         _ -> true
     end.
 
-
 -spec list(uri()) -> list(t()).
 
 list(RealmUri) ->
     list(RealmUri, #{}).
-
 
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
@@ -426,12 +398,13 @@ list(RealmUri, Opts) ->
     %% marking them with a flag)
     Prefix = ?PLUMDB_PREFIX(RealmUri),
 
-    FoldOpts = case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
-        undefined ->
-            ?FOLD_OPTS;
-        Limit ->
-            [{limit, Limit} | ?FOLD_OPTS]
-    end,
+    FoldOpts =
+        case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
+            undefined ->
+                ?FOLD_OPTS;
+            Limit ->
+                [{limit, Limit} | ?FOLD_OPTS]
+        end,
 
     plum_db:fold(
         fun
@@ -439,20 +412,18 @@ list(RealmUri, Opts) ->
                 Acc;
             ({_, _} = Term, Acc) ->
                 %% Consider legacy storage formats
-                [from_term(Term)|Acc]
+                [from_term(Term) | Acc]
         end,
         [?ANONYMOUS],
         Prefix,
         FoldOpts
     ).
 
-
 -doc "Returns the external representation of the Group.".
 -spec to_external(Group :: t()) -> external().
 
 to_external(#{type := ?TYPE, version := ?VERSION} = Group) ->
     Group.
-
 
 -doc """
 Takes a list of groupnames and returns any that can't be found on the realm
@@ -463,7 +434,6 @@ identified by `RealmUri` or in its prototype (if set).
 
 unknown(_, []) ->
     [];
-
 unknown(RealmUri, Names) ->
     case do_unknown(RealmUri, Names) of
         [] ->
@@ -477,7 +447,6 @@ unknown(RealmUri, Names) ->
                     do_unknown(ProtoUri, Unknown)
             end
     end.
-
 
 -doc """
 Creates a directed graph of the groups `Groups` by traversing the group
@@ -493,7 +462,6 @@ This function doesn't fetch the definition of the groups in each group
 
 topsort(L) when length(L) =< 1 ->
     L;
-
 topsort(Groups) ->
     Graph = digraph:new([acyclic]),
 
@@ -509,7 +477,7 @@ topsort(Groups) ->
                         fun(V, Acc) ->
                             case digraph:vertex(Graph, V) of
                                 {_, []} -> Acc;
-                                {_, #{type := ?TYPE} = G} -> [G|Acc]
+                                {_, #{type := ?TYPE} = G} -> [G | Acc]
                             end
                         end,
                         [],
@@ -517,7 +485,6 @@ topsort(Groups) ->
                     )
                 )
         end
-
     catch
         throw:{cycle, _} = Reason ->
             error(Reason)
@@ -525,50 +492,38 @@ topsort(Groups) ->
         digraph:delete(Graph)
     end.
 
-
-
 -spec normalise_name(Term :: name()) -> name() | no_return().
 
 normalise_name(all) ->
     all;
-
 normalise_name(anonymous) ->
     anonymous;
-
 normalise_name(<<"all">>) ->
     all;
-
 normalise_name(<<"anonymous">>) ->
     anonymous;
-
 normalise_name(Term) when is_binary(Term) ->
     string:casefold(Term);
-
 normalise_name(_) ->
     error(badarg).
-
-
 
 %% =============================================================================
 %% PLUM_DB PREFIX CALLBACKS
 %% =============================================================================
 
-
-
 -doc "bondy_config".
 will_merge(_PKey, _New, _Old) ->
     true.
 
-
 on_merge(_PKey, _New, _Old) ->
     ok.
-
 
 -doc "A local update".
 on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
     IsCreate =
         Old == undefined orelse
-        ?TOMBSTONE == plum_db_object:value(plum_db_object:resolve(Old, lww)),
+            ?TOMBSTONE ==
+                plum_db_object:value(plum_db_object:resolve(Old, lww)),
 
     case IsCreate of
         true ->
@@ -581,23 +536,17 @@ on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
             )
     end.
 
-
 -doc "A local delete".
 on_delete({?PLUMDB_PREFIX(RealmUri), Name}, _Old) ->
     bondy_event_manager:notify({[bondy, rbac, group, deleted], RealmUri, Name}).
-
 
 -doc "A local erase".
 on_erase(_PKey, _Old) ->
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
@@ -619,16 +568,13 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
             Error
     end.
 
-
 %% @private
 store(Prefix, Name, Group, #{rebase := true} = Opts) ->
     ActorId = maps:get(actor_id, Opts, undefined),
     Object = bondy_utils:rebase_object(Group, ActorId),
     plum_db:dirty_put(Prefix, Name, Object, []);
-
 store(Prefix, Name, Group, _) ->
     plum_db:put(Prefix, Name, Group).
-
 
 %% @private
 -doc "Doesn't take into account realm inheritance.".
@@ -638,7 +584,6 @@ exists_check(Prefix, Name) ->
         _ -> ok
     end.
 
-
 %% @private
 -doc "Doesn't take into account realm inheritance".
 not_exists_check(Prefix, Name) ->
@@ -646,7 +591,6 @@ not_exists_check(Prefix, Name) ->
         undefined -> ok;
         _ -> throw(already_exists)
     end.
-
 
 %% @private
 -doc "Takes into account realm inheritance".
@@ -658,7 +602,6 @@ group_exists_check(RealmUri, Groups) ->
         Unknown ->
             throw({no_such_groups, Unknown})
     end.
-
 
 %% @private
 -doc "Takes into account realm inheritance".
@@ -680,12 +623,10 @@ do_unknown(RealmUri, Names) ->
         ordsets:from_list(Names)
     ).
 
-
 %% @private
 not_reserved_name_check(Term) ->
     not bondy_rbac:is_reserved_name(Term) orelse throw(reserved_name),
     ok.
-
 
 %% @private
 from_term({Name, PList}) when is_list(PList) ->
@@ -695,10 +636,8 @@ from_term({Name, PList}) when is_list(PList) ->
     %% Prev to v1.1 we removed the name (key) from the payload (value).
     Group = maps:put(name, Name, Group0),
     type_and_version(Group);
-
 from_term({_, #{type := ?TYPE, version := ?VERSION} = Group}) ->
     Group.
-
 
 %% @private
 type_and_version(Group) ->
@@ -706,7 +645,6 @@ type_and_version(Group) ->
         version => ?VERSION,
         type => group
     }.
-
 
 %% @private
 -spec update_groups(
@@ -717,52 +655,48 @@ type_and_version(Group) ->
 ) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
-    plum_db:foreach(fun
-        ({_, ?TOMBSTONE}) ->
-            ok;
-        ({_, [?TOMBSTONE]}) ->
-            ok;
-        ({_, _} = Term) ->
-            ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun)
+    plum_db:foreach(
+        fun
+            ({_, ?TOMBSTONE}) ->
+                ok;
+            ({_, [?TOMBSTONE]}) ->
+                ok;
+            ({_, _} = Term) ->
+                ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun)
         end,
         ?PLUMDB_PREFIX(RealmUri),
         ?FOLD_OPTS
     );
-
 update_groups(RealmUri, Groups, Groupnames, Fun) when is_list(Groups) ->
-    _ = [
-        update_groups(RealmUri, Group, Groupnames, Fun) || Group <- Groups
-    ],
+    _ = [update_groups(RealmUri, Group, Groupnames, Fun) || Group <- Groups],
     ok;
-
-update_groups(RealmUri, #{type := ?TYPE, name := Name} = Group, Groupnames, Fun)
-when is_function(Fun, 2) ->
+update_groups(
+    RealmUri, #{type := ?TYPE, name := Name} = Group, Groupnames, Fun
+) when
+    is_function(Fun, 2)
+->
     Update = #{groups => Fun(maps:get(groups, Group), Groupnames)},
     case update(RealmUri, Name, Update) of
         {ok, _} -> ok;
         {error, Reason} -> throw(Reason)
     end;
-
 update_groups(RealmUri, GroupName, Groupnames, Fun) when is_binary(GroupName) ->
     update_groups(RealmUri, fetch(RealmUri, GroupName), Groupnames, Fun).
-
-
-
 
 %% =============================================================================
 %% PRIVATE: TOPSORT
 %% =============================================================================
 
-
 precedence_graph(Groups, Graph) ->
     _ = [
-        digraph:add_vertex(Graph, N) || #{groups := Names} <- Groups, N <- Names
+        digraph:add_vertex(Graph, N)
+     || #{groups := Names} <- Groups, N <- Names
     ],
     precedence_graph_aux(Groups, Graph).
 
-
 precedence_graph_aux(
-    [#{type := ?TYPE, name := A, groups := Names} = H|T], Graph) ->
+    [#{type := ?TYPE, name := A, groups := Names} = H | T], Graph
+) ->
     _ = digraph:add_vertex(Graph, A, H),
     _ = [
         begin
@@ -776,12 +710,10 @@ precedence_graph_aux(
                     ok
             end
         end
-        || B <- Names
+     || B <- Names
     ],
     precedence_graph_aux(T, Graph);
-
-precedence_graph_aux([#{type := ?TYPE}|T], Graph) ->
+precedence_graph_aux([#{type := ?TYPE} | T], Graph) ->
     precedence_graph_aux(T, Graph);
-
 precedence_graph_aux([], Graph) ->
     Graph.

@@ -23,24 +23,19 @@ it. Transient: a user disconnect (normal stop) stays down; a crash is restarted.
 -export([handler_sup/1]).
 -export([init/1]).
 
-
-
 -spec start_link(Config :: map()) -> supervisor:startlink_ret().
 start_link(Config) ->
     supervisor:start_link(?MODULE, [Config]).
-
 
 -doc "The connection (gen_statem) pid under this supervisor.".
 -spec connection(pid()) -> pid() | undefined.
 connection(SupPid) ->
     child_pid(SupPid, connection).
 
-
 -doc "The handler-worker supervisor pid under this supervisor.".
 -spec handler_sup(pid()) -> pid() | undefined.
 handler_sup(SupPid) ->
     child_pid(SupPid, handler_sup).
-
 
 -spec init([map()]) ->
     {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
@@ -70,13 +65,9 @@ init([Config]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 child_pid(SupPid, Id) ->

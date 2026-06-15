@@ -14,8 +14,6 @@ map manipulation.
 -include("bondy_plum_db.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
-
-
 -export([bin_to_pid/1]).
 -export([decode/2]).
 -export([elapsed_time/2]).
@@ -48,55 +46,45 @@ map manipulation.
 -export([uuid/0]).
 -export([uuid/1]).
 
-
-
 %% =============================================================================
 %%  API
 %% =============================================================================
 
-
-
 -spec foreach(
     Do :: fun((Elem :: term() | {continue, Cont :: any()}) -> term()),
-    ?EOT | {[term()], Cont :: any()} | list()) -> ok.
+    ?EOT | {[term()], Cont :: any()} | list()
+) -> ok.
 
 foreach(_, ?EOT) ->
     ok;
-
 foreach(Fun, {L, Cont}) ->
     ok = lists:foreach(Fun, L),
     foreach(Fun, Fun({continue, Cont}));
-
 foreach(Fun, L) when is_list(L) ->
     lists:foreach(Fun, L).
-
 
 pid_to_bin(Pid) ->
     list_to_binary(pid_to_list(Pid)).
 
-
 bin_to_pid(Bin) ->
     list_to_pid(binary_to_list(Bin)).
-
 
 to_binary_keys(Map) when is_map(Map) ->
     F = fun
         (K, V, Acc) when is_binary(K) ->
             maps:put(K, maybe_to_binary_keys(V), Acc);
         (K, V, Acc) when is_atom(K) ->
-            maps:put(list_to_binary(atom_to_list(K)), maybe_to_binary_keys(V), Acc)
+            maps:put(
+                list_to_binary(atom_to_list(K)), maybe_to_binary_keys(V), Acc
+            )
     end,
     maps:fold(F, #{}, Map).
-
-
 
 %% @private
 maybe_to_binary_keys(T) when is_map(T) ->
     to_binary_keys(T);
-
 maybe_to_binary_keys(T) ->
     T.
-
 
 to_existing_atom_keys(Map) when is_map(Map) ->
     F = fun
@@ -106,18 +94,14 @@ to_existing_atom_keys(Map) when is_map(Map) ->
                 to_existing_atom_keys(V),
                 Acc
             );
-
         (K, V, Acc) when is_binary(K) ->
             maps:put(try_binary_to_existing_atom(K), V, Acc);
-
         (K, V, Acc) when is_atom(K) andalso is_map(V) ->
             maps:put(K, to_existing_atom_keys(V), Acc);
-
         (K, V, Acc) when is_atom(K) ->
             maps:put(K, V, Acc)
     end,
     maps:fold(F, #{}, Map).
-
 
 %% @private
 -doc """
@@ -132,40 +116,31 @@ try_binary_to_existing_atom(Bin) when is_binary(Bin) ->
         error:badarg -> Bin
     end.
 
-
 -spec uuid() -> binary().
 
 uuid() ->
     list_to_binary(uuid:uuid_to_string(uuid:get_v4())).
-
 
 -spec uuid(Prefix :: binary()) -> binary().
 
 uuid(Prefix) ->
     <<Prefix/binary, (uuid())/binary>>.
 
-
 -spec is_uuid(any()) -> boolean().
 
 is_uuid(Term) when is_bitstring(Term) ->
     uuid:is_v4(uuid:string_to_uuid(binary_to_list(Term)));
-
 is_uuid(_) ->
     false.
 
-
 maybe_encode(_, <<>>) ->
     <<>>;
-
 maybe_encode(_, undefined) ->
     <<>>;
-
 maybe_encode(bert, Term) ->
     bert:encode(Term);
-
 maybe_encode(erl, Term) ->
-   binary_to_term(Term, [safe]);
-
+    binary_to_term(Term, [safe]);
 maybe_encode(json, Term) when is_binary(Term) ->
     %% TODO this is wrong, we should be passing the metadada so that we know in
     %% which encoding the Term is
@@ -175,44 +150,33 @@ maybe_encode(json, Term) when is_binary(Term) ->
         {error, _} ->
             bondy_wamp_json:encode(Term)
     end;
-
 maybe_encode(json, Term) ->
     bondy_wamp_json:encode(Term);
-
 maybe_encode(msgpack, Term) ->
-     %% TODO see if we can catch error when Term is already encoded
-     Opts = [{map_format, map}, {pack_str, from_binary}],
-     msgpack:pack(Term, Opts);
-
+    %% TODO see if we can catch error when Term is already encoded
+    Opts = [{map_format, map}, {pack_str, from_binary}],
+    msgpack:pack(Term, Opts);
 maybe_encode(Enc, Term) when is_binary(Enc) ->
     maybe_encode(binary_to_existing_atom(Enc, utf8), Term).
 
-
 maybe_slice(undefined, _, _) ->
     undefined;
-
 maybe_slice(String, Start, Length) ->
     string:slice(String, Start, Length).
-
 
 %% @private
 decode(bert, Bin) ->
     bert:decode(Bin);
-
 decode(erl, Bin) ->
-   binary_to_term(Bin, [safe]);
-
+    binary_to_term(Bin, [safe]);
 decode(json, <<>>) ->
     <<>>;
-
 decode(json, Term) ->
     bondy_wamp_json:decode(Term);
-
 decode(msgpack, Term) ->
     Opts = [{map_format, map}, {unpack_str, as_binary}],
     {ok, Bin} = msgpack:unpack(Term, Opts),
     Bin;
-
 decode(ContentType, Term) ->
     %% We cannot decode this so create a wrapped data object
     #{<<"type">> => ContentType, <<"content">> => Term}.
@@ -225,12 +189,10 @@ Converts a session identifier into a 0-padded binary string.
 session_id_to_uri_part(SessionId) ->
     list_to_binary(io_lib:format("~16..0B", [SessionId])).
 
-
 -spec external_session_id(optional(bondy_session_id:t())) -> optional(id()).
 
 external_session_id(Term) when is_binary(Term) ->
     bondy_session_id:to_external(Term);
-
 external_session_id(undefined) ->
     undefined.
 
@@ -247,7 +209,6 @@ timeout(#{timeout := 0}) ->
 timeout(_) ->
     bondy_config:get(wamp_call_timeout).
 
-
 -doc """
 Returns the elapsed time since Timestamp expressed in the desired TimeUnit.
 """.
@@ -258,20 +219,17 @@ elapsed_time(Timestamp, TimeUnit) ->
     Nsecs = erlang:monotonic_time() - Timestamp,
     erlang:convert_time_unit(Nsecs, nanosecond, TimeUnit).
 
-
 %% Borrowed from
 %% https://github.com/kivra/oauth2/blob/master/src/oauth2_token.erl
 -spec generate_fragment(non_neg_integer()) -> binary().
 
 generate_fragment(0) ->
     <<>>;
-
 generate_fragment(N) ->
     Opts = #{mode => urlsafe, padding => false},
     Rand = base64:encode(crypto:strong_rand_bytes(N), Opts),
-    Frag = << <<C>> || <<C>> <= <<Rand:N/bytes>>, is_alphanum(C) >>,
+    Frag = <<<<C>> || <<C>> <= <<Rand:N/bytes>>, is_alphanum(C)>>,
     <<Frag/binary, (generate_fragment(N - byte_size(Frag)))/binary>>.
-
 
 -doc """
 Returns true for alphanumeric ASCII characters, false for all others.
@@ -281,36 +239,32 @@ Returns true for alphanumeric ASCII characters, false for all others.
 is_alphanum(C) when C >= 16#30 andalso C =< 16#39 -> true;
 is_alphanum(C) when C >= 16#41 andalso C =< 16#5A -> true;
 is_alphanum(C) when C >= 16#61 andalso C =< 16#7A -> true;
-is_alphanum(_)                                    -> false.
-
-
+is_alphanum(_) -> false.
 
 -spec peername(
-    Transport :: atom(), Socket :: gen_tcp:socket() | ssl:socket()) ->
+    Transport :: atom(), Socket :: gen_tcp:socket() | ssl:socket()
+) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, any()}.
 
 %% @private
 peername(Transport, Socket) when Transport == ranch_tcp; Transport == tcp ->
     inet:peername(Socket);
-
 peername(Transport, Socket) when Transport == ranch_ssl; Transport == ssl ->
     ssl:peername(Socket).
 
-
-
 -spec get_ipaddr_family(
-    IPOrHostname :: inet:ip_address() | string() | any | localhost | hostname, Family :: inet | inet6) ->
+    IPOrHostname :: inet:ip_address() | string() | any | localhost | hostname,
+    Family :: inet | inet6
+) ->
     {inet:ip_address(), Family :: inet | inet6} | no_return().
 
 get_ipaddr_family(IPOrHostname, Family) ->
     case get_ipaddr(IPOrHostname, Family) of
         {_, _, _, _} = IP ->
             {IP, inet};
-
         {_, _, _, _, _, _, _, _} = IP ->
             {IP, inet6}
     end.
-
 
 -doc """
 Family is ignored when an `IPOrHostname` is an an `inet:ip_address()` or a string
@@ -325,68 +279,54 @@ or binary representation of it.
 ```
 """.
 -spec get_ipaddr(
-    IPOrHostname :: inet:ip_address() | string() | any | localhost | hostname, Family :: inet | inet6) ->
+    IPOrHostname :: inet:ip_address() | string() | any | localhost | hostname,
+    Family :: inet | inet6
+) ->
     {inet:ip_address(), inet | inet6} | no_return().
 
 get_ipaddr(any, inet) ->
     {0, 0, 0, 0};
-
 get_ipaddr(any, inet6) ->
     %% i.e. "::"
     {0, 0, 0, 0, 0, 0, 0, 0};
-
 get_ipaddr(localhost, inet) ->
     {127, 0, 0, 1};
-
 get_ipaddr(localhost, inet6) ->
     %% i.e. "::1"
     {0, 0, 0, 0, 0, 0, 0, 1};
-
 get_ipaddr(hostname, Family) ->
     {ok, Hostname} = inet:gethostname(),
     {ok, IP} = inet:getaddr(Hostname, Family),
     IP;
-
 get_ipaddr(partisan, _) ->
-    #{listen_addrs := [Addr|_]} = partisan:node_spec(),
+    #{listen_addrs := [Addr | _]} = partisan:node_spec(),
     maps:get(ip, Addr);
-
 get_ipaddr({_, _, _, _} = IP, _) ->
     inet:is_ipv4_address(IP);
-
 get_ipaddr({_, _, _, _, _, _, _, _} = IP, _) ->
     inet:is_ipv6_address(IP);
-
 get_ipaddr(IPOrHostname, Family) when is_binary(IPOrHostname) ->
     get_ipaddr(binary_to_list(IPOrHostname), Family);
-
 get_ipaddr(IPOrHostname, Family) when is_list(IPOrHostname) ->
     get_ipaddr(IPOrHostname, Family, continue).
-
 
 -spec rebase_object(Value :: term()) -> plum_db_object:t().
 
 rebase_object(Value) ->
     rebase_object(Value, undefined).
 
-
 -spec rebase_object(Value :: term(), Actor :: term()) -> plum_db_object:t().
 
 rebase_object(Value, undefined) ->
     rebase_object(Value, '$bondy');
-
 rebase_object(Value, Actor) ->
     Timestamp = {0, 0, 0},
     NewRecord = plum_db_dvvset:new({Value, Timestamp}),
     {object, plum_db_dvvset:update(NewRecord, Actor)}.
 
-
-
 %% =============================================================================
 %%  PRIVATE
 %% =============================================================================
-
-
 
 -doc """
 Returns a base64 encoded random string.
@@ -394,13 +334,11 @@ Returns a base64 encoded random string.
 get_nonce() ->
     get_nonce(32).
 
-
 -doc """
 Returns a base64 encoded random string.
 """.
 get_nonce(Len) ->
     base64:encode(crypto:strong_rand_bytes(Len)).
-
 
 -doc """
 Borrowed from
@@ -409,26 +347,29 @@ http://blog.teemu.im/2009/11/07/generating-random-strings-in-erlang/
 get_random_string(Length, AllowedChars) ->
     lists:foldl(
         fun(_, Acc) ->
-            [lists:nth(rand:uniform(length(AllowedChars)),
-            AllowedChars)]
-            ++ Acc
+            [
+                lists:nth(
+                    rand:uniform(length(AllowedChars)),
+                    AllowedChars
+                )
+            ] ++
+                Acc
         end,
         [],
-        lists:seq(1, Length)).
-
+        lists:seq(1, Length)
+    ).
 
 -spec json_consult(File :: file:name_all()) -> any().
 
 json_consult(File) ->
     json_consult(File, [undefined_as_null]).
 
-
 -spec json_consult(File :: file:name_all(), Opts :: list()) ->
     {ok, any()} | {error, any()}.
 
 json_consult(File, Opts) when is_list(Opts) ->
     case file:read_file(File) of
-        {ok, JSONBin}  ->
+        {ok, JSONBin} ->
             case bondy_wamp_json:try_decode(JSONBin, Opts) of
                 {ok, Term} ->
                     {ok, Term};
@@ -439,11 +380,9 @@ json_consult(File, Opts) when is_list(Opts) ->
             Error
     end.
 
-
 system_time_to_rfc3339(Value, Opts) ->
     String = calendar:system_time_to_rfc3339(Value, Opts),
     list_to_binary(String).
-
 
 tc(M, F, A) ->
     T1 = erlang:monotonic_time(),
@@ -451,7 +390,6 @@ tc(M, F, A) ->
     T2 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T2 - T1, native, perf_counter),
     {Time, Val}.
-
 
 -doc """
 Creates a time-dependent Message Authentication Code with byte length `Len`
@@ -465,10 +403,6 @@ timed_mac(Secret, Duration, Len) ->
     Interval = trunc((MegaSecs * 1000000 + (Secs + Duration)) / Duration),
     Msg = <<Interval:8/big-unsigned-integer-unit:8>>,
     crypto:macN(hmac, sha, Secret, Msg, Len).
-
-
-
-
 
 -doc """
 Borrowed from
@@ -489,11 +423,8 @@ groups_from_list(Fun, List0) when is_function(Fun, 1) ->
         error:_ ->
             badarg_with_info([Fun, List0])
     end;
-
 groups_from_list(Fun, List) ->
     badarg_with_info([Fun, List]).
-
-
 
 -doc """
 Borrowed from
@@ -509,8 +440,10 @@ https://github.com/erlang/otp/blob/master/lib/stdlib/src/maps.erl
     ListOut :: [ValOut],
     T :: term().
 
-groups_from_list(Fun, ValueFun, List0) when is_function(Fun, 1),
-                                            is_function(ValueFun, 1) ->
+groups_from_list(Fun, ValueFun, List0) when
+    is_function(Fun, 1),
+    is_function(ValueFun, 1)
+->
     try lists:reverse(List0) of
         List ->
             groups_from_list_2(Fun, ValueFun, List, #{})
@@ -518,66 +451,52 @@ groups_from_list(Fun, ValueFun, List0) when is_function(Fun, 1),
         error:_ ->
             badarg_with_info([Fun, ValueFun, List0])
     end;
-
 groups_from_list(Fun, ValueFun, List) ->
     badarg_with_info([Fun, ValueFun, List]).
-
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 groups_from_list_1(Fun, [H | Tail], Acc) ->
     K = Fun(H),
-    NewAcc = case Acc of
-                 #{K := Vs} -> Acc#{K := [H | Vs]};
-                 #{} -> Acc#{K => [H]}
-             end,
+    NewAcc =
+        case Acc of
+            #{K := Vs} -> Acc#{K := [H | Vs]};
+            #{} -> Acc#{K => [H]}
+        end,
     groups_from_list_1(Fun, Tail, NewAcc);
 groups_from_list_1(_Fun, [], Acc) ->
     Acc.
-
 
 %% @private
 groups_from_list_2(Fun, ValueFun, [H | Tail], Acc) ->
     K = Fun(H),
     V = ValueFun(H),
-    NewAcc = case Acc of
-                 #{K := Vs} -> Acc#{K := [V | Vs]};
-                 #{} -> Acc#{K => [V]}
-             end,
+    NewAcc =
+        case Acc of
+            #{K := Vs} -> Acc#{K := [V | Vs]};
+            #{} -> Acc#{K => [V]}
+        end,
     groups_from_list_2(Fun, ValueFun, Tail, NewAcc);
-
 groups_from_list_2(_Fun, _ValueFun, [], Acc) ->
     Acc.
-
 
 %% @private
 badarg_with_info(Args) ->
     erlang:error(badarg, Args, [{error_info, #{module => erl_stdlib_errors}}]).
-
-
 
 %% @private
 get_ipaddr(IPOrHostname, Family, continue) ->
     case inet:getaddr(IPOrHostname, Family) of
         {ok, IP} ->
             IP;
-
         {error, _} when Family == inet ->
             get_ipaddr(IPOrHostname, inet6, fail);
-
-
         {error, _} when Family == inet6 ->
             get_ipaddr(IPOrHostname, inet, fail)
     end;
-
 get_ipaddr(IPOrHostname, Family, fail) ->
     case inet:getaddr(IPOrHostname, Family) of
         {ok, IP} ->
@@ -585,4 +504,3 @@ get_ipaddr(IPOrHostname, Family, fail) ->
         {error, _} ->
             exit({badarg, [IPOrHostname, Family]})
     end.
-

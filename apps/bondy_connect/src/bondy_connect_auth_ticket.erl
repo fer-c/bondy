@@ -19,24 +19,18 @@ Config: `#{ticket => binary()}` (alias `password`).
 -export([authextra/1]).
 -export([authenticate/2]).
 
-
-
 -spec init(Config :: map()) -> {ok, binary()} | {error, missing_ticket}.
 
 init(#{ticket := Ticket}) when is_binary(Ticket) ->
     {ok, Ticket};
-
 init(#{password := Ticket}) when is_binary(Ticket) ->
     {ok, Ticket};
-
 init(_) ->
     {error, missing_ticket}.
-
 
 -spec authextra(term()) -> map().
 authextra(_State) ->
     #{}.
-
 
 -spec authenticate(Extra :: map(), Ticket :: binary()) ->
     {ok, binary(), map(), binary()}.

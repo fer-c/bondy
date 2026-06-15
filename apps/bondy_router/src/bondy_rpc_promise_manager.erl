@@ -16,12 +16,11 @@ A `m:gen_server` that periodically evicts expired RPC promises, sending a
 -define(DEFAULT_INTERVAL_MSECS, 1000).
 
 -record(state, {
-    evict_interval          ::  pos_integer()
+    evict_interval :: pos_integer()
 }).
 
 %% API
 -export([start_link/0]).
-
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -31,24 +30,16 @@ A `m:gen_server` that periodically evicts expired RPC promises, sending a
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
-
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init(_) ->
     %% We will trap helper exists
@@ -60,8 +51,6 @@ init(_) ->
 
     {ok, State}.
 
-
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -70,14 +59,12 @@ handle_call(Event, From, State) ->
     }),
     {noreply, State}.
 
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
     {noreply, State}.
-
 
 handle_info(evict, State) ->
     %% Start a helper per table
@@ -121,7 +108,6 @@ handle_info(evict, State) ->
         ),
 
         bondy:send(RealmUri, Caller, Error)
-
     end,
 
     Opts = #{
@@ -132,12 +118,10 @@ handle_info(evict, State) ->
     ok = schedule_eviction(State),
 
     {noreply, State};
-
 handle_info({'DOWN', _, process, _Pid, _Reason}, State) ->
     %% A helper terminated, remove from state and schedule
 
     {noreply, State};
-
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -145,20 +129,15 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(_Reason, _State) ->
     ok.
-
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 schedule_eviction(State) ->
@@ -171,4 +150,3 @@ schedule_eviction(State) ->
         false ->
             ok
     end.
-

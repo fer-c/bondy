@@ -14,34 +14,34 @@ the budget is exhausted; `succeed/1` resets it.
 """.
 
 -record(bondy_retry, {
-    id                  ::  any(),
-    deadline            ::  non_neg_integer(),
-    max_retries = 0     ::  non_neg_integer(),
-    interval            ::  pos_integer(),
-    count = 0           ::  non_neg_integer(),
-    backoff             ::  backoff:backoff() | undefined,
-    start_ts            ::  pos_integer() | undefined
+    id :: any(),
+    deadline :: non_neg_integer(),
+    max_retries = 0 :: non_neg_integer(),
+    interval :: pos_integer(),
+    count = 0 :: non_neg_integer(),
+    backoff :: backoff:backoff() | undefined,
+    start_ts :: pos_integer() | undefined
 }).
 
--type t()               ::  #bondy_retry{}.
--type opt()             ::  {deadline, non_neg_integer()}
-                            | {max_retries, non_neg_integer()}
-                            | {interval, pos_integer()}
-                            | {backoff_enabled, boolean()}
-                            | {backoff_min, pos_integer()}
-                            | {backoff_max, pos_integer()}
-                            | {backoff_type, jitter | normal}.
--type opts_map()        ::  #{
-                                deadline => non_neg_integer(),
-                                max_retries => non_neg_integer(),
-                                interval => pos_integer(),
-                                backoff_enabled => boolean(),
-                                backoff_min => pos_integer(),
-                                backoff_max => pos_integer(),
-                                backoff_type => jitter | normal
-                            }.
--type opts()            ::  [opt()] | opts_map().
-
+-type t() :: #bondy_retry{}.
+-type opt() ::
+    {deadline, non_neg_integer()}
+    | {max_retries, non_neg_integer()}
+    | {interval, pos_integer()}
+    | {backoff_enabled, boolean()}
+    | {backoff_min, pos_integer()}
+    | {backoff_max, pos_integer()}
+    | {backoff_type, jitter | normal}.
+-type opts_map() :: #{
+    deadline => non_neg_integer(),
+    max_retries => non_neg_integer(),
+    interval => pos_integer(),
+    backoff_enabled => boolean(),
+    backoff_min => pos_integer(),
+    backoff_max => pos_integer(),
+    backoff_type => jitter | normal
+}.
+-type opts() :: [opt()] | opts_map().
 
 -export_type([t/0]).
 -export_type([opts/0]).
@@ -57,12 +57,9 @@ the budget is exhausted; `succeed/1` resets it.
 
 -eqwalizer({nowarn_function, init/2}).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Set `deadline` to zero to disable the deadline and rely on `max_retries` only.
@@ -88,19 +85,15 @@ init(Id, Opts) ->
             State0
     end.
 
-
 -doc "Returns the current timer value.".
 -spec get(State :: t()) -> integer() | deadline | max_retries.
 
 get(#bondy_retry{start_ts = undefined, backoff = undefined} = State) ->
     State#bondy_retry.interval;
-
 get(#bondy_retry{start_ts = undefined, backoff = B}) ->
     backoff:get(B);
-
 get(#bondy_retry{count = N, max_retries = M}) when N > M ->
     max_retries;
-
 get(#bondy_retry{} = State) ->
     Now = erlang:system_time(millisecond),
     Deadline = State#bondy_retry.deadline,
@@ -123,14 +116,12 @@ get(#bondy_retry{} = State) ->
             backoff:get(B)
     end.
 
-
 -spec fail(State :: t()) ->
     {Time :: integer(), NewState :: t()}
     | {deadline | max_retries, NewState :: t()}.
 
 fail(#bondy_retry{max_retries = N, count = N} = State) ->
     {max_retries, State};
-
 fail(#bondy_retry{backoff = undefined} = State0) ->
     State1 = State0#bondy_retry{
         count = State0#bondy_retry.count + 1
@@ -138,7 +129,6 @@ fail(#bondy_retry{backoff = undefined} = State0) ->
     State = maybe_init_ts(State1),
     %% eqwalizer:ignore
     {get(State), State};
-
 fail(#bondy_retry{backoff = B0} = State0) ->
     {_, B1} = backoff:fail(B0),
 
@@ -150,7 +140,6 @@ fail(#bondy_retry{backoff = B0} = State0) ->
     %% eqwalizer:ignore
     {get(State), State}.
 
-
 -spec succeed(State :: t()) -> {Time :: integer(), NewState :: t()}.
 
 succeed(#bondy_retry{backoff = undefined} = State0) ->
@@ -160,7 +149,6 @@ succeed(#bondy_retry{backoff = undefined} = State0) ->
     },
     %% eqwalizer:ignore
     {get(State), State};
-
 succeed(#bondy_retry{backoff = B0} = State0) ->
     {_, B1} = backoff:succeed(B0),
     State = State0#bondy_retry{
@@ -170,7 +158,6 @@ succeed(#bondy_retry{backoff = B0} = State0) ->
     },
     %% eqwalizer:ignore
     {get(State), State}.
-
 
 -spec fire(State :: t()) -> Ref :: reference() | no_return().
 
@@ -182,23 +169,18 @@ fire(#bondy_retry{} = State) ->
             error(Other)
     end.
 
-
 -spec count(State :: t()) -> non_neg_integer().
 
 count(#bondy_retry{count = Val}) ->
     Val.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 maybe_init_ts(#bondy_retry{start_ts = undefined} = State) ->
     State#bondy_retry{
         start_ts = erlang:system_time(millisecond)
     };
-
 maybe_init_ts(#bondy_retry{} = State) ->
     State.

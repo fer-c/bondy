@@ -27,7 +27,6 @@ Configuration is read from the Bondy application environment at path
 -export([headers/2]).
 -export([set_headers/2]).
 
-
 -type cors_config() :: #{
     enabled := boolean(),
     allowed_origins := '*' | auto | [binary()],
@@ -38,20 +37,15 @@ Configuration is read from the Bondy application environment at path
 
 -export_type([cors_config/0]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Returns the CORS configuration for the listener associated with the given Cowboy request.".
 -spec config_from_req(cowboy_req:req()) -> cors_config().
 
 config_from_req(#{ref := Ref}) ->
     bondy_config:get([Ref, cors], default_config()).
-
 
 -doc "Returns the default CORS configuration (wildcard origin, all methods).".
 -spec default_config() -> cors_config().
@@ -61,10 +55,10 @@ default_config() ->
         enabled => true,
         allowed_origins => '*',
         allowed_methods => <<"GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE">>,
-        allowed_headers => <<"origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token">>,
+        allowed_headers =>
+            <<"origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token">>,
         max_age => <<"86400">>
     }.
-
 
 -doc """
 Computes the CORS response headers map based on the request and the given
@@ -77,7 +71,6 @@ does not match the allowed origins list.
 
 headers(_Req, #{enabled := false}) ->
     #{};
-
 headers(Req, Config) ->
     case effective_origin(Req, Config) of
         undefined ->
@@ -86,30 +79,25 @@ headers(Req, Config) ->
             build_headers(Origin, Config)
     end.
 
-
 -doc "Computes CORS headers and sets them on the Cowboy request.".
 -spec set_headers(cowboy_req:req(), cors_config()) -> cowboy_req:req().
 
 set_headers(Req, Config) ->
     cowboy_req:set_resp_headers(headers(Req, Config), Req).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 effective_origin(Req, #{allowed_origins := '*'}) ->
     _ = Req,
     <<"*">>;
-
 effective_origin(Req, #{allowed_origins := auto}) ->
     derive_origin(Req);
-
-effective_origin(Req, #{allowed_origins := AllowedList}) when is_list(AllowedList) ->
+effective_origin(Req, #{allowed_origins := AllowedList}) when
+    is_list(AllowedList)
+->
     case cowboy_req:header(<<"origin">>, Req) of
         undefined ->
             undefined;
@@ -119,7 +107,6 @@ effective_origin(Req, #{allowed_origins := AllowedList}) when is_list(AllowedLis
                 false -> undefined
             end
     end.
-
 
 %% @private
 derive_origin(Req) ->
@@ -136,23 +123,18 @@ derive_origin(Req) ->
             <<Scheme/binary, "://", Host/binary, ":", PortBin/binary>>
     end.
 
-
 %% @private
 origin_allowed(_Origin, []) ->
     false;
-
 origin_allowed(Origin, [Origin | _]) ->
     true;
-
 origin_allowed(Origin, [<<"*.", Rest/binary>> | Tail]) ->
     case origin_matches_wildcard(Origin, Rest) of
         true -> true;
         false -> origin_allowed(Origin, Tail)
     end;
-
 origin_allowed(Origin, [_ | Tail]) ->
     origin_allowed(Origin, Tail).
-
 
 %% @private
 %% Matches "*.example.com" against an origin like "https://sub.example.com:443".
@@ -169,9 +151,9 @@ origin_matches_wildcard(Origin, DomainSuffix) ->
             SuffixLen = byte_size(SuffixWithDot),
             HostLen = byte_size(Host),
             HostLen > SuffixLen andalso
-                binary:part(Host, HostLen - SuffixLen, SuffixLen) =:= SuffixWithDot
+                binary:part(Host, HostLen - SuffixLen, SuffixLen) =:=
+                    SuffixWithDot
     end.
-
 
 %% @private
 %% Extracts the host part from an origin string like "https://host:port".
@@ -186,7 +168,6 @@ extract_host(Origin) ->
             undefined
     end.
 
-
 %% @private
 build_headers(<<"*">> = Origin, Config) ->
     #{
@@ -196,7 +177,6 @@ build_headers(<<"*">> = Origin, Config) ->
         <<"access-control-allow-headers">> => maps:get(allowed_headers, Config),
         <<"access-control-max-age">> => maps:get(max_age, Config)
     };
-
 build_headers(Origin, Config) ->
     #{
         <<"access-control-allow-origin">> => Origin,

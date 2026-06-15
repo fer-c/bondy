@@ -132,7 +132,6 @@ connected to any realm.
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
-
 %% -define(PLUM_DB_PREFIX, {security, realms}).
 %% TODO This is a breaking change, we need to migrate the realms in
 %% {security, realms} into their new {security, RealmUri}
@@ -363,7 +362,7 @@ connected to any realm.
         alias => scopes,
         key => scopes,
         required => true,
-        default => [<<"openid">>,<<"profile">>,<<"email">>],
+        default => [<<"openid">>, <<"profile">>, <<"email">>],
         datatype => {list, binary}
     },
     <<"role_claim">> => #{
@@ -423,7 +422,8 @@ connected to any realm.
             <<"prototype_uri">>,
             <<"is_sso_realm">>,
             <<"sso_realm_uri">>
-        ], ?REALM_VALIDATOR
+        ],
+        ?REALM_VALIDATOR
     )
 ).
 
@@ -539,7 +539,8 @@ connected to any realm.
             <<"prototype_uri">>,
             <<"is_sso_realm">>,
             <<"sso_realm_uri">>
-        ], ?REALM_UPDATE_VALIDATOR
+        ],
+        ?REALM_UPDATE_VALIDATOR
     )
 ).
 
@@ -574,8 +575,7 @@ connected to any realm.
     groups => [
         #{
             name => <<"bondy.administrators">>,
-            groups => [
-            ],
+            groups => [],
             meta => #{
                 <<"description">> => <<"The Bondy administrators group">>
             }
@@ -693,7 +693,6 @@ connected to any realm.
     ]
 }).
 
-
 -define(CONTROL_REALM, #realm{
     uri = ?CONTROL_REALM_URI,
     description = <<
@@ -704,7 +703,6 @@ connected to any realm.
     security_enabled = true,
     allow_connections = false,
     authmethods = []
-
 }).
 
 -define(DELETE_OPTS, #{
@@ -718,48 +716,47 @@ connected to any realm.
 }).
 
 -record(realm, {
-    uri                             ::  uri(),
-    description                     ::  binary(),
-    is_prototype = false            ::  boolean(),
-    prototype_uri                   ::  optional(uri()),
-    is_sso_realm = false            ::  boolean(),
+    uri :: uri(),
+    description :: binary(),
+    is_prototype = false :: boolean(),
+    prototype_uri :: optional(uri()),
+    is_sso_realm = false :: boolean(),
     %% TODO change sso_realm_uri to allowed_sso_realms
-    sso_realm_uri                   ::  optional(uri()),
-    allow_connections               ::  optional(boolean()),
-    authmethods                     ::  optional([binary()]),
-    security_enabled                ::  optional(boolean()),
-    password_opts                   ::  optional(
-                                            bondy_password:opts()
-                                        ),
+    sso_realm_uri :: optional(uri()),
+    allow_connections :: optional(boolean()),
+    authmethods :: optional([binary()]),
+    security_enabled :: optional(boolean()),
+    password_opts :: optional(
+        bondy_password:opts()
+    ),
     %% it can be undefined when we strip the value only.
     %% See strip_private_keys
-    private_keys = #{}              ::  optional(keymap()),
-    public_keys = #{}               ::  keymap(),
-    encryption_keys = #{}           ::  keymap(),
-    info = #{}                      ::  map()
+    private_keys = #{} :: optional(keymap()),
+    public_keys = #{} :: keymap(),
+    encryption_keys = #{} :: keymap(),
+    info = #{} :: map()
 }).
 
--opaque t()                         ::  #realm{}.
--type kid()                         ::  binary().
--type keymap()                      ::  #{kid() => map()}.
--type keyset()                      ::  [map()].
--type delete_opts()                 ::  #{force => boolean()}.
--type external()                    ::  #{
-    uri                     :=  uri(),
-    is_prototype            :=  boolean(),
-    prototype_uri           :=  optional(uri()),
-    description             :=  binary(),
-    authmethods             :=  [binary()],
-    is_sso_realm            :=  boolean(),
-    allow_connections       :=  boolean(),
-    public_keys             :=  keyset(),
-    security_status         :=  enabled | disabled
+-opaque t() :: #realm{}.
+-type kid() :: binary().
+-type keymap() :: #{kid() => map()}.
+-type keyset() :: [map()].
+-type delete_opts() :: #{force => boolean()}.
+-type external() :: #{
+    uri := uri(),
+    is_prototype := boolean(),
+    prototype_uri := optional(uri()),
+    description := binary(),
+    authmethods := [binary()],
+    is_sso_realm := boolean(),
+    allow_connections := boolean(),
+    public_keys := keyset(),
+    security_status := enabled | disabled
 }.
 
 -export_type([t/0]).
 -export_type([uri/0]).
 -export_type([external/0]).
-
 
 -export([allow_connections/1]).
 -export([apply_config/0]).
@@ -808,7 +805,6 @@ connected to any realm.
 -export([close/2]).
 -export([resume/1]).
 
-
 -export([grants/1]).
 -export([grants/2]).
 -export([groups/1]).
@@ -825,14 +821,9 @@ connected to any realm.
 -export([on_delete/2]).
 -export([on_erase/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-
 
 -doc "Returns the URI that identifies the realm `Realm`.".
 -spec uri(Realm :: t()) -> uri().
@@ -840,23 +831,19 @@ connected to any realm.
 uri(#realm{uri = Uri}) ->
     Uri.
 
--spec description(t() | uri()) ->  map().
+-spec description(t() | uri()) -> map().
 
 description(#realm{description = Value}) ->
     Value;
-
 description(Uri) when is_binary(Uri) ->
     description(fetch(Uri)).
-
 
 -spec is_type(Realm :: t() | uri()) -> boolean().
 
 is_type(#realm{}) ->
     true;
-
 is_type(_) ->
     false.
-
 
 -doc """
 Returns `true` if realm `Realm` is a prototype. Otherwise, returns
@@ -873,10 +860,8 @@ Returns `true` if realm `Realm` is a prototype. Otherwise, returns
 
 is_prototype(#realm{is_prototype = Val}) ->
     Val;
-
 is_prototype(Uri) when is_binary(Uri) ->
     is_prototype(fetch(Uri)).
-
 
 -doc """
 Returns the uri of realm `Realm` prototype if defined. Otherwise
@@ -886,10 +871,8 @@ returns `undefined`.
 
 prototype_uri(#realm{prototype_uri = Val}) ->
     Val;
-
 prototype_uri(Uri) when is_binary(Uri) ->
     prototype_uri(fetch(Uri)).
-
 
 -doc """
 Returns `true` if the property value is inherited from a prototype.
@@ -903,35 +886,27 @@ is_value_inherited(#realm{prototype_uri = undefined}, Property) ->
     %% So we validate the property is valid and return false
     ok = check_is_property(Property),
     false;
-
 is_value_inherited(
-    #realm{allow_connections = Val}, allow_connections) ->
+    #realm{allow_connections = Val}, allow_connections
+) ->
     Val == undefined;
-
 is_value_inherited(#realm{authmethods = Val}, authmethods) ->
     Val == undefined;
-
 is_value_inherited(#realm{sso_realm_uri = Val}, sso_realm_uri) ->
     Val == undefined;
-
 is_value_inherited(#realm{security_enabled = Val}, is_security_enabled) ->
     Val == undefined;
-
 is_value_inherited(#realm{security_enabled = Val}, security_status) ->
     %% security_status is an util function that uses the value of the
     %% security_enabled property
     Val == undefined;
-
 is_value_inherited(#realm{}, Property) ->
     %% The property is not inheritable.
     %% So we validate the property is valid and return false
     ok = check_is_property(Property),
     false;
-
 is_value_inherited(Uri, Property) when is_binary(Uri) ->
     is_value_inherited(fetch(Uri), Property).
-
-
 
 -doc """
 Returns the same sign on (SSO) realm URI used by the realm.
@@ -950,16 +925,12 @@ value is returned. Otherwise if the realm doesn't have a prototype returns
 
 sso_realm_uri(#realm{sso_realm_uri = undefined, prototype_uri = undefined}) ->
     undefined;
-
 sso_realm_uri(#realm{sso_realm_uri = undefined, prototype_uri = Uri}) ->
     sso_realm_uri(Uri);
-
 sso_realm_uri(#realm{sso_realm_uri = Val}) ->
     Val;
-
 sso_realm_uri(Uri) when is_binary(Uri) ->
     sso_realm_uri(fetch(Uri)).
-
 
 -doc """
 Returns `true` if realm `Realm` is associated with the SSO Realm
@@ -973,7 +944,6 @@ is_allowed_sso_realm(Realm, SSORealmUri) ->
     %% We call sso_realm_uri to resolve prototype inheritance
     SSORealmUri =:= sso_realm_uri(Realm).
 
-
 -doc """
 Returns `true` if the Realm is a Same Sign-on (SSO) realm.
 Otherwise returns `false`.
@@ -986,10 +956,8 @@ value is returned. Otherwise if the realm doesn't have a prototype returns
 
 is_sso_realm(#realm{is_sso_realm = Val}) ->
     Val;
-
 is_sso_realm(Uri) when is_binary(Uri) ->
     is_sso_realm(fetch(Uri)).
-
 
 -doc """
 Returns `true` if the Realm is allowing connections. Otherwise returns
@@ -1011,20 +979,18 @@ resources in the realm is through a connection to the Bondy Master Realm.
 -spec allow_connections(Realm :: t() | uri()) -> boolean().
 
 allow_connections(
-    #realm{allow_connections = undefined, prototype_uri = undefined} = Realm) ->
+    #realm{allow_connections = undefined, prototype_uri = undefined} = Realm
+) ->
     %% By default allow connections unless this is a prototype realm
     not Realm#realm.is_prototype;
-
 allow_connections(
-    #realm{allow_connections = undefined, prototype_uri = Uri}) ->
+    #realm{allow_connections = undefined, prototype_uri = Uri}
+) ->
     allow_connections(Uri);
-
 allow_connections(#realm{allow_connections = Val}) ->
     Val;
-
 allow_connections(Uri) when is_binary(Uri) ->
     allow_connections(fetch(Uri)).
-
 
 -doc "Sets allow_connections to false.".
 -spec suspend(Realm :: t() | uri()) -> boolean().
@@ -1037,10 +1003,8 @@ suspend(#realm{} = Realm) ->
             _ = update(Realm, #{allow_connections => false}),
             true
     end;
-
 suspend(Uri) when is_binary(Uri) ->
     suspend(fetch(Uri)).
-
 
 -doc "Sets allow_connections to true.".
 -spec resume(Realm :: t() | uri()) -> boolean() | no_return().
@@ -1055,10 +1019,8 @@ resume(#realm{} = Realm) ->
             _ = update(Realm, #{allow_connections => true}),
             true
     end;
-
 resume(Uri) when is_binary(Uri) ->
     resume(fetch(Uri)).
-
 
 -doc """
 Calls the session manager to asynchronoulsy close all sessions for
@@ -1068,7 +1030,6 @@ realm `Realm`.
 
 close(RealmUri, Reason) ->
     bondy_session_manager:close_all(RealmUri, Reason).
-
 
 -doc """
 Returns the list of supported authentication methods for Realm.
@@ -1084,16 +1045,12 @@ affects the methods available for an authenticating user.
 
 authmethods(#realm{authmethods = undefined, prototype_uri = undefined}) ->
     ?DEFAULT_AUTHMETHODS;
-
 authmethods(#realm{authmethods = undefined, prototype_uri = Uri}) ->
     authmethods(Uri);
-
 authmethods(#realm{authmethods = Val}) ->
     Val;
-
 authmethods(Uri) when is_binary(Uri) ->
     authmethods(fetch(Uri)).
-
 
 -doc """
 Returns `true` if Method is an authentication method supported by realm
@@ -1112,10 +1069,8 @@ the password-based authentication methods in this list will not be available.
 
 is_allowed_authmethod(#realm{} = Realm, Method) ->
     lists:member(Method, authmethods(Realm));
-
 is_allowed_authmethod(Uri, Method) when is_binary(Uri) ->
     is_allowed_authmethod(fetch(Uri), Method).
-
 
 -doc """
 Returns `true` if security is enabled. Otherwise returns `false`.
@@ -1133,19 +1088,17 @@ as an atom.
 -spec is_security_enabled(t() | uri()) -> boolean().
 
 is_security_enabled(
-    #realm{security_enabled = undefined, prototype_uri = undefined}) ->
+    #realm{security_enabled = undefined, prototype_uri = undefined}
+) ->
     true;
-
 is_security_enabled(
-    #realm{security_enabled = undefined, prototype_uri = Uri}) ->
+    #realm{security_enabled = undefined, prototype_uri = Uri}
+) ->
     is_security_enabled(Uri);
-
 is_security_enabled(#realm{security_enabled = Val}) ->
     Val;
-
 is_security_enabled(Uri) when is_binary(Uri) ->
     is_security_enabled(fetch(Uri)).
-
 
 -doc """
 A util function that returns the security status as an atom.
@@ -1159,34 +1112,27 @@ security_status(Term) ->
         false -> disabled
     end.
 
-
 -doc "Enables security for realm `Realm`.".
 -spec enable_security(t() | uri()) -> ok.
 
 enable_security(#realm{} = Realm) ->
     _ = update(Realm, #{security_enabled => true}),
     ok;
-
 enable_security(Uri) when is_binary(Uri) ->
     enable_security(fetch(Uri)).
-
 
 -doc "Disables security for realm `Realm`.".
 -spec disable_security(t() | uri()) -> ok | no_return().
 
 disable_security(#realm{uri = ?MASTER_REALM_URI}) ->
     error(badarg);
-
 disable_security(#realm{uri = ?CONTROL_REALM_URI}) ->
     error(badarg);
-
 disable_security(#realm{} = Realm) ->
     _ = update(Realm, #{security_enabled => false}),
     ok;
-
 disable_security(Uri) when is_binary(Uri) ->
     disable_security(fetch(Uri)).
-
 
 -doc """
 Returns the password options to be used as default when adding users
@@ -1196,46 +1142,35 @@ to this realm. If the options have not been defined returns atom `undefined`.
 
 password_opts(#realm{password_opts = undefined, prototype_uri = undefined}) ->
     true;
-
 password_opts(#realm{password_opts = undefined, prototype_uri = Uri}) ->
     password_opts(Uri);
-
 password_opts(#realm{password_opts = Opts}) ->
     Opts;
-
 password_opts(RealmUri) ->
     password_opts(fetch(RealmUri)).
-
 
 -spec private_keys(t() | uri()) -> [map()].
 
 private_keys(#realm{private_keys = undefined}) ->
     %% Special case when we strip the keys
     [];
-
 private_keys(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
     Realm = init_keys(Realm0),
     private_keys(Realm);
-
 private_keys(#realm{private_keys = Keys}) ->
     [to_private_key(K) || {_, K} <- maps:to_list(Keys)];
-
 private_keys(Uri) when is_binary(Uri) ->
     private_keys(fetch(Uri)).
-
 
 -spec public_keys(t() | uri()) -> [map()].
 
 public_keys(#realm{public_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
     Realm = init_keys(Realm0),
     public_keys(Realm);
-
 public_keys(#realm{public_keys = Keys}) ->
     [K || {_, K} <- maps:to_list(Keys)];
-
 public_keys(Uri) when is_binary(Uri) ->
     public_keys(fetch(Uri)).
-
 
 -spec get_private_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
@@ -1244,10 +1179,8 @@ get_private_key(#realm{private_keys = Keys}, Kid) ->
         undefined -> undefined;
         Key -> to_private_key(Key)
     end;
-
 get_private_key(Uri, Kid) when is_binary(Uri) ->
     get_private_key(fetch(Uri), Kid).
-
 
 -spec get_public_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
@@ -1256,35 +1189,29 @@ get_public_key(#realm{public_keys = Keys}, Kid) ->
         undefined -> undefined;
         Key -> Key
     end;
-
 get_public_key(Uri, Kid) when is_binary(Uri) ->
     get_public_key(fetch(Uri), Kid).
-
 
 -spec get_random_kid(t() | uri()) -> binary().
 
 get_random_kid(#realm{private_keys = Keys}) ->
     Kids = maps:keys(Keys),
     lists:nth(rand:uniform(length(Kids)), Kids);
-
 get_random_kid(Uri) when is_binary(Uri) ->
     get_random_kid(fetch(Uri)).
 
-
 -spec encryption_keys(t() | uri()) -> [map()].
 
-encryption_keys(#realm{encryption_keys = Keys} = Realm0)
-when map_size(Keys) == 0 ->
+encryption_keys(#realm{encryption_keys = Keys} = Realm0) when
+    map_size(Keys) == 0
+->
     Data = #{encryption_keys => gen_encryption_keys()},
     Realm = merge_and_store(Realm0, Data, #{}),
     encryption_keys(Realm);
-
 encryption_keys(#realm{encryption_keys = Keys}) ->
     [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
-
 encryption_keys(Uri) when is_binary(Uri) ->
     encryption_keys(fetch(Uri)).
-
 
 -spec get_encryption_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
@@ -1293,29 +1220,23 @@ get_encryption_key(#realm{encryption_keys = Keys}, Kid) ->
         undefined -> undefined;
         Map -> jose_jwk:to_map(Map)
     end;
-
 get_encryption_key(Uri, Kid) when is_binary(Uri) ->
     get_encryption_key(fetch(Uri), Kid).
 
-
--spec get_random_encryption_kid(t() | uri()) ->  map().
+-spec get_random_encryption_kid(t() | uri()) -> map().
 
 get_random_encryption_kid(#realm{encryption_keys = Keys}) ->
     Kids = maps:keys(Keys),
     lists:nth(rand:uniform(length(Kids)), Kids);
-
 get_random_encryption_kid(Uri) when is_binary(Uri) ->
     get_random_encryption_kid(fetch(Uri)).
 
-
--spec info(t() | uri()) ->  map() | no_return().
+-spec info(t() | uri()) -> map() | no_return().
 
 info(#realm{info = Info}) ->
     Info;
-
 info(Uri) when is_binary(Uri) ->
     info(fetch(Uri)).
-
 
 -doc """
 Returns the OIDC providers configuration map for the given realm.
@@ -1325,10 +1246,8 @@ Returns an empty map if no providers are configured.
 
 oidc_providers(#realm{info = Info}) ->
     maps:get(oidc_providers, Info, []);
-
 oidc_providers(Uri) when is_binary(Uri) ->
     oidc_providers(fetch(Uri)).
-
 
 -doc """
 Looks up a specific OIDC provider configuration by name.
@@ -1345,7 +1264,6 @@ get_oidc_provider(Realm, ProviderName) when is_binary(ProviderName) ->
             {ok, maybe_migrate_provider_config(Value)}
     end.
 
-
 %% @private
 %% Removes ticket_expiry_secs from provider configs where the value matches
 %% the old hardcoded validator default (3600). This allows the handler to
@@ -1353,16 +1271,13 @@ get_oidc_provider(Realm, ProviderName) when is_binary(ProviderName) ->
 %% (different from the old default) are preserved.
 maybe_migrate_provider_config(#{ticket_expiry_secs := 3600} = Config) ->
     maps:remove(ticket_expiry_secs, Config);
-
 maybe_migrate_provider_config(Config) ->
     Config.
-
 
 -spec exists(uri()) -> boolean().
 
 exists(Uri) ->
     resulto:is_ok(lookup(Uri)).
-
 
 -doc """
 Retrieves the realm identified by Uri from the tuplespace or '{error, not_found}'
@@ -1373,7 +1288,6 @@ if it doesn't exist.
 lookup(Uri) ->
     do_lookup(string:casefold(Uri)).
 
-
 -doc """
 Retrieves the realm identified by Uri from the tuplespace. If the realm
 does not exist it fails with reason '{badarg, Uri}'.
@@ -1382,16 +1296,13 @@ does not exist it fails with reason '{badarg, Uri}'.
 
 fetch(?CONTROL_REALM_URI) ->
     ?CONTROL_REALM;
-
 fetch(Uri) ->
     case lookup(Uri) of
         {ok, #realm{} = Realm} ->
             Realm;
-
         {error, not_found} ->
             error({not_found, Uri})
     end.
-
 
 -doc """
 Retrieves the realm identified by Uri from the tuplespace. If the realm
@@ -1402,7 +1313,6 @@ new one for Uri with the default configuration options.
 
 get(Uri) ->
     get(Uri, #{}).
-
 
 -doc """
 Retrieves the realm identified by Uri from the tuplespace. If the realm
@@ -1418,15 +1328,12 @@ get(Uri, Opts) ->
         fun
             (not_found) when Uri == ?MASTER_REALM_URI ->
                 resulto:result(add_master_realm());
-
             (not_found) ->
                 resulto:result(maybe_create(Uri, Opts));
-
             (Reason) ->
                 {error, Reason}
         end
     ).
-
 
 -spec create(uri() | map()) -> t() | no_return().
 
@@ -1436,8 +1343,8 @@ create(Map0) when is_map(Map0) ->
     Prefix = binary:longest_common_prefix([?MASTER_REALM_URI, Uri]),
     Size = byte_size(?MASTER_REALM_URI),
 
-    Prefix < Size andalso Uri =/= ?CONTROL_REALM_URI
-    orelse error(badarg),
+    Prefix < Size andalso Uri =/= ?CONTROL_REALM_URI orelse
+        error(badarg),
 
     case exists(Uri) of
         true ->
@@ -1445,34 +1352,27 @@ create(Map0) when is_map(Map0) ->
         false ->
             do_create(Map1, #{})
     end;
-
 create(Uri) when is_binary(Uri) ->
     create(#{uri => Uri}).
-
 
 -spec update(Realm :: t() | uri(), Data :: map()) -> Realm :: t() | no_return().
 
 update(#realm{uri = ?CONTROL_REALM_URI}, _) ->
     error(badarg);
-
 update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
     Data = maps_utils:validate(Data0, ?MASTER_REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data, #{});
-
 update(#realm{} = Realm, Data0) ->
     Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data, #{});
-
 update(Uri, Data) when is_binary(Uri) ->
     update(fetch(Uri), Data).
-
 
 -spec delete(t() | uri()) ->
     ok | {error, not_found | active_users} | no_return().
 
 delete(Term) ->
     delete(Term, #{force => false}).
-
 
 -doc """
 Deletes the realm and all its associated resources in case the realm
@@ -1487,9 +1387,9 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
     %% TODO What is this is master realm? or prototype? or SSO?
 
     %% Cannot delete master and internal realms
-    Uri =/= ?MASTER_REALM_URI
-        andalso Uri =/= ?CONTROL_REALM_URI
-        orelse error(badarg),
+    Uri =/= ?MASTER_REALM_URI andalso
+        Uri =/= ?CONTROL_REALM_URI orelse
+        error(badarg),
 
     Opts = maps_utils:validate(Opts0, ?DELETE_OPTS),
     Force = maps:get(force, Opts, false),
@@ -1543,7 +1443,6 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             case bondy_router_worker:cast(Work) of
                 ok ->
                     ok;
-
                 {error, Reason} = Error ->
                     ?LOG_ERROR(#{
                         description =>
@@ -1554,13 +1453,11 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
                     Error
             end
     end;
-
 delete(Uri, Opts) when is_binary(Uri) ->
     resulto:then(
         lookup(Uri),
         fun(#realm{} = Realm) -> delete(Realm, Opts) end
     ).
-
 
 -doc """
 Loads a security config file from
@@ -1581,13 +1478,11 @@ apply_config() ->
             from_file(Filename, #{rebase => true})
     end.
 
-
 -doc "Loads a security config file from `Filename`.".
 -spec from_file(Filename :: file:filename_all()) -> ok | no_return().
 
 from_file(Filename) ->
     from_file(Filename, #{}).
-
 
 -doc "Loads a security config file from `Filename`.".
 -spec from_file(Filename :: file:filename_all(), #{rebase := boolean()}) ->
@@ -1606,17 +1501,15 @@ from_file(Filename, Opts) ->
             Uris = [Uri || #{<<"uri">> := Uri} <- SortedRealms],
             Len = length(Uris),
 
-            Details = case Len > 3 of
-                true ->
-                    [A, B, C | _] = Uris,
-                    Prefix = binary_utils:join([A, B, C], <<", ">>),
-                    <<Prefix/binary, "...">>;
-
-                false ->
-                    binary_utils:join([<<"a">>, <<"b">>], <<", ">>)
-
-            end,
-
+            Details =
+                case Len > 3 of
+                    true ->
+                        [A, B, C | _] = Uris,
+                        Prefix = binary_utils:join([A, B, C], <<", ">>),
+                        <<Prefix/binary, "...">>;
+                    false ->
+                        binary_utils:join([<<"a">>, <<"b">>], <<", ">>)
+                end,
 
             ?LOG_INFO(#{
                 description => "Loading configuration file",
@@ -1630,7 +1523,6 @@ from_file(Filename, Opts) ->
             %% to false
             _ = [add_or_update(Data, Opts) || Data <- SortedRealms],
             ok;
-
         {error, enoent} ->
             ?LOG_WARNING(#{
                 description => "Error while parsing configuration file",
@@ -1638,7 +1530,6 @@ from_file(Filename, Opts) ->
                 reason => file:format_error(enoent)
             }),
             ok;
-
         {error, Reason} ->
             ?LOG_WARNING(#{
                 description => "Error while parsing configuration file",
@@ -1648,14 +1539,11 @@ from_file(Filename, Opts) ->
             error(invalid_config)
     end.
 
-
-
 -spec list() -> [t()].
 
 list() ->
     Opts = [{remove_tombstones, true}, {resolver, lww}],
     [from_term(V) || {_K, V} <- plum_db:match(?PLUM_DB_PREFIX('_'), '_', Opts)].
-
 
 -doc "Returns the external map representation of the realm.".
 -spec to_external(t() | uri()) -> external().
@@ -1673,15 +1561,16 @@ to_external(#realm{} = R) ->
         password_opts => R#realm.password_opts,
         security_status => security_status(R),
         public_keys => [
-            begin {_, Map} = jose_jwk:to_map(K), Map end
-            || {_, K} <- maps:to_list(R#realm.public_keys)
+            begin
+                {_, Map} = jose_jwk:to_map(K),
+                Map
+            end
+         || {_, K} <- maps:to_list(R#realm.public_keys)
         ]
     },
     maps:filter(fun(_, V) -> V =/= undefined end, Map);
-
 to_external(RealmUri) ->
     to_external(fetch(RealmUri)).
-
 
 -doc """
 A temporary hack to prevent keys being synced with an Edge router. We
@@ -1693,13 +1582,9 @@ management strategies.
 strip_private_keys(#realm{} = R) ->
     R#realm{private_keys = undefined}.
 
-
-
 %% =============================================================================
 %% AUTHZ
 %% =============================================================================
-
-
 
 -doc """
 Returns the list of users belonging to realm `Realm`.
@@ -1710,7 +1595,6 @@ Users are never inherited through prototypes.
 users(Realm) ->
     users(Realm, #{}).
 
-
 -doc """
 Returns the list of users belonging to realm `Realm`.
 Users are never inherited through prototypes.
@@ -1720,10 +1604,8 @@ Users are never inherited through prototypes.
 users(#realm{uri = Uri}, Opts) ->
     %% TODO change this with continuation return
     bondy_rbac_user:list(Uri, Opts);
-
 users(Uri, Opts) when is_binary(Uri) ->
     users(fetch(Uri), Opts).
-
 
 -doc """
 Returns the list of users belonging to realm `Realm`.
@@ -1734,7 +1616,6 @@ These includes the groups inherited from the prototype (if defined).
 groups(Realm) ->
     groups(Realm, #{}).
 
-
 -doc """
 Returns the list of groups belonging to realm `Realm`.
 These includes the groups inherited from the prototype (if defined).
@@ -1744,10 +1625,8 @@ These includes the groups inherited from the prototype (if defined).
 groups(#realm{uri = Uri}, Opts) ->
     %% TODO change this with continuation return
     bondy_rbac_group:list(Uri, Opts);
-
 groups(Uri, Opts) when is_binary(Uri) ->
     groups(fetch(Uri), Opts).
-
 
 -doc """
 Returns the list of sources belonging to realm `Realm`.
@@ -1758,7 +1637,6 @@ These includes the sources inherited from the prototype (if defined).
 sources(Realm) ->
     sources(Realm, #{}).
 
-
 -doc """
 Returns the list of sources belonging to realm `Realm`.
 These includes the sources inherited from the prototype (if defined).
@@ -1768,10 +1646,8 @@ These includes the sources inherited from the prototype (if defined).
 sources(#realm{uri = Uri}, Opts) ->
     %% TODO change this with continuation return
     bondy_rbac_source:list(Uri, Opts);
-
 sources(Uri, Opts) when is_binary(Uri) ->
     sources(fetch(Uri), Opts).
-
 
 -doc """
 Returns the list of grants belonging to realm `Realm`.
@@ -1782,33 +1658,26 @@ These includes the grants inherited from the prototype (if defined).
 grants(Realm) ->
     grants(Realm, #{}).
 
-
 -doc """
 Returns the list of grants belonging to realm `Realm`.
 These includes the grants inherited from the prototype (if defined).
 """.
--spec grants(Realm :: t() | uri(), Opts :: map())
--> [{{binary(), {binary(), binary()}}, [binary()]}].
+-spec grants(Realm :: t() | uri(), Opts :: map()) ->
+    [{{binary(), {binary(), binary()}}, [binary()]}].
 
 grants(#realm{uri = Uri}, Opts) ->
     %% TODO change this with continuation return
     bondy_rbac:grants(Uri, Opts);
-
 grants(Uri, Opts) when is_binary(Uri) ->
     grants(fetch(Uri), Opts).
-
-
 
 %% =============================================================================
 %% PLUM_DB PREFIX CALLBACKS
 %% =============================================================================
 
-
-
 -doc "bondy_config".
 will_merge(_PKey, _New, _Old) ->
     true.
-
 
 on_merge(?PLUM_DB_PKEY(Uri), New, _Old) ->
     Resolved = plum_db_object:resolve(New, lww),
@@ -1822,34 +1691,26 @@ on_merge(?PLUM_DB_PKEY(Uri), New, _Old) ->
             ok
     end.
 
-
 -doc "A local update".
 on_update(_PKey, _New, _Old) ->
     ok.
-
 
 -doc "A local delete".
 on_delete(_PKey, _Old) ->
     ok.
 
-
 -doc "A local erase".
 on_erase(_PKey, _Old) ->
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 add_master_realm() ->
     Data = validate(?MASTER_REALM, ?MASTER_REALM_VALIDATOR),
     do_create(Data, #{rebase => true}).
-
 
 %% @private
 validate(Map0, Spec) ->
@@ -1860,35 +1721,36 @@ validate(Map0, Spec) ->
     IsProto = maps:get(is_prototype, Map, false),
     Proto = maps:get(prototype_uri, Map, undefined),
 
-    ok = case {IsProto, Proto} of
-        {true, undefined} ->
-            ok;
-        {true, _} ->
-            error({inconsistency_error, [is_prototype, prototype_uri]});
-        _ ->
-            ok
-    end,
+    ok =
+        case {IsProto, Proto} of
+            {true, undefined} ->
+                ok;
+            {true, _} ->
+                error({inconsistency_error, [is_prototype, prototype_uri]});
+            _ ->
+                ok
+        end,
 
     IsSSORealm = maps:get(is_sso_realm, Map, false),
     SSORealm = maps:get(sso_realm_uri, Map, undefined),
 
-    ok = case {IsSSORealm, SSORealm} of
-        {true, undefined} ->
-            ok;
-        {true, _} ->
-            error({inconsistency_error, [is_sso_realm, sso_realm_uri]});
-        _ ->
-            ok
-    end,
+    ok =
+        case {IsSSORealm, SSORealm} of
+            {true, undefined} ->
+                ok;
+            {true, _} ->
+                error({inconsistency_error, [is_sso_realm, sso_realm_uri]});
+            _ ->
+                ok
+        end,
 
     Map.
-
 
 %% @private
 validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
     Groups0 = [
         bondy_rbac_group:new(Data)
-        || Data <- maps:get(groups, Map, [])
+     || Data <- maps:get(groups, Map, [])
     ],
 
     Groups = group_topsort(Uri, Groups0),
@@ -1917,15 +1779,15 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
             PassOpts = key_value:put([params, salt], Salt, PassOpts0),
             bondy_rbac_user:new(Data, #{password_opts => PassOpts})
         end
-        || Data <- maps:get(users, Map, [])
+     || Data <- maps:get(users, Map, [])
     ],
     SourceAssignments = [
         bondy_rbac_source:new_assignment(Data)
-        || Data <- maps:get(sources, Map, [])
+     || Data <- maps:get(sources, Map, [])
     ],
     Grants = [
         bondy_rbac:request(Data)
-        || Data <- maps:get(grants, Map, [])
+     || Data <- maps:get(grants, Map, [])
     ],
     #{
         groups => Groups,
@@ -1934,18 +1796,15 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
         grants => Grants
     }.
 
-
 %% @private
 get_password_opts([]) ->
     undefined;
-
 get_password_opts(Methods) when is_list(Methods) ->
     %% We do this to override the config default protocol
     case lists:member(?WAMP_SCRAM_AUTH, Methods) of
         true -> bondy_password:default_opts(scram);
         false -> bondy_password:default_opts()
     end.
-
 
 %% @private
 apply_rbac_config(#realm{uri = Uri}, Map, Opts) ->
@@ -1960,7 +1819,7 @@ apply_rbac_config(#realm{uri = Uri}, Map, Opts) ->
         ok = maybe_error(
             bondy_rbac_group:add(Uri, Group, Opts), Uri
         )
-        || Group <- Groups
+     || Group <- Groups
     ],
 
     _ = [
@@ -1972,42 +1831,36 @@ apply_rbac_config(#realm{uri = Uri}, Map, Opts) ->
             ),
             Uri
         )
-        || User <- Users
+     || User <- Users
     ],
 
     _ = [
         ok = maybe_error(bondy_rbac_source:add(Uri, Assignment, Opts), Uri)
-        || Assignment <- SourcesAssignments
+     || Assignment <- SourcesAssignments
     ],
 
     _ = [
         ok = maybe_error(bondy_rbac:grant(Uri, Grant, Opts), Uri)
-        || Grant <- Grants
+     || Grant <- Grants
     ],
 
     ok.
 
-
 %% @private
 maybe_error({error, Reason}, Uri) ->
     error({Reason, Uri});
-
 maybe_error({ok, _}, _) ->
     ok;
-
 maybe_error(ok, _) ->
     ok.
-
 
 %% @private
 check_is_property(Property) when is_atom(Property) ->
     Props = [is_security_enabled | record_info(fields, realm)],
     lists:member(Property, Props) orelse error(badarg),
     ok;
-
 check_is_property(_) ->
     error(badarg).
-
 
 %% @private
 maybe_create(Uri, Opts) ->
@@ -2018,19 +1871,16 @@ maybe_create(Uri, Opts) ->
             {error, not_found}
     end.
 
-
 %% @private
 add_or_update(#{<<"uri">> := Uri} = Data0, Opts) ->
     case lookup(Uri) of
         {ok, #realm{} = Realm} ->
             Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
             do_update(Realm, Data, Opts);
-
         {error, not_found} ->
             Data = validate(Data0, ?REALM_VALIDATOR),
             do_create(Data, Opts)
     end.
-
 
 %% @private
 do_create(#{uri := Uri} = Map, Opts) ->
@@ -2039,7 +1889,6 @@ do_create(#{uri := Uri} = Map, Opts) ->
     ok = on_create(Realm),
     Realm.
 
-
 %% @private
 -spec do_lookup(uri()) -> {ok, t()} | {error, not_found}.
 
@@ -2047,16 +1896,13 @@ do_lookup(Uri) ->
     case plum_db:get(?PLUM_DB_PREFIX(Uri), Uri) of
         #realm{} = Realm ->
             {ok, Realm};
-
         undefined ->
             {error, not_found};
-
         Term ->
             try
                 Realm = from_term(Term),
                 ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
                 {ok, Realm}
-
             catch
                 throw:badarg ->
                     ?LOG_WARNING(#{
@@ -2067,13 +1913,11 @@ do_lookup(Uri) ->
             end
     end.
 
-
 %% @private
 do_update(Realm0, Map, Opts) ->
     Realm = merge_and_store(Realm0, Map, Opts),
     ok = on_update(Realm),
     Realm.
-
 
 %% @private
 merge_and_store(Realm0, Map, Opts) ->
@@ -2108,7 +1952,6 @@ merge_and_store(Realm0, Map, Opts) ->
 
     Realm.
 
-
 %% @private
 store(Prefix, Key, Realm, #{rebase := true} = Opts) ->
     ActorId = maps:get(actor_id, Opts, undefined),
@@ -2120,7 +1963,6 @@ store(Prefix, Key, Realm, #{rebase := true} = Opts) ->
         {error, Reason} ->
             throw(Reason)
     end;
-
 store(Prefix, Key, Realm, _) ->
     case plum_db:put(Prefix, Key, Realm) of
         ok ->
@@ -2129,24 +1971,19 @@ store(Prefix, Key, Realm, _) ->
             throw(Reason)
     end.
 
-
 %% @private
 fold_props(allow_connections, V, Realm) ->
     Realm#realm{allow_connections = V};
-
 fold_props(authmethods, V, Realm0) ->
     Realm = Realm0#realm{authmethods = V},
     %% We get opts by calling the authmethods function which inherits the value
     %% from the prototype
     Opts = get_password_opts(authmethods(Realm)),
     Realm#realm{password_opts = Opts};
-
 fold_props(description, V, Realm) ->
     Realm#realm{description = V};
-
 fold_props(is_prototype, true, #realm{is_prototype = false} = Realm) ->
     Realm#realm{is_prototype = true};
-
 fold_props(is_prototype, false, #realm{is_prototype = true}) ->
     error(
         {
@@ -2157,22 +1994,19 @@ fold_props(is_prototype, false, #realm{is_prototype = true}) ->
             >>
         }
     );
-
 fold_props(prototype_uri, V, #realm{prototype_uri = undefined} = Realm) ->
     Realm#realm{prototype_uri = V};
-
-fold_props(prototype_uri, V1, #realm{prototype_uri = V0})
-when V0 =/= V1 ->
+fold_props(prototype_uri, V1, #realm{prototype_uri = V0}) when
+    V0 =/= V1
+->
     error(
         {
             badarg,
             <<"Cannot set update 'prototype_uri' once it has been set.">>
         }
     );
-
 fold_props(is_sso_realm, true, #realm{is_sso_realm = false} = Realm) ->
     Realm#realm{is_sso_realm = true};
-
 fold_props(is_sso_realm, false, #realm{is_sso_realm = true}) ->
     error(
         {
@@ -2183,47 +2017,36 @@ fold_props(is_sso_realm, false, #realm{is_sso_realm = true}) ->
             >>
         }
     );
-
 fold_props(sso_realm_uri, V, Realm) ->
     Realm#realm{sso_realm_uri = V};
-
 fold_props(security_enabled, V, Realm) ->
     Realm#realm{security_enabled = V};
-
 fold_props(private_keys, V, Realm) ->
     set_keys(Realm, V);
-
 fold_props(encryption_keys, V, Realm) ->
     set_encryption_keys(Realm, V);
-
 fold_props(info, V, Realm) ->
     Realm#realm{info = V};
-
 fold_props(_, _, Realm) ->
     %% We ignote the rest of the properties.
     %% They will be handled separately.
     Realm.
 
-
 %% @private
 on_create(Realm) ->
     bondy_event_manager:notify({[bondy, realm, created], Realm#realm.uri}).
-
 
 %% @private
 on_update(Realm) ->
     bondy_event_manager:notify({[bondy, realm, updated], Realm#realm.uri}).
 
-
 %% @private
 on_delete(Uri) ->
     bondy_event_manager:notify({[bondy, realm, deleted], Uri}).
 
-
 %% @private
 set_keys(Realm, undefined) ->
     Realm;
-
 set_keys(#realm{private_keys = Old} = Realm, New) ->
     PrivateKeys = keys_to_jwts(Old, New),
     PublicKeys = maps:map(fun(_, V) -> jose_jwk:to_public(V) end, PrivateKeys),
@@ -2232,16 +2055,13 @@ set_keys(#realm{private_keys = Old} = Realm, New) ->
         public_keys = PublicKeys
     }.
 
-
 %% @private
 set_encryption_keys(Realm, undefined) ->
     Realm;
-
 set_encryption_keys(#realm{encryption_keys = Old} = Realm, New) ->
     Realm#realm{
         encryption_keys = keys_to_jwts(Old, New)
     }.
-
 
 %% @private
 keys_to_jwts(Old, New) ->
@@ -2255,20 +2075,17 @@ keys_to_jwts(Old, New) ->
                 Existing ->
                     {Kid, Existing}
             end
-        end || Key <- New
+        end
+     || Key <- New
     ]).
-
 
 %% private
 validate_keys([]) ->
     {ok, gen_keys()};
-
 validate_keys(L) when is_list(L) ->
     do_validate_keys(L);
-
 validate_keys(_) ->
     false.
-
 
 %% @private
 -doc "This updates the realm and stores it.".
@@ -2276,34 +2093,28 @@ init_keys(Realm) ->
     Data = #{private_keys => gen_keys()},
     merge_and_store(Realm, Data, #{}).
 
-
 %% @private
 %% We generate the keys for signing
 gen_keys() ->
     [
         jose_jwk:generate_key({namedCurve, secp256r1})
-        || _ <- lists:seq(1, 3)
+     || _ <- lists:seq(1, 3)
     ].
-
 
 %% private
 validate_encryption_keys([]) ->
     {ok, gen_encryption_keys()};
-
 validate_encryption_keys(L) when is_list(L) ->
     do_validate_keys(L);
-
 validate_encryption_keys(_) ->
     false.
-
 
 %% @private
 gen_encryption_keys() ->
     [
         jose_jwk:generate_key({rsa, 2048, 65537})
-        || _ <- lists:seq(1, 3)
+     || _ <- lists:seq(1, 3)
     ].
-
 
 %% @private
 do_validate_keys(L) when is_list(L) ->
@@ -2326,7 +2137,6 @@ do_validate_keys(L) when is_list(L) ->
             false
     end.
 
-
 group_topsort(Uri, Groups) ->
     try
         bondy_rbac_group:topsort(Groups)
@@ -2345,7 +2155,6 @@ group_topsort(Uri, Groups) ->
             error({invalid_config, EReason})
     end.
 
-
 %% @private
 topsort(Realms) ->
     Graph = digraph:new([acyclic]),
@@ -2361,7 +2170,6 @@ topsort(Realms) ->
             Vertices ->
                 [element(2, digraph:vertex(Graph, V)) || V <- Vertices]
         end
-
     catch
         throw:{cycle, Path} ->
             EReason = list_to_binary(
@@ -2375,11 +2183,9 @@ topsort(Realms) ->
                 )
             ),
             error({invalid_config, EReason})
-
     after
         digraph:delete(Graph)
     end.
-
 
 %% @private
 precedence_graph(Realms, Graph) ->
@@ -2389,13 +2195,13 @@ precedence_graph(Realms, Graph) ->
             R = validate_uris(R0),
             Uri = maps:get(uri, R),
             digraph:add_vertex(Graph, Uri, R)
-        end || R0 <- Realms
+        end
+     || R0 <- Realms
     ],
     precedence_graph_aux(Vertices, Graph).
 
-
 %% @private
-precedence_graph_aux([H|T], Graph) ->
+precedence_graph_aux([H | T], Graph) ->
     {H, Realm} = digraph:vertex(Graph, H),
 
     %% The following cases should be covered:
@@ -2409,14 +2215,12 @@ precedence_graph_aux([H|T], Graph) ->
 
     _ = [
         precedence_graph_add_edge(Graph, Uri, H)
-        || Uri <- Uris, Uri =/= undefined
+     || Uri <- Uris, Uri =/= undefined
     ],
 
     precedence_graph_aux(T, Graph);
-
 precedence_graph_aux([], Graph) ->
     Graph.
-
 
 %% @private
 precedence_graph_add_edge(Graph, A, B) ->
@@ -2437,7 +2241,6 @@ precedence_graph_add_edge(Graph, A, B) ->
             %% during merge_and_store, so we do nothing here
             ok
     end.
-
 
 %% @private we validate just the URIs that are needed to build the precedence
 %% graph
@@ -2469,19 +2272,17 @@ validate_uris(Data) ->
     },
     maps_utils:validate(Data, Validator, Opts).
 
-
 %% @private
 check_integrity_constraints(Realm) ->
     ok = check_integrity_constraints(Realm, prototype),
     ok = check_integrity_constraints(Realm, sso),
     ok.
 
-
 %% @private
 check_integrity_constraints(
-    #realm{is_sso_realm = true, sso_realm_uri = undefined}, sso) ->
+    #realm{is_sso_realm = true, sso_realm_uri = undefined}, sso
+) ->
     ok;
-
 check_integrity_constraints(#realm{is_sso_realm = true}, sso) ->
     error(
         {
@@ -2495,7 +2296,6 @@ check_integrity_constraints(#realm{is_sso_realm = true}, sso) ->
             >>
         }
     );
-
 check_integrity_constraints(#realm{uri = Uri, sso_realm_uri = Uri}, sso) ->
     %% sso relationship is irreflexive
     error(
@@ -2509,19 +2309,16 @@ check_integrity_constraints(#realm{uri = Uri, sso_realm_uri = Uri}, sso) ->
             >>
         }
     );
-
 check_integrity_constraints(
     #realm{is_sso_realm = false, sso_realm_uri = Uri}, sso
 ) when Uri =/= undefined ->
     check_realm_type(Uri, sso);
-
 check_integrity_constraints(_, sso) ->
     ok;
-
 check_integrity_constraints(
-    #realm{is_prototype = true, prototype_uri = undefined}, prototype) ->
+    #realm{is_prototype = true, prototype_uri = undefined}, prototype
+) ->
     ok;
-
 check_integrity_constraints(#realm{is_prototype = true}, prototype) ->
     error(
         {
@@ -2535,9 +2332,9 @@ check_integrity_constraints(#realm{is_prototype = true}, prototype) ->
             >>
         }
     );
-
 check_integrity_constraints(
-    #realm{uri = Uri, prototype_uri = Uri}, prototype) ->
+    #realm{uri = Uri, prototype_uri = Uri}, prototype
+) ->
     %% prototype relationship is irreflexive
     error(
         {
@@ -2550,40 +2347,34 @@ check_integrity_constraints(
             >>
         }
     );
-
 check_integrity_constraints(
     #realm{is_prototype = false, prototype_uri = Uri}, prototype
 ) when Uri =/= undefined ->
     check_realm_type(Uri, prototype);
-
 check_integrity_constraints(_, prototype) ->
     ok.
-
 
 %% @private
 check_realm_type(undefined, _) ->
     ok;
-
 check_realm_type(Uri, Type) ->
-    _ = case lookup(Uri) of
-        {ok, Realm} when Type == sso ->
-            is_sso_realm(Realm) orelse error(badarg(Uri, Type, badtype));
-
-        {ok, Realm} when Type == prototype ->
-            is_prototype(Realm) orelse error(badarg(Uri, Type, badtype));
-
-        {error, not_found = Reason} ->
-            error(badarg(Uri, Type, Reason))
-    end,
+    _ =
+        case lookup(Uri) of
+            {ok, Realm} when Type == sso ->
+                is_sso_realm(Realm) orelse error(badarg(Uri, Type, badtype));
+            {ok, Realm} when Type == prototype ->
+                is_prototype(Realm) orelse error(badarg(Uri, Type, badtype));
+            {error, not_found = Reason} ->
+                error(badarg(Uri, Type, Reason))
+        end,
     ok.
-
 
 %% @private
 from_term(#realm{} = Realm) ->
     Realm;
-
-from_term(Term)
-when is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13 ->
+from_term(Term) when
+    is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13
+->
     %% 0.9.SNAPSHOT-SSO
     %% -record(realm, {
     %%     [2] uri                      ::  uri(),
@@ -2616,7 +2407,6 @@ when is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13 ->
         encryption_keys = element(12, Term),
         info = element(13, Term)
     };
-
 from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
     %% At the moment we will not get this one as it is store in a different
     %% prefix
@@ -2643,10 +2433,8 @@ from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
         encryption_keys = #{},
         info = #{}
     };
-
 from_term(_) ->
     throw(badarg).
-
 
 %% @private
 badarg(Uri, prototype, not_found) ->
@@ -2658,7 +2446,6 @@ badarg(Uri, prototype, not_found) ->
             "') that doesn't exist."
         >>
     };
-
 badarg(Uri, sso, not_found) ->
     {
         badarg,
@@ -2668,7 +2455,6 @@ badarg(Uri, sso, not_found) ->
             "') that doesn't exist."
         >>
     };
-
 badarg(Uri, prototype, badtype) ->
     {
         badarg,
@@ -2678,7 +2464,6 @@ badarg(Uri, prototype, badtype) ->
             "') that isn't a Prototype Realm."
         >>
     };
-
 badarg(Uri, sso, badtype) ->
     {
         badarg,
@@ -2689,13 +2474,11 @@ badarg(Uri, sso, badtype) ->
         >>
     }.
 
-
-
 %% In Erlang 24 Keys have an additional field, so until we have a migration
 %% tool we do this lazily
-to_private_key(#jose_jwk{kty = {Mod, PK0}} = JWK)
-when element(1, PK0) == 'ECPrivateKey', tuple_size(PK0) == 5 ->
+to_private_key(#jose_jwk{kty = {Mod, PK0}} = JWK) when
+    element(1, PK0) == 'ECPrivateKey', tuple_size(PK0) == 5
+->
     JWK#jose_jwk{kty = {Mod, erlang:append_element(PK0, asn1_NOVALUE)}};
-
 to_private_key(Term) ->
     Term.

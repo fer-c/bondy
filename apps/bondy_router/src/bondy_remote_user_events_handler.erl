@@ -15,7 +15,6 @@ remote nodes.
 -include("bondy_uris.hrl").
 -include("bondy_plum_db.hrl").
 
-
 -record(state, {
     subscriptions = #{} :: map()
 }).
@@ -30,28 +29,20 @@ remote nodes.
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
-
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     State = subscribe(#state{}),
     {ok, State}.
-
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -61,7 +52,6 @@ handle_call(Event, From, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -69,9 +59,7 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
 handle_info({plum_db_event, object_update, {{FP, _Key}, _Obj, _Prev}}, State) ->
-
     case FP of
         {?PLUM_DB_USER_TAB, _RealmUri} ->
             ok;
@@ -85,8 +73,6 @@ handle_info({plum_db_event, object_update, {{FP, _Key}, _Obj, _Prev}}, State) ->
     end,
 
     {noreply, State};
-
-
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -94,35 +80,25 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(normal, State) ->
     _ = unsubscribe(State),
     ok;
-
 terminate(shutdown, State) ->
     _ = unsubscribe(State),
     ok;
-
 terminate({shutdown, _}, State) ->
     _ = unsubscribe(State),
     ok;
-
 terminate(_Reason, State) ->
     _ = unsubscribe(State),
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 subscribe(State) ->
@@ -138,14 +114,13 @@ subscribe(State) ->
     ok = plum_db_events:subscribe(object_update, MS),
     State.
 
-
 %% @private
 unsubscribe(State) ->
     _ = plum_db_events:unsubscribe(object_update),
 
     _ = [
         bondy_broker:unsubscribe(Id, ?MASTER_REALM_URI)
-        ||  Id <- maps:keys(State#state.subscriptions)
+     || Id <- maps:keys(State#state.subscriptions)
     ],
 
     State#state{subscriptions = #{}}.

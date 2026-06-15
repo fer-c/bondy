@@ -19,16 +19,16 @@ back to the origin `wamp_call()` and Caller
 -define(TAB(RealmUri), tuplespace:locate_table(bondy_rpc_promise, RealmUri)).
 
 -record(bondy_rpc_promise, {
-    key                     ::  key(),
+    key :: key(),
     %% We have the procedure so that we can reference it when performing
     %% authorization of user requests like CANCEL.
-    procedure_uri           ::  optional(uri()),
-    callee                  ::  bondy_ref:t(),
-    caller                  ::  bondy_ref:t(),
-    via                     ::  optional(queue:queue(bondy_ref:t())),
-    timeout                 ::  optional(timeout()),
-    timestamp               ::  pos_integer(),
-    info                    ::  optional(map())
+    procedure_uri :: optional(uri()),
+    callee :: bondy_ref:t(),
+    caller :: bondy_ref:t(),
+    via :: optional(queue:queue(bondy_ref:t())),
+    timeout :: optional(timeout()),
+    timestamp :: pos_integer(),
+    info :: optional(map())
 }).
 
 %% Wildcards are allowed only when key is used as pattern.
@@ -40,37 +40,35 @@ back to the origin `wamp_call()` and Caller
 %% the future. As a result all other searches (e.g. CANCEL, INTERRUPT and
 %% specially the eviction search) are suboptimal.
 -record(bondy_rpc_promise_key, {
-    realm_uri               ::  uri(),
-    type                    ::  call | invocation,
-    caller_session_id       ::  wildcard(bondy_session_id:t()),
-    call_id                 ::  wildcard(id()),
-    callee_session_id       ::  wildcard(bondy_session_id:t()),
-    invocation_id           ::  wildcard(optional(id())),
-    expiry                  ::  wildcard(optional(timeout()))
+    realm_uri :: uri(),
+    type :: call | invocation,
+    caller_session_id :: wildcard(bondy_session_id:t()),
+    call_id :: wildcard(id()),
+    callee_session_id :: wildcard(bondy_session_id:t()),
+    invocation_id :: wildcard(optional(id())),
+    expiry :: wildcard(optional(timeout()))
 }).
 
-
--opaque t()                 ::  #bondy_rpc_promise{}.
--type key()                 ::  #bondy_rpc_promise_key{}.
--type info()                ::  map().
--type take_fun()            ::  fun((error | {ok, t()}) -> any()).
--type evict_fun()           ::  fun((t()) -> ok).
--type wildcard(T)           ::  T | '_'.
--type status()              ::  all | active | expired.
--type opts()                ::  #{
-                                    call_id => id(),
-                                    procedure_uri => uri(),
-                                    via =>
-                                        bondy_ref:relay()
-                                        | bondy_ref:bridge_relay(),
-                                    timeout => timeout()
-                                }.
+-opaque t() :: #bondy_rpc_promise{}.
+-type key() :: #bondy_rpc_promise_key{}.
+-type info() :: map().
+-type take_fun() :: fun((error | {ok, t()}) -> any()).
+-type evict_fun() :: fun((t()) -> ok).
+-type wildcard(T) :: T | '_'.
+-type status() :: all | active | expired.
+-type opts() :: #{
+    call_id => id(),
+    procedure_uri => uri(),
+    via =>
+        bondy_ref:relay()
+        | bondy_ref:bridge_relay(),
+    timeout => timeout()
+}.
 
 -export_type([t/0]).
 -export_type([key/0]).
 -export_type([take_fun/0]).
 -export_type([evict_fun/0]).
-
 
 -export([add/1]).
 -export([call_id/1]).
@@ -99,12 +97,9 @@ back to the origin `wamp_call()` and Caller
 -export([type/1]).
 -export([via/1]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Creates a new promise.
@@ -118,8 +113,8 @@ Creates a new promise.
 
 new_call(RealmUri, Caller, CallId, Opts) ->
     %% We validate the arguments
-    bondy_ref:is_type(Caller)
-        orelse error({badarg, {caller, Caller}}),
+    bondy_ref:is_type(Caller) orelse
+        error({badarg, {caller, Caller}}),
 
     Via =
         case maps:get(via, Opts, undefined) of
@@ -130,22 +125,22 @@ new_call(RealmUri, Caller, CallId, Opts) ->
                     true ->
                         Term;
                     false ->
-                        bondy_ref:is_type(Term)
-                            orelse error({badarg, {via, Term}}),
+                        bondy_ref:is_type(Term) orelse
+                            error({badarg, {via, Term}}),
                         queue:from_list([Term])
                 end
         end,
 
     Uri = maps:get(procedure_uri, Opts, undefined),
-    is_binary(Uri)
-        orelse Uri == undefined
-        orelse error({badarg, {procedure_uri, Uri}}),
+    is_binary(Uri) orelse
+        Uri == undefined orelse
+        error({badarg, {procedure_uri, Uri}}),
 
     TTL = maps:get(timeout, Opts, undefined),
-    (is_integer(TTL) andalso TTL > 0)
-        orelse TTL == undefined
-        orelse TTL == infinity
-        orelse error({badarg, {timeout, TTL}}),
+    (is_integer(TTL) andalso TTL > 0) orelse
+        TTL == undefined orelse
+        TTL == infinity orelse
+        error({badarg, {timeout, TTL}}),
 
     %% We create the key
     CallerSessionId = bondy_ref:session_id(Caller),
@@ -175,7 +170,6 @@ new_call(RealmUri, Caller, CallId, Opts) ->
         timestamp = Now
     }.
 
-
 -doc """
 Creates a new promise.
 """.
@@ -185,17 +179,18 @@ Creates a new promise.
     CallId :: id(),
     Callee :: bondy_ref:t(),
     InvocationId :: id(),
-    Opts :: opts()) -> t().
+    Opts :: opts()
+) -> t().
 
-new_invocation(RealmUri, Caller, CallId, Callee, InvocationId, Opts)
-when is_binary(RealmUri), is_integer(InvocationId), is_integer(CallId) ->
-
+new_invocation(RealmUri, Caller, CallId, Callee, InvocationId, Opts) when
+    is_binary(RealmUri), is_integer(InvocationId), is_integer(CallId)
+->
     %% We validate the arguments
-    bondy_ref:is_type(Callee)
-        orelse error({badarg, {callee, Callee}}),
+    bondy_ref:is_type(Callee) orelse
+        error({badarg, {callee, Callee}}),
 
-    bondy_ref:is_type(Caller)
-        orelse error({badarg, {caller, Caller}}),
+    bondy_ref:is_type(Caller) orelse
+        error({badarg, {caller, Caller}}),
 
     Via =
         case maps:get(via, Opts, undefined) of
@@ -206,22 +201,22 @@ when is_binary(RealmUri), is_integer(InvocationId), is_integer(CallId) ->
                     true ->
                         Term;
                     false ->
-                        bondy_ref:is_type(Term)
-                            orelse error({badarg, {via, Term}}),
+                        bondy_ref:is_type(Term) orelse
+                            error({badarg, {via, Term}}),
                         queue:from_list([Term])
                 end
         end,
 
     Uri = maps:get(procedure_uri, Opts, undefined),
-    is_binary(Uri)
-        orelse Uri == undefined
-        orelse error({badarg, {procedure_uri, Uri}}),
+    is_binary(Uri) orelse
+        Uri == undefined orelse
+        error({badarg, {procedure_uri, Uri}}),
 
     TTL = maps:get(timeout, Opts, undefined),
-    (is_integer(TTL) andalso TTL > 0)
-        orelse TTL == undefined
-        orelse TTL == infinity
-        orelse error({badarg, {timeout, TTL}}),
+    (is_integer(TTL) andalso TTL > 0) orelse
+        TTL == undefined orelse
+        TTL == infinity orelse
+        error({badarg, {timeout, TTL}}),
 
     %% We create the key
     CalleeSessionId = bondy_ref:session_id(Callee),
@@ -255,13 +250,11 @@ when is_binary(RealmUri), is_integer(InvocationId), is_integer(CallId) ->
         timestamp = Now
     }.
 
-
 -doc "Returns the realm of the promise.".
 -spec key(t()) -> key().
 
 key(#bondy_rpc_promise{key = Val}) ->
     Val.
-
 
 -doc "Returns the promise type.".
 -spec type(t()) -> call | invocation.
@@ -269,13 +262,11 @@ key(#bondy_rpc_promise{key = Val}) ->
 type(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.type.
 
-
 -doc "Returns the realm of the promise.".
 -spec realm_uri(t()) -> uri().
 
 realm_uri(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.realm_uri.
-
 
 -doc "Returns the invocation request identifier.".
 -spec invocation_id(t()) -> optional(id()).
@@ -283,13 +274,11 @@ realm_uri(#bondy_rpc_promise{key = Key}) ->
 invocation_id(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.invocation_id.
 
-
 -doc "Returns the call request identifier.".
 -spec call_id(t()) -> optional(id()).
 
 call_id(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.call_id.
-
 
 -doc """
 Returns the callee (`bondy_ref:t()`) that is the target of this
@@ -300,7 +289,6 @@ promise.
 callee(#bondy_rpc_promise{callee = Val}) ->
     Val.
 
-
 -doc """
 Returns the caller (`bondy_ref:t()`) who made the call request
 associated with this invocation promise.
@@ -309,7 +297,6 @@ associated with this invocation promise.
 
 caller(#bondy_rpc_promise{caller = Val}) ->
     Val.
-
 
 -doc """
 Returns the queue of relays that are needed to forward an invocation
@@ -320,49 +307,40 @@ result to the caller.
 via(#bondy_rpc_promise{via = Val}) ->
     Val.
 
-
 -spec procedure_uri(t()) -> optional(uri()).
 
 procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) ->
     Val.
-
 
 -spec timeout(t()) -> optional(timeout()).
 
 timeout(#bondy_rpc_promise{timeout = Val}) ->
     Val.
 
-
 -spec info(t()) -> info().
 
 info(#bondy_rpc_promise{info = Val}) ->
     Val.
-
 
 -spec get(Key :: any(), t()) -> any() | no_return().
 
 get(Key, #bondy_rpc_promise{info = Info}) ->
     maps:get(Key, Info).
 
-
 -spec get(Key :: any(), t(), Default :: any()) -> any().
 
 get(Key, #bondy_rpc_promise{info = Info}, Default) ->
     maps:get(Key, Info, Default).
-
 
 -spec expiry(t()) -> optional(timeout()).
 
 expiry(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.expiry.
 
-
 -spec timestamp(t()) -> pos_integer().
 
 timestamp(#bondy_rpc_promise{timestamp = Val}) ->
     Val.
-
-
 
 -doc """
 Pattern for looking up promises on the promise table.
@@ -370,22 +348,24 @@ Pattern for looking up promises on the promise table.
 -spec call_key_pattern(
     RealmUri :: uri(),
     Caller :: wildcard(bondy_ref:t()),
-    CallId :: wildcard(id())) -> key().
+    CallId :: wildcard(id())
+) -> key().
 
 call_key_pattern(RealmUri, Caller, CallId) when is_binary(RealmUri) ->
-    CallId == '_' orelse is_integer(CallId)
-        orelse error({badarg, {invocation_id, CallId}}),
+    CallId == '_' orelse is_integer(CallId) orelse
+        error({badarg, {invocation_id, CallId}}),
 
-    CallerSessionId = case Caller of
-        '_' when CallId =/= '_' ->
-            %% We need the caller to get the session_id in order to
-            %% disambiguate the call_id
-            error({badarg, {caller, Caller}});
-        '_' ->
-            '_';
-        _ ->
-            bondy_ref:session_id(Caller)
-    end,
+    CallerSessionId =
+        case Caller of
+            '_' when CallId =/= '_' ->
+                %% We need the caller to get the session_id in order to
+                %% disambiguate the call_id
+                error({badarg, {caller, Caller}});
+            '_' ->
+                '_';
+            _ ->
+                bondy_ref:session_id(Caller)
+        end,
 
     #bondy_rpc_promise_key{
         realm_uri = RealmUri,
@@ -397,7 +377,6 @@ call_key_pattern(RealmUri, Caller, CallId) when is_binary(RealmUri) ->
         expiry = '_'
     }.
 
-
 -doc """
 Pattern for looking up promises on the promise table.
 """.
@@ -406,38 +385,41 @@ Pattern for looking up promises on the promise table.
     Caller :: wildcard(bondy_ref:t()),
     CallId :: wildcard(id()),
     Callee :: wildcard(bondy_ref:t()),
-    InvocationId :: wildcard(id())) -> key().
+    InvocationId :: wildcard(id())
+) -> key().
 
-invocation_key_pattern(RealmUri, Caller, CallId, Callee, InvocationId)
-when is_binary(RealmUri) ->
+invocation_key_pattern(RealmUri, Caller, CallId, Callee, InvocationId) when
+    is_binary(RealmUri)
+->
+    InvocationId == '_' orelse is_integer(InvocationId) orelse
+        error({badarg, {invocation_id, InvocationId}}),
 
-    InvocationId == '_' orelse is_integer(InvocationId)
-        orelse error({badarg, {invocation_id, InvocationId}}),
+    CallId == '_' orelse is_integer(CallId) orelse
+        error({badarg, {invocation_id, CallId}}),
 
-    CallId == '_' orelse is_integer(CallId)
-        orelse error({badarg, {invocation_id, CallId}}),
+    CalleeSessionId =
+        case Callee of
+            '_' when InvocationId =/= '_' ->
+                %% We need the callee to get the session_id in order to
+                %% disambiguate the invocation_id
+                error({badarg, {callee, Callee}});
+            '_' ->
+                '_';
+            _ ->
+                bondy_ref:session_id(Callee)
+        end,
 
-    CalleeSessionId = case Callee of
-        '_' when InvocationId =/= '_' ->
-            %% We need the callee to get the session_id in order to
-            %% disambiguate the invocation_id
-            error({badarg, {callee, Callee}});
-        '_' ->
-            '_';
-        _ ->
-            bondy_ref:session_id(Callee)
-    end,
-
-    CallerSessionId = case Caller of
-        '_' when CallId =/= '_' ->
-            %% We need the caller to get the session_id in order to
-            %% disambiguate the call_id
-            error({badarg, {caller, Caller}});
-        '_' ->
-            '_';
-        _ ->
-            bondy_ref:session_id(Caller)
-    end,
+    CallerSessionId =
+        case Caller of
+            '_' when CallId =/= '_' ->
+                %% We need the caller to get the session_id in order to
+                %% disambiguate the call_id
+                error({badarg, {caller, Caller}});
+            '_' ->
+                '_';
+            _ ->
+                bondy_ref:session_id(Caller)
+        end,
 
     #bondy_rpc_promise_key{
         realm_uri = RealmUri,
@@ -449,7 +431,6 @@ when is_binary(RealmUri) ->
         expiry = '_'
     }.
 
-
 -doc """
 Adds the promise `P` to the promise table.
 
@@ -460,10 +441,8 @@ will receive an error with reason `wamp.error.timeout`.
 
 add(#bondy_rpc_promise{} = T) ->
     add([T]);
-
 add([]) ->
     ok;
-
 add([#bondy_rpc_promise{key = Key} | _] = L) ->
     RealmUri = Key#bondy_rpc_promise_key.realm_uri,
 
@@ -482,7 +461,6 @@ add([#bondy_rpc_promise{key = Key} | _] = L) ->
         false -> error({badarg, {duplicates, L}})
     end.
 
-
 -doc """
 Return and removes the promise that matches key pattern.
 """.
@@ -491,14 +469,14 @@ Return and removes the promise that matches key pattern.
 take(Pattern) ->
     take(Pattern, active).
 
-
 -doc """
 Return and removes the promise that matches key pattern.
 """.
 -spec take(Pattern :: key(), Status :: status()) -> {ok, t()} | error.
 
-take(#bondy_rpc_promise_key{} = Pattern, Status)
-when Status == all orelse Status == active orelse Status == expired ->
+take(#bondy_rpc_promise_key{} = Pattern, Status) when
+    Status == all orelse Status == active orelse Status == expired
+->
     %% Key is a pattern so we need to do a find followed by a delete.
     case do_find(Pattern, Status) of
         {ok, #bondy_rpc_promise{key = Key}} = OK ->
@@ -509,7 +487,6 @@ when Status == all orelse Status == active orelse Status == expired ->
             error
     end.
 
-
 -doc """
 Reads the active promise that matches the key pattern.
 """.
@@ -517,7 +494,6 @@ Reads the active promise that matches the key pattern.
 
 find(#bondy_rpc_promise_key{} = Key) ->
     do_find(Key, active).
-
 
 -doc """
 Removes all expired items.
@@ -527,21 +503,21 @@ An expired item is one for which its expiry (millisecs) has been reached.
 Returns the atom `ok`.
 """.
 -spec evict_expired(
-    Opts :: #{parallel => boolean(), on_evict => evict_fun()}) -> ok.
+    Opts :: #{parallel => boolean(), on_evict => evict_fun()}
+) -> ok.
 
 evict_expired(Opts) ->
     %% No parallelism at the moment
 
     OnEvict = maps:get(on_evict, Opts, undefined),
 
-    is_function(OnEvict, 1)
-        orelse undefined == OnEvict
-        orelse error({badarg, {on_evict, OnEvict}}),
+    is_function(OnEvict, 1) orelse
+        undefined == OnEvict orelse
+        error({badarg, {on_evict, OnEvict}}),
 
     _ = [do_evict_expired(Tab, OnEvict) || Tab <- ?TABLES],
 
     ok.
-
 
 -doc """
 Removes all pending promises from the queue for the reference.
@@ -551,7 +527,6 @@ Equivalent to `flush(RealmUri, Ref, #{})`.
 
 flush(RealmUri, Ref) ->
     flush(RealmUri, Ref, #{}).
-
 
 -doc """
 Removes all pending promises from the queue for the reference.
@@ -585,14 +560,13 @@ flush(RealmUri, '_', _Opts) ->
     },
     _ = do_flush(Tab, KeyPattern),
     ok;
-
 flush(RealmUri, Ref, Opts) ->
     Tab = ?TAB(RealmUri),
     OnCalleeFlush = maps:get(on_callee_flush, Opts, undefined),
 
-    is_function(OnCalleeFlush, 1)
-        orelse undefined == OnCalleeFlush
-        orelse error({badarg, {on_callee_flush, OnCalleeFlush}}),
+    is_function(OnCalleeFlush, 1) orelse
+        undefined == OnCalleeFlush orelse
+        error({badarg, {on_callee_flush, OnCalleeFlush}}),
 
     %% As caller — no notify (caller is already gone)
     _ = do_flush(Tab, call_key_pattern(RealmUri, Ref, '_')),
@@ -606,13 +580,9 @@ flush(RealmUri, Ref, Opts) ->
 
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 do_find(#bondy_rpc_promise_key{} = Key, Status) ->
     Tab = ?TAB(Key#bondy_rpc_promise_key.realm_uri),
@@ -621,11 +591,9 @@ do_find(#bondy_rpc_promise_key{} = Key, Status) ->
     case ets:select(Tab, MS, 1) of
         {[#bondy_rpc_promise{} = Promise], _Cont} ->
             {ok, Promise};
-
         '$end_of_table' ->
             error
     end.
-
 
 %% @private
 do_flush(Tab, Key) ->
@@ -633,21 +601,17 @@ do_flush(Tab, Key) ->
     MS = [{MatchPattern, [], ['true']}],
     ets:select_delete(Tab, MS).
 
-
 %% @private
 do_flush_as_callee(Tab, Key, undefined) ->
     do_flush(Tab, Key);
-
 do_flush_as_callee(Tab, Key, OnFlush) ->
     [{MatchPattern, _, _}] = match_spec(Key),
     MS = [{MatchPattern, [], ['$_']}],
     do_flush_as_callee_loop(Tab, OnFlush, ets:select(Tab, MS, 100)).
 
-
 %% @private
 do_flush_as_callee_loop(_, _, '$end_of_table') ->
     ok;
-
 do_flush_as_callee_loop(Tab, OnFlush, {Promises, Cont}) ->
     _ = [
         begin
@@ -662,10 +626,9 @@ do_flush_as_callee_loop(Tab, OnFlush, {Promises, Cont}) ->
                     ok
             end
         end
-        || #bondy_rpc_promise{key = K} <- Promises
+     || #bondy_rpc_promise{key = K} <- Promises
     ],
     do_flush_as_callee_loop(Tab, OnFlush, ets:select(Cont)).
-
 
 %% @private
 do_evict_expired(Tab, OnEvict) ->
@@ -673,10 +636,8 @@ do_evict_expired(Tab, OnEvict) ->
     MS = match_spec(undefined, expired),
     do_evict_expired(Tab, OnEvict, ets:select(Tab, MS, N)).
 
-
 do_evict_expired(_, _, '$end_of_table') ->
     ok;
-
 do_evict_expired(Tab, OnEvict, {Promises, Cont}) ->
     _ = [
         begin
@@ -692,16 +653,14 @@ do_evict_expired(Tab, OnEvict, {Promises, Cont}) ->
                     ok
             end
         end
-        || #bondy_rpc_promise{key = Key} = Promise <- Promises
+     || #bondy_rpc_promise{key = Key} = Promise <- Promises
     ],
 
     do_evict_expired(Tab, OnEvict, ets:select(Cont)).
 
-
 %% @private
 maybe_apply(undefined, _) ->
     ok;
-
 maybe_apply(Fun, V) ->
     try
         _ = Fun(V),
@@ -717,17 +676,13 @@ maybe_apply(Fun, V) ->
             ok
     end.
 
-
 %% @private
 calc_expiry(infinity, _) ->
     infinity;
-
 calc_expiry(undefined, _) ->
     infinity;
-
-calc_expiry(TTL, Now)->
+calc_expiry(TTL, Now) ->
     TTL + Now.
-
 
 %% @private
 match_pattern(Key) ->
@@ -742,11 +697,9 @@ match_pattern(Key) ->
         info = '_'
     }.
 
-
 %% @private
 match_spec(Key0) ->
     match_spec(Key0, active).
-
 
 %% @private
 -spec match_spec(key(), active | expired | all) -> ets:match_spec().
@@ -757,9 +710,8 @@ match_spec(Key0, active) ->
     MatchPattern = match_pattern(Key),
     Conditions = [{'>=', '$1', {const, Now}}],
     [{MatchPattern, Conditions, ['$_']}];
-
 match_spec(undefined, expired) ->
-    Key =  #bondy_rpc_promise_key{
+    Key = #bondy_rpc_promise_key{
         realm_uri = '_',
         type = '_',
         caller_session_id = '_',
@@ -769,14 +721,12 @@ match_spec(undefined, expired) ->
         expiry = '_'
     },
     match_spec(Key, expired);
-
 match_spec(Key0, expired) ->
     Now = erlang:system_time(millisecond),
     Key = Key0#bondy_rpc_promise_key{expiry = '$1'},
     MatchPattern = match_pattern(Key),
     Conditions = [{'<', '$1', {const, Now}}],
     [{MatchPattern, Conditions, ['$_']}];
-
 match_spec(Key, all) ->
     MatchPattern = match_pattern(Key),
     [{MatchPattern, [], ['$_']}].

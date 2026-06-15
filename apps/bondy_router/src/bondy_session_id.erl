@@ -27,21 +27,16 @@ such a large number space.
 -define(LEN, 160).
 -define(EXT_LEN, 56).
 
-
--type t()           ::  binary().
+-type t() :: binary().
 
 -export([new/0]).
 -export([new/1]).
 -export([to_external/1]).
 -export([is_type/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Returns a new globally unique session id based on a new random external
@@ -54,18 +49,17 @@ new() ->
     %% distribution_ over the complete range [0, 2^53]
     new(rand:uniform(?MAX_EXT_ID)).
 
-
 -doc """
 Returns a new globally unique session id based on the external identifier
 `ExternalId`.
 """.
 -spec new(ExternalId :: id()) -> t().
 
-new(ExternalId)
-when is_integer(ExternalId)
-andalso ExternalId >= 1
-andalso ExternalId =< ?MAX_EXT_ID ->
-
+new(ExternalId) when
+    is_integer(ExternalId) andalso
+        ExternalId >= 1 andalso
+        ExternalId =< ?MAX_EXT_ID
+->
     %% First segment is the external id as a 56-bit binary
     ExternalIdBin = <<ExternalId:?EXT_LEN/integer>>,
 
@@ -82,7 +76,6 @@ andalso ExternalId =< ?MAX_EXT_ID ->
     %% We pad to 27 chars and return as binary
     iolist_to_binary(string:pad(Base62, ?ENCODED_LEN, leading, $0)).
 
-
 -doc """
 Returns the external session identifier i.e. the WAMP Session ID.
 """.
@@ -97,9 +90,7 @@ to_external(Base62) when is_binary(Base62) ->
 
     ExternalId.
 
-
 is_type(Base62) when is_binary(Base62) andalso byte_size(Base62) =:= 27 ->
     true;
-
 is_type(_) ->
     false.

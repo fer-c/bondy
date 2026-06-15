@@ -38,9 +38,9 @@ authorization/grants/sources still enforced).
 
 %% The opaque session handle handed back to `bondy_connect_local'.
 -record(local_session, {
-    session             ::  bondy_session:t(),
-    context             ::  bondy_context:t(),
-    realm_uri           ::  binary()
+    session :: bondy_session:t(),
+    context :: bondy_context:t(),
+    realm_uri :: binary()
 }).
 
 -export([open/3]).
@@ -48,13 +48,9 @@ authorization/grants/sources still enforced).
 -export([handle_info/2]).
 -export([close/1]).
 
-
-
 %% =============================================================================
 %% bondy_connect_local CALLBACKS
 %% =============================================================================
-
-
 
 -spec open(RealmUri :: binary(), Roles :: map(), Opts :: map()) ->
     {ok, term(), bondy_wamp_message:t()} | {error, term()}.
@@ -66,7 +62,6 @@ open(RealmUri, Roles, _Opts) ->
         {error, not_found} ->
             {error, {no_such_realm, RealmUri}}
     end.
-
 
 -spec forward(bondy_wamp_message:t(), term()) ->
     ok | {reply, bondy_wamp_message:t()} | {error, term()}.
@@ -81,16 +76,13 @@ forward(Msg, #local_session{context = Ctxt}) ->
             {reply, Reply}
     end.
 
-
 -spec handle_info(term(), term()) -> {ok, [bondy_wamp_message:t()]} | ignore.
 
 %% A WAMP message delivered by the router to the connection (peer) mailbox.
 handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, #local_session{}) ->
     {ok, [M]};
-
 handle_info(_Info, #local_session{}) ->
     ignore.
-
 
 -spec close(term()) -> ok.
 
@@ -98,13 +90,9 @@ close(#local_session{session = Session}) ->
     _ = catch bondy_session_manager:close(Session),
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private Open the in-VM session and build the forwarding context + WELCOME.
 do_open(RealmUri, Roles) ->
@@ -135,7 +123,6 @@ do_open(RealmUri, Roles) ->
         Class:Reason ->
             {error, {session_open_failed, Class, Reason}}
     end.
-
 
 %% @private Synthesize the WELCOME for the already-open session, mirroring
 %% `bondy_wamp_protocol:open_session/2'.

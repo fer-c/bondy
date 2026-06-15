@@ -21,28 +21,21 @@ Bondy events.
 -export([terminate/2]).
 -export([code_change/3]).
 
-
-
 %% =============================================================================
 %% GEN_EVENT CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
     State = #state{},
     {ok, State}.
-
 
 handle_event(Event, State) when element(1, Event) =/= wamp ->
     ?LOG_NOTICE(#{
         event => Event
     }),
     {ok, State};
-
 handle_event(_, State) ->
     {ok, State}.
-
 
 handle_call(Event, State) ->
     ?LOG_WARNING(#{
@@ -51,14 +44,11 @@ handle_call(Event, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-
 handle_info(_Info, State) ->
     {ok, State}.
 
-
 terminate(_Reason, _State) ->
     ok.
-
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

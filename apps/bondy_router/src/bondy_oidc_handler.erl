@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_oidc_handler).
 -moduledoc """
 Cowboy handler for OIDC login, callback, and logout endpoints.
@@ -21,20 +20,14 @@ Dispatches on the `action` key in the handler state:
 -include("bondy_security.hrl").
 -include("http_api.hrl").
 
-
 -export([init/2]).
-
 
 %% Default post-login redirect
 -define(DEFAULT_REDIRECT, <<"/">>).
 
-
-
 %% =============================================================================
 %% COWBOY CALLBACKS
 %% =============================================================================
-
-
 
 init(Req0, State) ->
     CorsConfig = bondy_http_cors:config_from_req(Req0),
@@ -48,25 +41,17 @@ init(Req0, State) ->
             dispatch(Req, State)
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 %% @private
 dispatch(Req, #{action := login} = State) ->
     handle_login(Req, State);
-
 dispatch(Req, #{action := callback} = State) ->
     handle_callback(Req, State);
-
 dispatch(Req, #{action := logout} = State) ->
     handle_logout(Req, State).
-
-
 
 %% @private
 handle_login(Req0, #{realm_uri := RealmUri} = State) ->
@@ -77,7 +62,6 @@ handle_login(Req0, #{realm_uri := RealmUri} = State) ->
             Req1 = cowboy_req:reply(?HTTP_METHOD_NOT_ALLOWED, #{}, <<>>, Req0),
             {ok, Req1, State}
     end.
-
 
 %% @private
 do_handle_login(Req0, State, RealmUri) ->
@@ -92,7 +76,6 @@ do_handle_login(Req0, State, RealmUri) ->
             ),
             {ok, Req1, State}
     end.
-
 
 %% @private
 do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
@@ -116,8 +99,14 @@ do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
         <<"device_id">>, QsVals0, <<"all">>
     ),
     ok = bondy_oidc_state:new(
-        StateToken, Nonce, CodeVerifier, Provider, RealmUri, SpaRedirect,
-        ClientId, DeviceId
+        StateToken,
+        Nonce,
+        CodeVerifier,
+        Provider,
+        RealmUri,
+        SpaRedirect,
+        ClientId,
+        DeviceId
     ),
 
     %% Get client context and create redirect URL
@@ -173,7 +162,6 @@ do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
             {ok, Req1, State}
     end.
 
-
 %% @private
 handle_callback(Req0, #{realm_uri := RealmUri} = State) ->
     case cowboy_req:method(Req0) of
@@ -183,7 +171,6 @@ handle_callback(Req0, #{realm_uri := RealmUri} = State) ->
             Req1 = cowboy_req:reply(?HTTP_METHOD_NOT_ALLOWED, #{}, <<>>, Req0),
             {ok, Req1, State}
     end.
-
 
 %% @private
 do_handle_callback(Req0, State, RealmUri) ->
@@ -202,7 +189,6 @@ do_handle_callback(Req0, State, RealmUri) ->
             do_validate_state(Req0, State, RealmUri, Code, StateToken)
     end.
 
-
 %% @private
 do_validate_state(Req0, State, RealmUri, Code, StateToken) ->
     case bondy_oidc_state:take(StateToken) of
@@ -217,8 +203,15 @@ do_validate_state(Req0, State, RealmUri, Code, StateToken) ->
         }} when StoredRealmUri == RealmUri ->
             TicketScope = #{client_id => ClientId, device_id => DeviceId},
             do_exchange_code(
-                Req0, State, RealmUri, Provider,
-                Code, Nonce, CodeVerifier, SpaRedirect, TicketScope
+                Req0,
+                State,
+                RealmUri,
+                Provider,
+                Code,
+                Nonce,
+                CodeVerifier,
+                SpaRedirect,
+                TicketScope
             );
         {ok, _} ->
             Req1 = reply_json_error(
@@ -237,23 +230,32 @@ do_validate_state(Req0, State, RealmUri, Code, StateToken) ->
             {ok, Req1, State}
     end.
 
-
 %% @private
 do_exchange_code(
-    Req0, State, RealmUri, Provider,
-    Code, Nonce, CodeVerifier, SpaRedirect, TicketScope
+    Req0,
+    State,
+    RealmUri,
+    Provider,
+    Code,
+    Nonce,
+    CodeVerifier,
+    SpaRedirect,
+    TicketScope
 ) ->
     case bondy_oidc_provider:get_provider_config(RealmUri, Provider) of
         {ok, Config} ->
             case bondy_oidc_provider:get_client_context(RealmUri, Provider) of
                 {ok, ClientCtx} ->
                     #{redirect_uri := RedirectUri} = Config,
-                    RefreshJwks = case bondy_oidc_provider:get_refresh_jwks_fun(
-                        RealmUri, Provider
-                    ) of
-                        {ok, Fun} -> Fun;
-                        {error, _} -> undefined
-                    end,
+                    RefreshJwks =
+                        case
+                            bondy_oidc_provider:get_refresh_jwks_fun(
+                                RealmUri, Provider
+                            )
+                        of
+                            {ok, Fun} -> Fun;
+                            {error, _} -> undefined
+                        end,
                     ReqOpts = bondy_oidc_provider:request_opts(Config),
                     RetrieveOpts = #{
                         redirect_uri => RedirectUri,
@@ -265,8 +267,14 @@ do_exchange_code(
                     case oidcc_token:retrieve(Code, ClientCtx, RetrieveOpts) of
                         {ok, Token} ->
                             handle_token_success(
-                                Req0, State, RealmUri, Provider,
-                                Config, Token, ClientCtx, SpaRedirect,
+                                Req0,
+                                State,
+                                RealmUri,
+                                Provider,
+                                Config,
+                                Token,
+                                ClientCtx,
+                                SpaRedirect,
                                 TicketScope
                             );
                         {error, Reason} ->
@@ -299,10 +307,16 @@ do_exchange_code(
             {ok, Req1, State}
     end.
 
-
 %% @private
 handle_token_success(
-    Req0, State, RealmUri, Provider, Config, Token, ClientCtx, SpaRedirect,
+    Req0,
+    State,
+    RealmUri,
+    Provider,
+    Config,
+    Token,
+    ClientCtx,
+    SpaRedirect,
     TicketScope
 ) ->
     #oidcc_token{
@@ -317,31 +331,34 @@ handle_token_success(
     %% minimal claims in the ID token and serve custom claims (e.g. roles)
     %% via userinfo.
     UserinfoOpts = #{request_opts => bondy_oidc_provider:request_opts(Config)},
-    AllClaims = case oidcc_userinfo:retrieve(Token, ClientCtx, UserinfoOpts) of
-        {ok, UserinfoClaims} ->
-            ?LOG_DEBUG(#{
-                description => "OIDC userinfo fetched successfully",
-                realm_uri => RealmUri,
-                provider => Provider,
-                userinfo_keys => maps:keys(UserinfoClaims),
-                has_roles => maps:is_key(<<"roles">>, UserinfoClaims)
-            }),
-            maps:merge(IdClaims, UserinfoClaims);
-        {error, Reason} ->
-            ?LOG_ERROR(#{
-                description => "Failed to fetch OIDC userinfo, "
-                    "using id_token claims only",
-                realm_uri => RealmUri,
-                provider => Provider,
-                reason => Reason
-            }),
-            IdClaims
-    end,
+    AllClaims =
+        case oidcc_userinfo:retrieve(Token, ClientCtx, UserinfoOpts) of
+            {ok, UserinfoClaims} ->
+                ?LOG_DEBUG(#{
+                    description => "OIDC userinfo fetched successfully",
+                    realm_uri => RealmUri,
+                    provider => Provider,
+                    userinfo_keys => maps:keys(UserinfoClaims),
+                    has_roles => maps:is_key(<<"roles">>, UserinfoClaims)
+                }),
+                maps:merge(IdClaims, UserinfoClaims);
+            {error, Reason} ->
+                ?LOG_ERROR(#{
+                    description =>
+                        "Failed to fetch OIDC userinfo, "
+                        "using id_token claims only",
+                    realm_uri => RealmUri,
+                    provider => Provider,
+                    reason => Reason
+                }),
+                IdClaims
+        end,
 
     %% Extract authid from configured claim
     AuthidClaim = maps:get(authid_claim, Config, <<"preferred_username">>),
     Authid = maps:get(
-        AuthidClaim, AllClaims,
+        AuthidClaim,
+        AllClaims,
         maps:get(<<"sub">>, AllClaims, undefined)
     ),
 
@@ -362,18 +379,35 @@ handle_token_success(
             %% Extract roles from userinfo + token claims
             Authroles = extract_roles(AllClaims, AccessToken, Config),
             do_issue_ticket(
-                Req0, State, RealmUri, Provider, Config,
-                Authid, Authroles, IdTokenJWT, AccessToken, RefreshToken,
-                SpaRedirect, TicketScope
+                Req0,
+                State,
+                RealmUri,
+                Provider,
+                Config,
+                Authid,
+                Authroles,
+                IdTokenJWT,
+                AccessToken,
+                RefreshToken,
+                SpaRedirect,
+                TicketScope
             )
     end.
 
-
 %% @private
 do_issue_ticket(
-    Req0, State, RealmUri, Provider, Config,
-    Authid, Authroles, IdTokenJWT, AccessToken, RefreshToken,
-    SpaRedirect, TicketScope
+    Req0,
+    State,
+    RealmUri,
+    Provider,
+    Config,
+    Authid,
+    Authroles,
+    IdTokenJWT,
+    AccessToken,
+    RefreshToken,
+    SpaRedirect,
+    TicketScope
 ) ->
     %% Filter out roles that have no corresponding Bondy group in the realm.
     %% This ensures that only valid groups end up in the ticket, in the
@@ -390,16 +424,19 @@ do_issue_ticket(
     end,
 
     %% Build OIDC tokens map for the ticket
-    OidcTokensMap = build_oidc_tokens_map(IdTokenJWT, AccessToken, RefreshToken),
+    OidcTokensMap = build_oidc_tokens_map(
+        IdTokenJWT, AccessToken, RefreshToken
+    ),
 
     %% Per-provider ticket_expiry_secs overrides the global default.
     %% We use maps:find/2 so that legacy configs with the old hardcoded
     %% default (3600) from the validator are not distinguished from an
     %% explicit setting — the validator no longer injects a default.
-    ConfigExpirySecs = case maps:find(ticket_expiry_secs, Config) of
-        {ok, Val} when is_integer(Val) -> Val;
-        _ -> bondy_config:get([security, ticket, expiry_time_secs])
-    end,
+    ConfigExpirySecs =
+        case maps:find(ticket_expiry_secs, Config) of
+            {ok, Val} when is_integer(Val) -> Val;
+            _ -> bondy_config:get([security, ticket, expiry_time_secs])
+        end,
 
     %% Align ticket lifetime with the OIDC refresh token TTL.
     %% The Bondy ticket represents the OIDC session — it should last as long
@@ -409,14 +446,19 @@ do_issue_ticket(
         ConfigExpirySecs, refresh_token_ttl_secs(RefreshToken)
     ),
 
-    case bondy_oidc_ticket:issue(
-        RealmUri, Authid, Provider, OidcTokensMap,
-        #{
-            expiry_time_secs => ExpirySecs,
-            authroles => ValidAuthroles,
-            scope => TicketScope
-        }
-    ) of
+    case
+        bondy_oidc_ticket:issue(
+            RealmUri,
+            Authid,
+            Provider,
+            OidcTokensMap,
+            #{
+                expiry_time_secs => ExpirySecs,
+                authroles => ValidAuthroles,
+                scope => TicketScope
+            }
+        )
+    of
         {ok, JWT, _Claims} ->
             BasePath = maps:get(base_path, State, <<>>),
             IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
@@ -426,12 +468,24 @@ do_issue_ticket(
             ),
             CsrfToken = bondy_utils:uuid(),
             Req1 = set_ticket_cookie(
-                Req0, RealmUri, JWT, BasePath, ExpirySecs, IsSecure,
-                CookieDomain, CookieSameSite
+                Req0,
+                RealmUri,
+                JWT,
+                BasePath,
+                ExpirySecs,
+                IsSecure,
+                CookieDomain,
+                CookieSameSite
             ),
             Req2 = set_csrf_cookie(
-                Req1, RealmUri, CsrfToken, BasePath, ExpirySecs, IsSecure,
-                CookieDomain, CookieSameSite
+                Req1,
+                RealmUri,
+                CsrfToken,
+                BasePath,
+                ExpirySecs,
+                IsSecure,
+                CookieDomain,
+                CookieSameSite
             ),
             Req3 = cowboy_req:reply(
                 302,
@@ -456,7 +510,6 @@ do_issue_ticket(
             {ok, Req1, State}
     end.
 
-
 %% @private
 handle_logout(Req0, State) ->
     case cowboy_req:method(Req0) of
@@ -468,7 +521,6 @@ handle_logout(Req0, State) ->
             Req1 = cowboy_req:reply(?HTTP_METHOD_NOT_ALLOWED, #{}, <<>>, Req0),
             {ok, Req1, State}
     end.
-
 
 %% @private
 do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
@@ -486,51 +538,55 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
     %% The realm may not exist on this node (e.g. after reconfiguration),
     %% so we catch errors to ensure cookies are always cleared.
     TicketCookieName = ticket_cookie_name(RealmUri),
-    OidcClaims = case lists:keyfind(TicketCookieName, 1, Cookies) of
-        {_, JWT} ->
-            try bondy_ticket:verify(JWT) of
-                {ok, Claims} ->
-                    _ = bondy_ticket:revoke(Claims),
-                    Claims;
-                {error, _} ->
-                    _ = catch bondy_ticket:revoke(JWT),
-                    #{}
-            catch
-                _:_ ->
-                    #{}
-            end;
-        false ->
-            #{}
-    end,
+    OidcClaims =
+        case lists:keyfind(TicketCookieName, 1, Cookies) of
+            {_, JWT} ->
+                try bondy_ticket:verify(JWT) of
+                    {ok, Claims} ->
+                        _ = bondy_ticket:revoke(Claims),
+                        Claims;
+                    {error, _} ->
+                        _ = catch bondy_ticket:revoke(JWT),
+                        #{}
+                catch
+                    _:_ ->
+                        #{}
+                end;
+            false ->
+                #{}
+        end,
 
     %% Always clear realm-prefixed cookies regardless of verify outcome.
     %% cookie_domain may come from the provider config or as a query param.
     Provider = maps:get(oidc_provider, OidcClaims, undefined),
-    {CookieDomain, CookieSameSite} = case Provider of
-        P when is_binary(P) ->
-            case bondy_oidc_provider:get_provider_config(RealmUri, P) of
-                {ok, Cfg} ->
-                    {
-                        maps:get(cookie_domain, Cfg, undefined),
-                        same_site_atom(
-                            maps:get(cookie_same_site, Cfg, <<"lax">>)
-                        )
-                    };
-                {error, _} ->
-                    {undefined, lax}
-            end;
-        _ ->
-            {undefined, lax}
-    end,
+    {CookieDomain, CookieSameSite} =
+        case Provider of
+            P when is_binary(P) ->
+                case bondy_oidc_provider:get_provider_config(RealmUri, P) of
+                    {ok, Cfg} ->
+                        {
+                            maps:get(cookie_domain, Cfg, undefined),
+                            same_site_atom(
+                                maps:get(cookie_same_site, Cfg, <<"lax">>)
+                            )
+                        };
+                    {error, _} ->
+                        {undefined, lax}
+                end;
+            _ ->
+                {undefined, lax}
+        end,
     %% Query params override provider config.
-    CookieDomain1 = case proplists:get_value(<<"cookie_domain">>, QsVals) of
-        undefined -> CookieDomain;
-        QsDomain -> QsDomain
-    end,
-    CookieSameSite1 = case proplists:get_value(<<"cookie_same_site">>, QsVals) of
-        undefined -> CookieSameSite;
-        Val -> same_site_atom(Val)
-    end,
+    CookieDomain1 =
+        case proplists:get_value(<<"cookie_domain">>, QsVals) of
+            undefined -> CookieDomain;
+            QsDomain -> QsDomain
+        end,
+    CookieSameSite1 =
+        case proplists:get_value(<<"cookie_same_site">>, QsVals) of
+            undefined -> CookieSameSite;
+            Val -> same_site_atom(Val)
+        end,
     IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
     Req1 = clear_ticket_cookie(
         Req0, RealmUri, BasePath, IsSecure, CookieDomain1, CookieSameSite1
@@ -554,7 +610,6 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
     ),
     {ok, Req3, State}.
 
-
 %% @private
 provider_name(Req, State) ->
     case maps:find(provider, State) of
@@ -570,14 +625,14 @@ provider_name(Req, State) ->
             end
     end.
 
-
 %% @private
 filter_valid_groups(RealmUri, Authid, Authroles) ->
     {ValidGroups, Unknown} = lists:partition(
-        fun(G) when is_binary(G) ->
-            bondy_rbac_group:lookup(RealmUri, G) =/= {error, not_found};
-           (_) ->
-            false
+        fun
+            (G) when is_binary(G) ->
+                bondy_rbac_group:lookup(RealmUri, G) =/= {error, not_found};
+            (_) ->
+                false
         end,
         Authroles
     ),
@@ -594,7 +649,6 @@ filter_valid_groups(RealmUri, Authid, Authroles) ->
             })
     end,
     ValidGroups.
-
 
 %% @private
 ensure_user(RealmUri, Authid, Groups) ->
@@ -613,28 +667,27 @@ ensure_user(RealmUri, Authid, Groups) ->
             end
     end.
 
-
 %% @private
 extract_roles(AllClaims, AccessToken, Config) ->
     RoleClaim = maps:get(role_claim, Config, <<"roles">>),
     FallbackClaim = maps:get(role_claim_fallback, Config, <<"role">>),
     RoleMapping = maps:get(role_mapping, Config, #{}),
 
-    Roles = case extract_claim(RoleClaim, AllClaims) of
-        [] ->
-            case extract_claim(FallbackClaim, AllClaims) of
-                [] ->
-                    extract_roles_from_access_token(
-                        RoleClaim, FallbackClaim, AccessToken
-                    );
-                Found ->
-                    Found
-            end;
-        Found ->
-            Found
-    end,
+    Roles =
+        case extract_claim(RoleClaim, AllClaims) of
+            [] ->
+                case extract_claim(FallbackClaim, AllClaims) of
+                    [] ->
+                        extract_roles_from_access_token(
+                            RoleClaim, FallbackClaim, AccessToken
+                        );
+                    Found ->
+                        Found
+                end;
+            Found ->
+                Found
+        end,
     map_roles(Roles, RoleMapping).
-
 
 %% @private
 extract_claim(ClaimName, Claims) when is_map(Claims) ->
@@ -661,7 +714,6 @@ extract_claim(ClaimName, Claims) when is_map(Claims) ->
             end
     end.
 
-
 %% @private
 extract_roles_from_access_token(RoleClaim, FallbackClaim, AccessToken) ->
     case AccessToken of
@@ -679,7 +731,6 @@ extract_roles_from_access_token(RoleClaim, FallbackClaim, AccessToken) ->
             []
     end.
 
-
 %% @private
 %% Extracts the remaining TTL in seconds from an OIDC refresh token.
 %% If the refresh token is a JWT with an `exp` claim, returns the number of
@@ -691,10 +742,8 @@ refresh_token_ttl_secs(#oidcc_token_refresh{token = RT}) when is_binary(RT) ->
         _ ->
             0
     end;
-
 refresh_token_ttl_secs(_) ->
     0.
-
 
 %% @private
 decode_jwt_claims(JWT) when is_binary(JWT) ->
@@ -705,40 +754,41 @@ decode_jwt_claims(JWT) when is_binary(JWT) ->
         _:_ -> error
     end.
 
-
 %% @private
 map_roles(Roles, RoleMapping) when map_size(RoleMapping) == 0 ->
     [R || R <- Roles, is_binary(R)];
-
 map_roles(Roles, RoleMapping) ->
     lists:filtermap(
-        fun(Role) when is_binary(Role) ->
-            case maps:find(Role, RoleMapping) of
-                {ok, MappedRole} -> {true, string:casefold(MappedRole)};
-                error -> {true, string:casefold(Role)}
-            end;
-           (_) ->
-            false
+        fun
+            (Role) when is_binary(Role) ->
+                case maps:find(Role, RoleMapping) of
+                    {ok, MappedRole} -> {true, string:casefold(MappedRole)};
+                    error -> {true, string:casefold(Role)}
+                end;
+            (_) ->
+                false
         end,
         Roles
     ).
 
-
 %% @private
 build_oidc_tokens_map(IdTokenJWT, AccessToken, RefreshToken) ->
-    Map0 = case is_binary(IdTokenJWT) of
-        true -> #{id_token => IdTokenJWT};
-        false -> #{}
-    end,
-    Map1 = case RefreshToken of
-        #oidcc_token_refresh{token = RT} when is_binary(RT) ->
-            Map0#{refresh_token => RT};
-        _ ->
-            Map0
-    end,
+    Map0 =
+        case is_binary(IdTokenJWT) of
+            true -> #{id_token => IdTokenJWT};
+            false -> #{}
+        end,
+    Map1 =
+        case RefreshToken of
+            #oidcc_token_refresh{token = RT} when is_binary(RT) ->
+                Map0#{refresh_token => RT};
+            _ ->
+                Map0
+        end,
     case AccessToken of
-        #oidcc_token_access{token = AT, expires = Exp}
-        when is_binary(AT) ->
+        #oidcc_token_access{token = AT, expires = Exp} when
+            is_binary(AT)
+        ->
             Map2 = Map1#{access_token => AT},
             case is_integer(Exp) of
                 true -> Map2#{access_token_expires_in => Exp};
@@ -748,38 +798,55 @@ build_oidc_tokens_map(IdTokenJWT, AccessToken, RefreshToken) ->
             Map1
     end.
 
-
 %% @private
 ticket_cookie_name(RealmUri) ->
     <<?TICKET_COOKIE_PREFIX/binary, RealmUri/binary>>.
-
 
 %% @private
 csrf_cookie_name(RealmUri) ->
     <<?CSRF_COOKIE_PREFIX/binary, RealmUri/binary>>.
 
-
 %% @private
-set_ticket_cookie(Req, RealmUri, JWT, BasePath, MaxAgeSecs, IsSecure,
-                  CookieDomain, CookieSameSite) ->
+set_ticket_cookie(
+    Req,
+    RealmUri,
+    JWT,
+    BasePath,
+    MaxAgeSecs,
+    IsSecure,
+    CookieDomain,
+    CookieSameSite
+) ->
     Opts = cookie_opts(
         BasePath, MaxAgeSecs, IsSecure, true, CookieDomain, CookieSameSite
     ),
     cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), JWT, Req, Opts).
 
-
 %% @private
-clear_ticket_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain,
-                    CookieSameSite) ->
+clear_ticket_cookie(
+    Req,
+    RealmUri,
+    BasePath,
+    IsSecure,
+    CookieDomain,
+    CookieSameSite
+) ->
     Opts = cookie_opts(
         BasePath, 0, IsSecure, true, CookieDomain, CookieSameSite
     ),
     cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), <<>>, Req, Opts).
 
-
 %% @private
-set_csrf_cookie(Req, RealmUri, CsrfToken, BasePath, MaxAgeSecs, IsSecure,
-                CookieDomain, CookieSameSite) ->
+set_csrf_cookie(
+    Req,
+    RealmUri,
+    CsrfToken,
+    BasePath,
+    MaxAgeSecs,
+    IsSecure,
+    CookieDomain,
+    CookieSameSite
+) ->
     Opts = cookie_opts(
         BasePath, MaxAgeSecs, IsSecure, false, CookieDomain, CookieSameSite
     ),
@@ -787,17 +854,21 @@ set_csrf_cookie(Req, RealmUri, CsrfToken, BasePath, MaxAgeSecs, IsSecure,
         csrf_cookie_name(RealmUri), CsrfToken, Req, Opts
     ).
 
-
 %% @private
-clear_csrf_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain,
-                  CookieSameSite) ->
+clear_csrf_cookie(
+    Req,
+    RealmUri,
+    BasePath,
+    IsSecure,
+    CookieDomain,
+    CookieSameSite
+) ->
     Opts = cookie_opts(
         BasePath, 0, IsSecure, false, CookieDomain, CookieSameSite
     ),
     cowboy_req:set_resp_cookie(
         csrf_cookie_name(RealmUri), <<>>, Req, Opts
     ).
-
 
 %% @private
 same_site_atom(<<"none">>) -> none;
@@ -807,10 +878,15 @@ same_site_atom(none) -> none;
 same_site_atom(lax) -> lax;
 same_site_atom(strict) -> strict.
 
-
 %% @private
-cookie_opts(_BasePath, MaxAge, IsSecure, HttpOnly, CookieDomain,
-            CookieSameSite) ->
+cookie_opts(
+    _BasePath,
+    MaxAge,
+    IsSecure,
+    HttpOnly,
+    CookieDomain,
+    CookieSameSite
+) ->
     Opts0 = #{
         http_only => HttpOnly,
         secure => IsSecure,
@@ -822,7 +898,6 @@ cookie_opts(_BasePath, MaxAge, IsSecure, HttpOnly, CookieDomain,
         undefined -> Opts0;
         Domain when is_binary(Domain) -> Opts0#{domain => Domain}
     end.
-
 
 %% @private
 -doc """
@@ -843,9 +918,11 @@ maybe_idp_logout_url(RealmUri, Claims, RedirectUri) ->
             case bondy_oidc_provider:get_client_context(RealmUri, Provider) of
                 {ok, ClientCtx} ->
                     Opts = #{post_logout_redirect_uri => RedirectUri},
-                    case oidcc_logout:initiate_url(
-                        IdTokenHint, ClientCtx, Opts
-                    ) of
+                    case
+                        oidcc_logout:initiate_url(
+                            IdTokenHint, ClientCtx, Opts
+                        )
+                    of
                         {ok, LogoutUrl} ->
                             LogoutUrl;
                         {error, end_session_endpoint_not_supported} ->
@@ -874,7 +951,6 @@ maybe_idp_logout_url(RealmUri, Claims, RedirectUri) ->
             RedirectUri
     end.
 
-
 %% @private
 reply_json_error(StatusCode, ErrorBin, Req) ->
     ReplyBody = json:encode(#{<<"error">> => ErrorBin}),
@@ -884,5 +960,3 @@ reply_json_error(StatusCode, ErrorBin, Req) ->
         ReplyBody,
         Req
     ).
-
-

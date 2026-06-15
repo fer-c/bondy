@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_connect_dispatch).
 
 -moduledoc """
@@ -61,34 +60,35 @@ effects are demonitors), and that pairing removes a whole class of lockstep bugs
 -record(dispatch, {
     %% in-flight callee invocations: InvReqId => {WorkerPid, MonRef}
     %% (the pid lets an inbound INTERRUPT kill the servicing worker).
-    invocations = #{}   ::  #{pos_integer() => {pid(), reference()}},
+    invocations = #{} :: #{pos_integer() => {pid(), reference()}},
     %% worker monitor reverse index: MonRef => {invocation, InvReqId}
     %%                                       | {event, SubId}
-    mons = #{}          ::  #{reference() => mon_tag()},
+    mons = #{} :: #{reference() => mon_tag()},
     %% per-subscription FIFO dispatch: SubId => entry(); an absent SubId is idle.
-    queues = #{}        ::  #{pos_integer() => entry()},
-    load                ::  bondy_connect_load:t()
+    queues = #{} :: #{pos_integer() => entry()},
+    load :: bondy_connect_load:t()
 }).
 
--type entry()       ::  #{
-                            busy := true,
-                            queue := queue:queue(job()),
-                            %% the live worker's monitor, or `pending` between a
-                            %% {spawn, event, …} effect and its worker_started/4.
-                            mon := reference() | pending
-                        }.
--type mon_tag()     ::  {invocation, pos_integer()} | {event, pos_integer()}.
--type job()         ::  map().
--type reply()       ::  {yield, list() | undefined, map() | undefined}
-                      | {error, uri(), list() | undefined, map() | undefined}.
+-type entry() :: #{
+    busy := true,
+    queue := queue:queue(job()),
+    %% the live worker's monitor, or `pending` between a
+    %% {spawn, event, …} effect and its worker_started/4.
+    mon := reference() | pending
+}.
+-type mon_tag() :: {invocation, pos_integer()} | {event, pos_integer()}.
+-type job() :: map().
+-type reply() ::
+    {yield, list() | undefined, map() | undefined}
+    | {error, uri(), list() | undefined, map() | undefined}.
 
--type effect()      ::
-      {spawn, invocation | event, Key :: pos_integer(), Job :: job()}
+-type effect() ::
+    {spawn, invocation | event, Key :: pos_integer(), Job :: job()}
     | {spawn_nomon, Job :: job()}
     | {send, Msg :: term()}
     | {kill, Pid :: pid()}.
 
--opaque t()         ::  #dispatch{}.
+-opaque t() :: #dispatch{}.
 
 -export_type([t/0]).
 -export_type([effect/0]).
@@ -109,20 +109,15 @@ effects are demonitors), and that pairing removes a whole class of lockstep bugs
 -export([in_flight/1]).
 -export([inspect/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Build dispatch state wrapping the (already-built) load regulator.".
 -spec new(Load :: bondy_connect_load:t()) -> t().
 
 new(Load) ->
     #dispatch{load = Load}.
-
 
 -doc """
 Admit an inbound INVOCATION (the registration was found by the connection).
@@ -144,7 +139,6 @@ admit_invocation(ReqId, Job, #dispatch{load = Load} = D) ->
             {D, [{send, Err}]}
     end.
 
-
 -doc """
 Dispatch an inbound EVENT for `SubId`. `Ordered =:= false` fires an unmonitored,
 unqueued, load-free worker (the `handler_sup` contains any crash). `Ordered =:=
@@ -160,7 +154,6 @@ rest queue, draining on `event_done/2` (or a worker `DOWN`).
 
 dispatch_event(_SubId, false, Job, D) ->
     {D, [{spawn_nomon, Job}]};
-
 dispatch_event(SubId, true, Job, #dispatch{queues = Queues} = D) ->
     case maps:get(SubId, Queues, undefined) of
         #{busy := true, queue := Q} = Entry ->
@@ -175,7 +168,6 @@ dispatch_event(SubId, true, Job, #dispatch{queues = Queues} = D) ->
                 [{spawn, event, SubId, Job}]
             }
     end.
-
 
 -doc """
 Feed back the result of a `{spawn, Tag, Key, _}` effect.
@@ -202,7 +194,6 @@ worker_started(invocation, ReqId, {ok, {Pid, MonRef}}, D) ->
         },
         []
     };
-
 worker_started(invocation, ReqId, {error, Reason}, #dispatch{load = Load} = D) ->
     %% Pitfall 1: admit_invocation/3 charged the token; releasing it here is the
     %% other half — forgetting it leaks a token and wedges the in-flight cap.
@@ -215,7 +206,6 @@ worker_started(invocation, ReqId, {error, Reason}, #dispatch{load = Load} = D) -
         ?INVOCATION, ReqId, #{}, ?BONDY_CONNECT_INTERNAL_ERROR
     ),
     {D#dispatch{load = bondy_connect_load:release(Load)}, [{send, Err}]};
-
 worker_started(event, SubId, {ok, {_Pid, MonRef}}, D) ->
     #dispatch{queues = Queues, mons = Mons} = D,
     case maps:get(SubId, Queues, undefined) of
@@ -235,7 +225,6 @@ worker_started(event, SubId, {ok, {_Pid, MonRef}}, D) ->
             _ = demonitor_mon(MonRef),
             {D, []}
     end;
-
 worker_started(event, SubId, {error, Reason}, #dispatch{queues = Queues} = D) ->
     ?LOG_WARNING(#{
         description => "Failed to start event worker",
@@ -249,7 +238,6 @@ worker_started(event, SubId, {error, Reason}, #dispatch{queues = Queues} = D) ->
         undefined ->
             {D, []}
     end.
-
 
 -doc """
 The worker servicing invocation `ReqId` finished — release its load token, drop
@@ -276,7 +264,6 @@ handler_done(ReqId, Reply, #dispatch{invocations = Inv, mons = Mons} = D) ->
             {D, []}
     end.
 
-
 -doc """
 The worker servicing subscription `SubId` finished cleanly — flush its `DOWN`,
 drop the monitor and start the next queued event (or leave the subscription
@@ -293,7 +280,6 @@ event_done(SubId, #dispatch{queues = Queues, mons = Mons} = D) ->
         undefined ->
             {D, []}
     end.
-
 
 -doc """
 The router is cancelling an in-flight INVOCATION (`kill`/`killnowait`). Cancel
@@ -322,7 +308,6 @@ interrupt(InvReqId, _Opts, #dispatch{invocations = Inv, mons = Mons} = D) ->
         error ->
             {D, []}
     end.
-
 
 -doc """
 A monitored worker died. An invocation worker that died before replying yields a
@@ -365,7 +350,6 @@ worker_down(MonRef, _Reason, #dispatch{mons = Mons} = D) ->
             {D, []}
     end.
 
-
 -doc """
 Forget subscription `SubId` (unsubscribe): demonitor its busy worker so a stale
 `DOWN` cannot advance a now-dead subscription, and drop its queue. Pitfall 3:
@@ -388,7 +372,6 @@ clear_subscription(SubId, #dispatch{queues = Queues, mons = Mons} = D) ->
         undefined ->
             {D, []}
     end.
-
 
 -doc """
 Teardown on a disconnect: kill in-flight invocation workers and demonitor event
@@ -413,7 +396,6 @@ kill_all(#dispatch{invocations = Inv, queues = Queues} = D) ->
     ),
     {D, KillEffects}.
 
-
 -doc """
 Clear all dispatch maps and reset the load counter, **reusing** the same token
 bucket across reconnects (a fresh `bondy_connect_load:new/1` would orphan a
@@ -424,13 +406,11 @@ bucket across reconnects (a fresh `bondy_connect_load:new/1` would orphan a
 reset(#dispatch{load = Load}) ->
     #dispatch{load = bondy_connect_load:reset(Load)}.
 
-
 -doc "Free the load regulator's ETS row on connection terminate (review B4).".
 -spec delete(t()) -> ok.
 
 delete(#dispatch{load = Load}) ->
     bondy_connect_load:delete(Load).
-
 
 -doc "The number of in-flight callee invocations (test/introspection helper).".
 -spec in_flight(t()) -> non_neg_integer().
@@ -438,18 +418,18 @@ delete(#dispatch{load = Load}) ->
 in_flight(#dispatch{invocations = Inv}) ->
     maps:size(Inv).
 
-
 -doc """
 A snapshot of the internal maps for tests/debugging (the `t()` is otherwise
 opaque). `load_in_flight` is the load regulator's current count, used to assert
 the admit/release-exactly-once invariant.
 """.
--spec inspect(t()) -> #{
-    invocations := map(),
-    mons := map(),
-    queues := map(),
-    load_in_flight := non_neg_integer()
-}.
+-spec inspect(t()) ->
+    #{
+        invocations := map(),
+        mons := map(),
+        queues := map(),
+        load_in_flight := non_neg_integer()
+    }.
 
 inspect(#dispatch{invocations = Inv, mons = Mons, queues = Q, load = L}) ->
     #{
@@ -459,13 +439,9 @@ inspect(#dispatch{invocations = Inv, mons = Mons, queues = Q, load = L}) ->
         load_in_flight => bondy_connect_load:in_flight(L)
     }.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private Start the next queued event for `SubId` (the worker's monitor is
 %% already gone — demonitored on the clean path, consumed by the DOWN, or never
@@ -484,7 +460,6 @@ drain_next(SubId, #{queue := Q} = Entry, #dispatch{queues = Queues} = D) ->
             {D#dispatch{queues = maps:remove(SubId, Queues)}, []}
     end.
 
-
 %% @private Demonitor a real reference (flushing any pending DOWN); a no-op for a
 %% `pending`/`undefined` placeholder so callers need not special-case it.
 demonitor_mon(Mon) when is_reference(Mon) ->
@@ -492,7 +467,6 @@ demonitor_mon(Mon) when is_reference(Mon) ->
     ok;
 demonitor_mon(_) ->
     ok.
-
 
 %% @private Build the YIELD/ERROR a finished invocation worker reports back.
 invocation_reply(ReqId, {yield, Args, KWArgs}) ->
@@ -502,11 +476,9 @@ invocation_reply(ReqId, {yield, Args, KWArgs}) ->
         {A, K} ->
             bondy_wamp_message:yield(ReqId, #{}, A, K)
     end;
-
 invocation_reply(ReqId, {error, Uri, Args, KWArgs}) ->
     {A, K} = normalize_payload(Args, KWArgs),
     bondy_wamp_message:error(?INVOCATION, ReqId, #{}, Uri, A, K).
-
 
 %% @private Normalise a (Args, KWArgs) payload for the WAMP constructors: empty
 %% kwargs collapse to `undefined`; non-empty kwargs require a (possibly empty)

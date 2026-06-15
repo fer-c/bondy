@@ -70,7 +70,6 @@ all() ->
         multiple_source_cidrs
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.auth_password">>,
@@ -88,7 +87,6 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 add_realm(RealmUri) ->
     Config = #{
@@ -154,7 +152,6 @@ add_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
 add_multi_method_realm(RealmUri) ->
     Config = #{
         uri => RealmUri,
@@ -202,7 +199,6 @@ add_multi_method_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
 add_multi_cidr_realm(RealmUri) ->
     Config = #{
         uri => RealmUri,
@@ -243,13 +239,9 @@ add_multi_cidr_realm(RealmUri) ->
     _ = bondy_realm:create(Config),
     ok.
 
-
-
 %% =============================================================================
 %% ORIGINAL TESTS (PRESERVED)
 %% =============================================================================
-
-
 
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -296,8 +288,6 @@ test_1(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt2)
     ).
 
-
-
 test_2(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -343,13 +333,9 @@ test_2(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ).
 
-
-
 %% =============================================================================
 %% SOURCE / CIDR FILTERING
 %% =============================================================================
-
-
 
 user1_allowed_from_any_ip(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -367,7 +353,6 @@ user1_allowed_from_any_ip(Config) ->
     {ok, C3} = bondy_auth:init(SessionId, RealmUri, ?U1, [], {8, 8, 8, 8}),
     ?assert(lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(C3))).
 
-
 user2_rejected_outside_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -376,14 +361,15 @@ user2_rejected_outside_cidr(Config) ->
     {ok, Ctxt} = bondy_auth:init(
         SessionId, RealmUri, ?U2, [], {10, 0, 0, 1}
     ),
-    ?assertNot(lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))),
+    ?assertNot(
+        lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))
+    ),
 
     %% Trying to authenticate should fail with method_not_allowed
     ?assertMatch(
         {error, method_not_allowed},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
     ).
-
 
 user2_allowed_within_cidr(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -399,13 +385,9 @@ user2_allowed_within_cidr(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
     ).
 
-
-
 %% =============================================================================
 %% PASSWORD VERIFICATION
 %% =============================================================================
-
-
 
 correct_password_succeeds(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -418,7 +400,6 @@ correct_password_succeeds(Config) ->
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
     ).
-
 
 wrong_password_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -439,7 +420,6 @@ wrong_password_fails(Config) ->
         )
     ).
 
-
 empty_password_string_fails(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -452,13 +432,9 @@ empty_password_string_fails(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, <<>>, undefined, Ctxt)
     ).
 
-
-
 %% =============================================================================
 %% CHALLENGE STEP
 %% =============================================================================
-
-
 
 challenge_returns_true_empty_map(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -480,13 +456,9 @@ challenge_returns_true_empty_map(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ).
 
-
-
 %% =============================================================================
 %% METHOD SELECTION
 %% =============================================================================
-
-
 
 method_not_in_realm_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -505,7 +477,6 @@ method_not_in_realm_rejected(Config) ->
         bondy_auth:authenticate(?WAMP_CRA_AUTH, ?P1, undefined, Ctxt)
     ).
 
-
 invalid_method_name_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
@@ -521,7 +492,6 @@ invalid_method_name_rejected(Config) ->
             <<"nonexistent_method">>, ?P1, undefined, Ctxt
         )
     ).
-
 
 already_set_method_mismatch(Config) ->
     RealmUri = ?config(multi_realm_uri, Config),
@@ -541,13 +511,9 @@ already_set_method_mismatch(Config) ->
         bondy_auth:authenticate(?WAMP_CRA_AUTH, ?P2, undefined, Ctxt1)
     ).
 
-
-
 %% =============================================================================
 %% USER WITHOUT PASSWORD
 %% =============================================================================
-
-
 
 user_without_password_excluded(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -566,13 +532,9 @@ user_without_password_excluded(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, <<"anything">>, undefined, Ctxt)
     ).
 
-
-
 %% =============================================================================
 %% ANONYMOUS USER
 %% =============================================================================
-
-
 
 anonymous_user_password_not_available(Config) ->
     RealmUri = ?config(multi_realm_uri, Config),
@@ -586,13 +548,9 @@ anonymous_user_password_not_available(Config) ->
         lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))
     ).
 
-
-
 %% =============================================================================
 %% ERROR CASES
 %% =============================================================================
-
-
 
 nonexistent_user_error(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -604,7 +562,6 @@ nonexistent_user_error(Config) ->
             SessionId, RealmUri, <<"ghost_user">>, [], {127, 0, 0, 1}
         )
     ).
-
 
 nonexistent_realm_error(_Config) ->
     SessionId = bondy_session_id:new(),
@@ -620,13 +577,9 @@ nonexistent_realm_error(_Config) ->
         )
     ).
 
-
-
 %% =============================================================================
 %% RETURN VALUES
 %% =============================================================================
-
-
 
 authenticate_returns_empty_extra(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -641,13 +594,9 @@ authenticate_returns_empty_extra(Config) ->
     %% Password auth returns empty extra map on success
     ?assertEqual(#{}, Extra).
 
-
-
 %% =============================================================================
 %% CONTEXT ACCESSORS
 %% =============================================================================
-
-
 
 context_accessors(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -664,13 +613,9 @@ context_accessors(Config) ->
     ?assertEqual(SourceIP, bondy_auth:source_ip(Ctxt)),
     ?assertNotEqual(undefined, bondy_auth:user(Ctxt)).
 
-
-
 %% =============================================================================
 %% MULTIPLE AUTH METHODS
 %% =============================================================================
-
-
 
 password_coexists_with_other_methods(Config) ->
     RealmUri = ?config(multi_realm_uri, Config),
@@ -696,13 +641,9 @@ password_coexists_with_other_methods(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt)
     ).
 
-
-
 %% =============================================================================
 %% FULL CHALLENGE-AUTHENTICATE FLOW
 %% =============================================================================
-
-
 
 full_challenge_authenticate_flow(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -733,13 +674,9 @@ full_challenge_authenticate_flow(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt1)
     ).
 
-
-
 %% =============================================================================
 %% MULTIPLE SOURCE CIDRS
 %% =============================================================================
-
-
 
 multiple_source_cidrs(Config) ->
     RealmUri = ?config(multi_cidr_realm_uri, Config),

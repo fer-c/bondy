@@ -39,13 +39,9 @@ be used for local testing against a self-signed router.
 
 -export([options/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Build the `ssl` client options from a `tls` config submap, secure by default.
@@ -59,17 +55,13 @@ explicit `server_name_indication` applies).
 options(Host, TLS) when is_map(TLS) ->
     Verify = maps:get(verify, TLS, verify_peer),
     Versions = maps:get(versions, TLS, ?DEFAULT_VERSIONS),
-    [{versions, Versions}]
-        ++ verify_opts(Verify, Host, TLS)
-        ++ cert_opts(TLS).
-
-
+    [{versions, Versions}] ++
+        verify_opts(Verify, Host, TLS) ++
+        cert_opts(TLS).
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 verify_opts(verify_none, _Host, _TLS) ->
@@ -79,12 +71,10 @@ verify_opts(verify_none, _Host, _TLS) ->
             "certificate will not be validated. Use only for local testing."
     }),
     [{verify, verify_none}];
-
 verify_opts(verify_peer, Host, TLS) ->
-    [{verify, verify_peer}, {depth, maps:get(depth, TLS, ?DEFAULT_DEPTH)}]
-        ++ ca_opts(TLS)
-        ++ hostname_opts(Host, TLS).
-
+    [{verify, verify_peer}, {depth, maps:get(depth, TLS, ?DEFAULT_DEPTH)}] ++
+        ca_opts(TLS) ++
+        hostname_opts(Host, TLS).
 
 %% @private CA trust: user-supplied, otherwise the OS trust store.
 ca_opts(#{cacerts := CAs}) ->
@@ -93,7 +83,6 @@ ca_opts(#{cacertfile := File}) ->
     [{cacertfile, File}];
 ca_opts(_) ->
     [{cacerts, public_key:cacerts_get()}].
-
 
 %% @private SNI + hostname verification. A string host is used for SNI and for
 %% the HTTPS-style hostname match; `server_name_indication => disable` turns both
@@ -110,13 +99,13 @@ hostname_opts(Host, TLS) ->
             [{server_name_indication, Name} | hostname_check()]
     end.
 
-
 %% @private
 hostname_check() ->
-    [{customize_hostname_check, [
-        {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
-    ]}].
-
+    [
+        {customize_hostname_check, [
+            {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
+        ]}
+    ].
 
 %% @private Optional client certificate (mutual TLS), key material and ciphers.
 cert_opts(TLS) ->
@@ -128,7 +117,6 @@ cert_opts(TLS) ->
         opt(password, TLS),
         opt(ciphers, TLS)
     ]).
-
 
 %% @private
 opt(Key, TLS) ->

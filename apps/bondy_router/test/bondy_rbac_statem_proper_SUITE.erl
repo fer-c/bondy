@@ -30,36 +30,30 @@ explicit-groups normalization.
 -define(MAX_CMDS, 30).
 -define(REALM, <<"com.test.proper.rbac.statem">>).
 
-
 %% =============================================================================
 %% MODEL STATE
 %% =============================================================================
 
-
 -record(model, {
-    realm_uri     :: binary(),
+    realm_uri :: binary(),
     %% #{NormalizedGroupName => [NormalizedParentGroupNames]}
-    groups = #{}  :: #{binary() => [binary()]},
+    groups = #{} :: #{binary() => [binary()]},
     %% #{NormalizedUsername => [NormalizedGroupNames]}
-    users = #{}   :: #{binary() => [binary()]},
+    users = #{} :: #{binary() => [binary()]},
     %% #{{user|group, NormalizedName|all} => #{Resource => ordsets(Perm)}}
-    grants = #{}  :: #{grant_key() => #{resource() => [binary()]}},
+    grants = #{} :: #{grant_key() => #{resource() => [binary()]}},
     %% Resources that have been granted (for biased test URI generation)
     granted_resources = [] :: [resource()],
-    next_gid = 1  :: pos_integer(),
-    next_uid = 1  :: pos_integer()
+    next_gid = 1 :: pos_integer(),
+    next_uid = 1 :: pos_integer()
 }).
 
 -type grant_key() :: {user | group, binary() | all}.
--type resource()  :: any | {binary(), binary()}.
-
-
+-type resource() :: any | {binary(), binary()}.
 
 %% =============================================================================
 %% CT CALLBACKS
 %% =============================================================================
-
-
 
 all() ->
     [
@@ -71,22 +65,16 @@ all() ->
         prop_explicit_groups_normalization
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
-
 
 %% =============================================================================
 %% GENERATORS
 %% =============================================================================
-
-
 
 %% @private
 gen_case_variant(Bin) ->
@@ -96,13 +84,11 @@ gen_case_variant(Bin) ->
         capitalize_first(Bin)
     ]).
 
-
 %% @private
 capitalize_first(<<C, Rest/binary>>) when C >= $a, C =< $z ->
     <<(C - 32), Rest/binary>>;
 capitalize_first(Bin) ->
     Bin.
-
 
 %% @private
 gen_permission() ->
@@ -116,11 +102,9 @@ gen_permission() ->
         <<"wamp.publish">>
     ]).
 
-
 %% @private
 gen_permissions() ->
     non_empty(list(gen_permission())).
-
 
 %% @private
 %% Small vocabulary so exact-match collisions happen often enough.
@@ -135,7 +119,6 @@ gen_resource() ->
         {1, exactly({<<>>, <<"prefix">>})}
     ]).
 
-
 %% @private
 gen_exact_resource() ->
     ?LET(
@@ -144,28 +127,31 @@ gen_exact_resource() ->
         {iolist_to_binary(lists:join(<<".">>, Parts)), <<"exact">>}
     ).
 
-
 %% @private
 gen_prefix_resource() ->
     ?LET(
         Parts,
         non_empty(list(elements(?URI_PARTS))),
-        {<<(iolist_to_binary(lists:join(<<".">>, Parts)))/binary, ".">>,
-         <<"prefix">>}
+        {
+            <<(iolist_to_binary(lists:join(<<".">>, Parts)))/binary, ".">>,
+            <<"prefix">>
+        }
     ).
-
 
 %% @private
 gen_wildcard_resource() ->
     ?LET(
         Parts,
-        vector(3, frequency([
-            {3, elements(?URI_PARTS)},
-            {1, exactly(<<>>)}  %% wildcard component
-        ])),
+        vector(
+            3,
+            frequency([
+                {3, elements(?URI_PARTS)},
+                %% wildcard component
+                {1, exactly(<<>>)}
+            ])
+        ),
         {iolist_to_binary(lists:join(<<".">>, Parts)), <<"wildcard">>}
     ).
-
 
 %% @private
 %% Biased: preferentially generates URIs that could match granted resources,
@@ -177,8 +163,12 @@ gen_test_uri(#model{granted_resources = Granted}) ->
         iolist_to_binary(lists:join(<<".">>, Parts))
     ),
     %% Extract concrete URIs from granted resources to reuse
-    ConcreteUris = [Uri || {Uri, _} <- Granted,
-                           is_binary(Uri), byte_size(Uri) > 0],
+    ConcreteUris = [
+        Uri
+     || {Uri, _} <- Granted,
+        is_binary(Uri),
+        byte_size(Uri) > 0
+    ],
     case ConcreteUris of
         [] ->
             frequency([
@@ -192,57 +182,54 @@ gen_test_uri(#model{granted_resources = Granted}) ->
                 %% Reuse a granted URI directly (high chance of exact hit)
                 {3, elements(ConcreteUris)},
                 %% Extend a granted prefix (high chance of prefix hit)
-                {2, ?LET(
-                    {Prefix, Suffix},
-                    {elements(ConcreteUris), elements(?URI_PARTS)},
-                    <<Prefix/binary, Suffix/binary>>
-                )}
+                {2,
+                    ?LET(
+                        {Prefix, Suffix},
+                        {elements(ConcreteUris), elements(?URI_PARTS)},
+                        <<Prefix/binary, Suffix/binary>>
+                    )}
             ])
     end.
 
-
 %% --- State-dependent generators ---
-
 
 %% @private
 gen_new_group_spec(#model{groups = Groups, next_gid = N}) ->
     ExistingNames = maps:keys(Groups),
     BaseName = <<"grp_", (integer_to_binary(N))/binary>>,
-    Parents = case ExistingNames of
-        [] -> exactly([]);
-        _ -> list(elements(ExistingNames))
-    end,
+    Parents =
+        case ExistingNames of
+            [] -> exactly([]);
+            _ -> list(elements(ExistingNames))
+        end,
     ?LET(
         {CaseVariant, Prnts},
         {gen_case_variant(BaseName), Parents},
         {CaseVariant, lists:usort(Prnts)}
     ).
 
-
 %% @private
 gen_new_user_spec(#model{groups = Groups, next_uid = N}) ->
     GroupNames = maps:keys(Groups),
     BaseName = <<"usr_", (integer_to_binary(N))/binary>>,
-    Membership = case GroupNames of
-        [] -> exactly([]);
-        _ -> list(elements(GroupNames))
-    end,
+    Membership =
+        case GroupNames of
+            [] -> exactly([]);
+            _ -> list(elements(GroupNames))
+        end,
     ?LET(
         {CaseVariant, Grps},
         {gen_case_variant(BaseName), Membership},
         {CaseVariant, lists:usort(Grps)}
     ).
 
-
 %% @private
 gen_existing_groupname(#model{groups = Groups}) ->
     elements(maps:keys(Groups)).
 
-
 %% @private
 gen_existing_username(#model{users = Users}) ->
     elements(maps:keys(Users)).
-
 
 %% @private
 gen_role_name(#model{users = Users, groups = Groups}) ->
@@ -252,17 +239,12 @@ gen_role_name(#model{users = Users, groups = Groups}) ->
         {2, exactly(<<"all">>)}
     ]).
 
-
-
 %% =============================================================================
 %% PROPER_STATEM CALLBACKS
 %% =============================================================================
 
-
-
 initial_state() ->
     #model{realm_uri = ?REALM}.
-
 
 command(#model{} = S) ->
     GroupNames = maps:keys(S#model.groups),
@@ -273,131 +255,167 @@ command(#model{} = S) ->
 
     %% Always available: add new entities
     Base = [
-        {8, {call, ?MODULE, sut_add_group,
-             [S#model.realm_uri, gen_new_group_spec(S)]}},
-        {5, {call, ?MODULE, sut_add_user,
-             [S#model.realm_uri, gen_new_user_spec(S)]}}
+        {8,
+            {call, ?MODULE, sut_add_group, [
+                S#model.realm_uri, gen_new_group_spec(S)
+            ]}},
+        {5,
+            {call, ?MODULE, sut_add_user, [
+                S#model.realm_uri, gen_new_user_spec(S)
+            ]}}
     ],
 
     %% Need at least one role for grant/revoke
-    Grant = case HasRoles of
-        true -> [
-            {15, {call, ?MODULE, sut_grant, [
-                S#model.realm_uri, gen_role_name(S),
-                gen_resource(), gen_permissions()
-            ]}},
-            {8, {call, ?MODULE, sut_revoke, [
-                S#model.realm_uri, gen_role_name(S),
-                gen_resource(), gen_permissions()
-            ]}}
-        ];
-        false -> []
-    end,
+    Grant =
+        case HasRoles of
+            true ->
+                [
+                    {15,
+                        {call, ?MODULE, sut_grant, [
+                            S#model.realm_uri,
+                            gen_role_name(S),
+                            gen_resource(),
+                            gen_permissions()
+                        ]}},
+                    {8,
+                        {call, ?MODULE, sut_revoke, [
+                            S#model.realm_uri,
+                            gen_role_name(S),
+                            gen_resource(),
+                            gen_permissions()
+                        ]}}
+                ];
+            false ->
+                []
+        end,
 
     %% Need at least one user for authorization checks
-    Auth = case HasUsers of
-        true -> [
-            {20, {call, ?MODULE, sut_authorize, [
-                S#model.realm_uri, gen_existing_username(S),
-                gen_permission(), gen_test_uri(S)
-            ]}}
-        ];
-        false -> []
-    end,
+    Auth =
+        case HasUsers of
+            true ->
+                [
+                    {20,
+                        {call, ?MODULE, sut_authorize, [
+                            S#model.realm_uri,
+                            gen_existing_username(S),
+                            gen_permission(),
+                            gen_test_uri(S)
+                        ]}}
+                ];
+            false ->
+                []
+        end,
 
     %% Authorize via get_context/3 with explicit (possibly mixed-case) groups
-    AuthExplicit = case HasUsers andalso HasGroups of
-        true -> [
-            {8, {call, ?MODULE, sut_authorize_explicit, [
-                S#model.realm_uri, gen_existing_username(S),
-                non_empty(list(
-                    ?LET(G, gen_existing_groupname(S), gen_case_variant(G))
-                )),
-                gen_permission(), gen_test_uri(S)
-            ]}}
-        ];
-        false -> []
-    end,
+    AuthExplicit =
+        case HasUsers andalso HasGroups of
+            true ->
+                [
+                    {8,
+                        {call, ?MODULE, sut_authorize_explicit, [
+                            S#model.realm_uri,
+                            gen_existing_username(S),
+                            non_empty(
+                                list(
+                                    ?LET(
+                                        G,
+                                        gen_existing_groupname(S),
+                                        gen_case_variant(G)
+                                    )
+                                )
+                            ),
+                            gen_permission(),
+                            gen_test_uri(S)
+                        ]}}
+                ];
+            false ->
+                []
+        end,
 
     %% Need both users and groups for membership changes
-    Membership = case HasUsers andalso HasGroups of
-        true -> [
-            {5, {call, ?MODULE, sut_add_user_to_group, [
-                S#model.realm_uri,
-                gen_existing_username(S),
-                gen_existing_groupname(S)
-            ]}}
-        ];
-        false -> []
-    end,
+    Membership =
+        case HasUsers andalso HasGroups of
+            true ->
+                [
+                    {5,
+                        {call, ?MODULE, sut_add_user_to_group, [
+                            S#model.realm_uri,
+                            gen_existing_username(S),
+                            gen_existing_groupname(S)
+                        ]}}
+                ];
+            false ->
+                []
+        end,
 
     %% Destructive
     Remove = lists:append([
         case HasGroups of
-            true -> [{3, {call, ?MODULE, sut_remove_group, [
-                S#model.realm_uri, gen_existing_groupname(S)
-            ]}}];
-            false -> []
+            true ->
+                [
+                    {3,
+                        {call, ?MODULE, sut_remove_group, [
+                            S#model.realm_uri, gen_existing_groupname(S)
+                        ]}}
+                ];
+            false ->
+                []
         end,
         case HasUsers of
-            true -> [{2, {call, ?MODULE, sut_remove_user, [
-                S#model.realm_uri, gen_existing_username(S)
-            ]}}];
-            false -> []
+            true ->
+                [
+                    {2,
+                        {call, ?MODULE, sut_remove_user, [
+                            S#model.realm_uri, gen_existing_username(S)
+                        ]}}
+                ];
+            false ->
+                []
         end
     ]),
 
-    frequency(lists:append([
-        Base, Grant, Auth, AuthExplicit, Membership, Remove
-    ])).
-
+    frequency(
+        lists:append([
+            Base, Grant, Auth, AuthExplicit, Membership, Remove
+        ])
+    ).
 
 precondition(S, {call, _, sut_add_group, [_, {Name, Parents}]}) ->
     NormName = string:casefold(Name),
-    (not maps:is_key(NormName, S#model.groups))
-    andalso lists:all(
-        fun(P) -> maps:is_key(P, S#model.groups) end,
-        Parents
-    );
-
+    (not maps:is_key(NormName, S#model.groups)) andalso
+        lists:all(
+            fun(P) -> maps:is_key(P, S#model.groups) end,
+            Parents
+        );
 precondition(S, {call, _, sut_add_user, [_, {Username, Groups}]}) ->
     NormUser = string:casefold(Username),
-    (not maps:is_key(NormUser, S#model.users))
-    andalso (not maps:is_key(NormUser, S#model.groups))
-    andalso lists:all(
-        fun(G) -> maps:is_key(G, S#model.groups) end,
-        Groups
-    );
-
+    (not maps:is_key(NormUser, S#model.users)) andalso
+        (not maps:is_key(NormUser, S#model.groups)) andalso
+        lists:all(
+            fun(G) -> maps:is_key(G, S#model.groups) end,
+            Groups
+        );
 precondition(S, {call, _, sut_grant, [_, RoleName, _, _]}) ->
     role_exists(RoleName, S);
-
 precondition(S, {call, _, sut_revoke, [_, RoleName, _, _]}) ->
     role_exists(RoleName, S);
-
 precondition(S, {call, _, sut_authorize, [_, Username, _, _]}) ->
     maps:is_key(Username, S#model.users);
-
 precondition(S, {call, _, sut_authorize_explicit, [_, Username, Groups, _, _]}) ->
-    maps:is_key(Username, S#model.users)
-    andalso lists:all(
-        fun(G) -> maps:is_key(string:casefold(G), S#model.groups) end,
-        Groups
-    );
-
+    maps:is_key(Username, S#model.users) andalso
+        lists:all(
+            fun(G) -> maps:is_key(string:casefold(G), S#model.groups) end,
+            Groups
+        );
 precondition(S, {call, _, sut_add_user_to_group, [_, Username, GroupName]}) ->
-    maps:is_key(Username, S#model.users)
-    andalso maps:is_key(GroupName, S#model.groups);
-
+    maps:is_key(Username, S#model.users) andalso
+        maps:is_key(GroupName, S#model.groups);
 precondition(S, {call, _, sut_remove_group, [_, Name]}) ->
     maps:is_key(Name, S#model.groups);
-
 precondition(S, {call, _, sut_remove_user, [_, Username]}) ->
     maps:is_key(Username, S#model.users);
-
 precondition(_, _) ->
     true.
-
 
 next_state(S, _Res, {call, _, sut_add_group, [_, {Name, Parents}]}) ->
     NormName = string:casefold(Name),
@@ -405,14 +423,12 @@ next_state(S, _Res, {call, _, sut_add_group, [_, {Name, Parents}]}) ->
         groups = maps:put(NormName, Parents, S#model.groups),
         next_gid = S#model.next_gid + 1
     };
-
 next_state(S, _Res, {call, _, sut_add_user, [_, {Username, Groups}]}) ->
     NormUser = string:casefold(Username),
     S#model{
         users = maps:put(NormUser, Groups, S#model.users),
         next_uid = S#model.next_uid + 1
     };
-
 next_state(S, _Res, {call, _, sut_grant, [_, RoleName, Resource, Permissions]}) ->
     RoleKey = model_role_key(RoleName, S),
     NormResource = normalize_resource(Resource),
@@ -422,10 +438,13 @@ next_state(S, _Res, {call, _, sut_grant, [_, RoleName, Resource, Permissions]}) 
     NewRoleGrants = maps:put(NormResource, NewPerms, ExistingRoleGrants),
     S#model{
         grants = maps:put(RoleKey, NewRoleGrants, S#model.grants),
-        granted_resources = lists:usort([NormResource | S#model.granted_resources])
+        granted_resources = lists:usort([
+            NormResource | S#model.granted_resources
+        ])
     };
-
-next_state(S, _Res, {call, _, sut_revoke, [_, RoleName, Resource, Permissions]}) ->
+next_state(
+    S, _Res, {call, _, sut_revoke, [_, RoleName, Resource, Permissions]}
+) ->
     RoleKey = model_role_key(RoleName, S),
     NormResource = normalize_resource(Resource),
     case maps:find(RoleKey, S#model.grants) of
@@ -433,13 +452,17 @@ next_state(S, _Res, {call, _, sut_revoke, [_, RoleName, Resource, Permissions]})
             case maps:find(NormResource, RoleGrants) of
                 {ok, ExistingPerms} ->
                     NewPerms = ExistingPerms -- Permissions,
-                    NewRoleGrants = case NewPerms of
-                        [] ->
-                            maps:remove(NormResource, RoleGrants);
-                        _ ->
-                            maps:put(NormResource,
-                                     lists:usort(NewPerms), RoleGrants)
-                    end,
+                    NewRoleGrants =
+                        case NewPerms of
+                            [] ->
+                                maps:remove(NormResource, RoleGrants);
+                            _ ->
+                                maps:put(
+                                    NormResource,
+                                    lists:usort(NewPerms),
+                                    RoleGrants
+                                )
+                        end,
                     case map_size(NewRoleGrants) of
                         0 ->
                             S#model{
@@ -448,7 +471,8 @@ next_state(S, _Res, {call, _, sut_revoke, [_, RoleName, Resource, Permissions]})
                         _ ->
                             S#model{
                                 grants = maps:put(
-                                    RoleKey, NewRoleGrants, S#model.grants)
+                                    RoleKey, NewRoleGrants, S#model.grants
+                                )
                             }
                     end;
                 error ->
@@ -457,12 +481,10 @@ next_state(S, _Res, {call, _, sut_revoke, [_, RoleName, Resource, Permissions]})
         error ->
             S
     end;
-
 next_state(S, _Res, {call, _, sut_add_user_to_group, [_, Username, GroupName]}) ->
     CurrentGroups = maps:get(Username, S#model.users),
     NewGroups = lists:usort([GroupName | CurrentGroups]),
     S#model{users = maps:put(Username, NewGroups, S#model.users)};
-
 next_state(S, _Res, {call, _, sut_remove_group, [_, Name]}) ->
     %% Remove the group itself
     NewGroups0 = maps:remove(Name, S#model.groups),
@@ -479,19 +501,19 @@ next_state(S, _Res, {call, _, sut_remove_group, [_, Name]}) ->
     %% Remove grants for this group
     NewGrants = maps:remove({group, Name}, S#model.grants),
     S#model{groups = NewGroups, users = NewUsers, grants = NewGrants};
-
 next_state(S, _Res, {call, _, sut_remove_user, [_, Username]}) ->
     S#model{
         users = maps:remove(Username, S#model.users),
         grants = maps:remove({user, Username}, S#model.grants)
     };
-
 next_state(S, _Res, _Call) ->
     S.
 
-
-postcondition(S, {call, _, sut_authorize, [_, Username, Permission, Resource]},
-              Result) ->
+postcondition(
+    S,
+    {call, _, sut_authorize, [_, Username, Permission, Resource]},
+    Result
+) ->
     EffGrants = model_effective_grants(Username, S),
     ModelDecision = model_authorize(Permission, Resource, EffGrants),
     case {Result, ModelDecision} of
@@ -521,9 +543,13 @@ postcondition(S, {call, _, sut_authorize, [_, Username, Permission, Resource]},
             ct:pal("UNEXPECTED RESULT: ~p", [Result]),
             false
     end;
-
-postcondition(S, {call, _, sut_authorize_explicit,
-              [_, Username, ExplicitGroups, Permission, Resource]}, Result) ->
+postcondition(
+    S,
+    {call, _, sut_authorize_explicit, [
+        _, Username, ExplicitGroups, Permission, Resource
+    ]},
+    Result
+) ->
     %% For explicit groups, effective grants come from those groups
     %% (after normalization) + 'all' group + direct user grants.
     NormGroups = [string:casefold(G) || G <- ExplicitGroups],
@@ -555,66 +581,47 @@ postcondition(S, {call, _, sut_authorize_explicit,
             ct:pal("UNEXPECTED RESULT (explicit): ~p", [Result]),
             false
     end;
-
 postcondition(_S, {call, _, sut_add_group, _}, {ok, _}) ->
     true;
-
 postcondition(_S, {call, _, sut_add_group, _}, Result) ->
     ct:pal("add_group unexpected: ~p", [Result]),
     false;
-
 postcondition(_S, {call, _, sut_add_user, _}, {ok, _}) ->
     true;
-
 postcondition(_S, {call, _, sut_add_user, _}, Result) ->
     ct:pal("add_user unexpected: ~p", [Result]),
     false;
-
 postcondition(_S, {call, _, sut_grant, _}, ok) ->
     true;
-
 postcondition(_S, {call, _, sut_grant, _}, Result) ->
     ct:pal("grant unexpected: ~p", [Result]),
     false;
-
 postcondition(_S, {call, _, sut_revoke, _}, ok) ->
     true;
-
 postcondition(_S, {call, _, sut_revoke, _}, Result) ->
     ct:pal("revoke unexpected: ~p", [Result]),
     false;
-
 postcondition(_S, {call, _, sut_add_user_to_group, _}, ok) ->
     true;
-
 postcondition(_S, {call, _, sut_add_user_to_group, _}, Result) ->
     ct:pal("add_user_to_group unexpected: ~p", [Result]),
     false;
-
 postcondition(_S, {call, _, sut_remove_group, _}, ok) ->
     true;
-
 postcondition(_S, {call, _, sut_remove_group, _}, Result) ->
     ct:pal("remove_group unexpected: ~p", [Result]),
     false;
-
 postcondition(_S, {call, _, sut_remove_user, _}, ok) ->
     true;
-
 postcondition(_S, {call, _, sut_remove_user, _}, Result) ->
     ct:pal("remove_user unexpected: ~p", [Result]),
     false;
-
 postcondition(_, _, _) ->
     true.
-
-
 
 %% =============================================================================
 %% MODEL FUNCTIONS (PURE)
 %% =============================================================================
-
-
 
 %% @private
 role_exists(<<"all">>, _S) ->
@@ -622,7 +629,6 @@ role_exists(<<"all">>, _S) ->
 role_exists(RoleName, #model{users = Users, groups = Groups}) ->
     NR = string:casefold(RoleName),
     maps:is_key(NR, Users) orelse maps:is_key(NR, Groups).
-
 
 %% @private
 model_role_key(<<"all">>, _S) ->
@@ -634,22 +640,18 @@ model_role_key(RoleName, #model{users = Users}) ->
         false -> {group, NR}
     end.
 
-
 %% @private
 normalize_resource(any) -> any;
 normalize_resource({Uri, Strategy}) -> {Uri, Strategy}.
-
 
 %% @doc Compute transitive closure of group membership.
 %% Returns all groups reachable from the given seed group names.
 model_resolve_groups(GroupNames, GroupsMap) ->
     model_resolve_groups(GroupNames, GroupsMap, sets:new([{version, 2}])).
 
-
 %% @private
 model_resolve_groups([], _GroupsMap, Seen) ->
     sets:to_list(Seen);
-
 model_resolve_groups([Name | Rest], GroupsMap, Seen) ->
     case sets:is_element(Name, Seen) of
         true ->
@@ -659,7 +661,6 @@ model_resolve_groups([Name | Rest], GroupsMap, Seen) ->
             Parents = maps:get(Name, GroupsMap, []),
             model_resolve_groups(Parents ++ Rest, GroupsMap, NewSeen)
     end.
-
 
 %% @doc Compute the full set of effective grants for a user.
 %%
@@ -691,7 +692,6 @@ model_effective_grants(Username, #model{
     UserGrants = maps:get({user, Username}, Grants, #{}),
     merge_grant_maps(GroupGrantsAcc, UserGrants).
 
-
 %% @private
 merge_grant_maps(Map1, Map2) ->
     maps:fold(
@@ -702,7 +702,6 @@ merge_grant_maps(Map1, Map2) ->
         Map1,
         Map2
     ).
-
 
 %% @doc Compute effective grants for explicit group memberships (get_context/3).
 %% Uses the provided groups instead of the user's stored groups.
@@ -730,7 +729,6 @@ model_effective_grants_explicit(Username, ExplicitGroups, #model{
     UserGrants = maps:get({user, Username}, Grants, #{}),
     merge_grant_maps(GroupGrantsAcc, UserGrants).
 
-
 %% @doc Check if a permission is authorized given the effective grants.
 model_authorize(Permission, Resource, EffectiveGrants) ->
     maps:fold(
@@ -738,13 +736,12 @@ model_authorize(Permission, Resource, EffectiveGrants) ->
             (_, _, true) ->
                 true;
             (GrantResource, Perms, false) ->
-                grant_resource_matches(Resource, GrantResource)
-                andalso lists:member(Permission, Perms)
+                grant_resource_matches(Resource, GrantResource) andalso
+                    lists:member(Permission, Perms)
         end,
         false,
         EffectiveGrants
     ).
-
 
 %% @private
 %% Does a grant on GrantResource cover an authorization check for Resource?
@@ -760,13 +757,9 @@ grant_resource_matches(Resource, {Uri, Strategy}) when is_binary(Resource) ->
 grant_resource_matches(_, _) ->
     false.
 
-
-
 %% =============================================================================
 %% SUT WRAPPERS
 %% =============================================================================
-
-
 
 sut_add_group(RealmUri, {Name, Parents}) ->
     Group = bondy_rbac_group:new(#{
@@ -776,7 +769,6 @@ sut_add_group(RealmUri, {Name, Parents}) ->
     }),
     bondy_rbac_group:add(RealmUri, Group).
 
-
 sut_add_user(RealmUri, {Username, Groups}) ->
     User = bondy_rbac_user:new(#{
         username => Username,
@@ -785,18 +777,15 @@ sut_add_user(RealmUri, {Username, Groups}) ->
     }),
     bondy_rbac_user:add(RealmUri, User).
 
-
 sut_grant(RealmUri, RoleName, Resource, Permissions) ->
     UniquePerms = lists:usort(Permissions),
     GrantData = grant_request_data(RoleName, Resource, UniquePerms),
     bondy_rbac:grant(RealmUri, GrantData).
 
-
 sut_revoke(RealmUri, RoleName, Resource, Permissions) ->
     UniquePerms = lists:usort(Permissions),
     GrantData = grant_request_data(RoleName, Resource, UniquePerms),
     bondy_rbac:revoke(RealmUri, GrantData).
-
 
 sut_authorize(RealmUri, Username, Permission, Resource) ->
     Ctxt = bondy_rbac:get_context(RealmUri, Username),
@@ -807,8 +796,9 @@ sut_authorize(RealmUri, Username, Permission, Resource) ->
         error:{not_authorized, _} -> denied
     end.
 
-
-sut_authorize_explicit(RealmUri, Username, ExplicitGroups, Permission, Resource) ->
+sut_authorize_explicit(
+    RealmUri, Username, ExplicitGroups, Permission, Resource
+) ->
     Ctxt = bondy_rbac:get_context(RealmUri, Username, ExplicitGroups),
     try
         ok = bondy_rbac:authorize(Permission, Resource, Ctxt),
@@ -817,25 +807,22 @@ sut_authorize_explicit(RealmUri, Username, ExplicitGroups, Permission, Resource)
         error:{not_authorized, _} -> denied
     end.
 
-
 sut_add_user_to_group(RealmUri, Username, GroupName) ->
     bondy_rbac_user:add_groups(RealmUri, Username, [GroupName]).
-
 
 sut_remove_group(RealmUri, Name) ->
     bondy_rbac_group:remove(RealmUri, Name).
 
-
 sut_remove_user(RealmUri, Username) ->
     bondy_rbac_user:remove(RealmUri, Username).
 
-
 %% @private
 grant_request_data(RoleName, Resource, Permissions) ->
-    RolesVal = case RoleName of
-        <<"all">> -> <<"all">>;
-        _ -> [RoleName]
-    end,
+    RolesVal =
+        case RoleName of
+            <<"all">> -> <<"all">>;
+            _ -> [RoleName]
+        end,
     Base = #{
         <<"permissions">> => Permissions,
         <<"roles">> => RolesVal
@@ -847,13 +834,9 @@ grant_request_data(RoleName, Resource, Permissions) ->
             Base#{<<"uri">> => Uri, <<"match">> => Strategy}
     end.
 
-
-
 %% =============================================================================
 %% STATEFUL PROPERTY
 %% =============================================================================
-
-
 
 prop_rbac_statem(_Config) ->
     ensure_realm(?REALM),
@@ -878,19 +861,17 @@ prop_rbac_statem(_Config) ->
             )
         end
     ),
-    ?assert(proper:quickcheck(Prop, [
-        {numtests, ?STATEM_NUMTESTS},
-        {max_size, ?MAX_CMDS},
-        quiet
-    ])).
-
-
+    ?assert(
+        proper:quickcheck(Prop, [
+            {numtests, ?STATEM_NUMTESTS},
+            {max_size, ?MAX_CMDS},
+            quiet
+        ])
+    ).
 
 %% =============================================================================
 %% STANDALONE FORALL PROPERTIES
 %% =============================================================================
-
-
 
 %% @doc Normalization transparency: authorization decisions must be identical
 %% regardless of the case used for role names during grant operations.
@@ -913,8 +894,12 @@ prop_normalization_transparency(_Config) ->
                 security_enabled => true,
                 authmethods => [?TRUST_AUTH],
                 groups => [#{name => LowerGroup}],
-                users => [#{username => LowerUser,
-                            groups => [LowerGroup]}]
+                users => [
+                    #{
+                        username => LowerUser,
+                        groups => [LowerGroup]
+                    }
+                ]
             }),
 
             %% Grant using a mixed-case group name
@@ -945,10 +930,11 @@ prop_normalization_transparency(_Config) ->
             lists:all(fun(R) -> R end, Results)
         end
     ),
-    ?assert(proper:quickcheck(Prop, [
-        {numtests, ?FORALL_NUMTESTS}, quiet
-    ])).
-
+    ?assert(
+        proper:quickcheck(Prop, [
+            {numtests, ?FORALL_NUMTESTS}, quiet
+        ])
+    ).
 
 %% @doc Grant monotonicity: adding a grant never removes existing permissions.
 prop_grant_monotonicity(_Config) ->
@@ -967,8 +953,12 @@ prop_grant_monotonicity(_Config) ->
                 security_enabled => true,
                 authmethods => [?TRUST_AUTH],
                 groups => [#{name => GroupName}],
-                users => [#{username => Username,
-                            groups => [GroupName]}]
+                users => [
+                    #{
+                        username => Username,
+                        groups => [GroupName]
+                    }
+                ]
             }),
 
             GrantBase = #{
@@ -992,7 +982,7 @@ prop_grant_monotonicity(_Config) ->
                 catch
                     error:{not_authorized, _} -> false
                 end
-                || P <- P1
+             || P <- P1
             ],
 
             %% Grant additional permissions
@@ -1010,7 +1000,7 @@ prop_grant_monotonicity(_Config) ->
                 catch
                     error:{not_authorized, _} -> false
                 end
-                || P <- P1
+             || P <- P1
             ],
 
             %% Everything authorized before must still be authorized
@@ -1020,10 +1010,11 @@ prop_grant_monotonicity(_Config) ->
             )
         end
     ),
-    ?assert(proper:quickcheck(Prop, [
-        {numtests, ?FORALL_NUMTESTS}, quiet
-    ])).
-
+    ?assert(
+        proper:quickcheck(Prop, [
+            {numtests, ?FORALL_NUMTESTS}, quiet
+        ])
+    ).
 
 %% @doc 'all' group universality: permissions granted to 'all' apply to every
 %% user in the realm.
@@ -1036,7 +1027,7 @@ prop_all_group_universality(_Config) ->
             RealmUri = make_realm_uri(<<"allg">>),
             UserNames = [
                 <<"allg_u_", (integer_to_binary(I))/binary>>
-                || I <- lists:seq(1, UserCount)
+             || I <- lists:seq(1, UserCount)
             ],
 
             _ = bondy_realm:create(#{
@@ -1076,10 +1067,11 @@ prop_all_group_universality(_Config) ->
             )
         end
     ),
-    ?assert(proper:quickcheck(Prop, [
-        {numtests, ?FORALL_NUMTESTS}, quiet
-    ])).
-
+    ?assert(
+        proper:quickcheck(Prop, [
+            {numtests, ?FORALL_NUMTESTS}, quiet
+        ])
+    ).
 
 %% @doc Prototype inheritance: child realm inherits prototype grants;
 %% overriding a group in the child shadows the prototype group completely.
@@ -1090,10 +1082,8 @@ prop_prototype_inheritance(_Config) ->
         begin
             UniquePerms = lists:usort(Perms),
             N = erlang:unique_integer([positive]),
-            ProtoUri = <<"com.test.proto.",
-                         (integer_to_binary(N))/binary>>,
-            ChildUri = <<"com.test.child.",
-                         (integer_to_binary(N))/binary>>,
+            ProtoUri = <<"com.test.proto.", (integer_to_binary(N))/binary>>,
+            ChildUri = <<"com.test.child.", (integer_to_binary(N))/binary>>,
 
             %% Create prototype with a group and grant
             _ = bondy_realm:create(#{
@@ -1117,8 +1107,12 @@ prop_prototype_inheritance(_Config) ->
                 prototype_uri => ProtoUri,
                 security_enabled => true,
                 authmethods => [?TRUST_AUTH],
-                users => [#{username => <<"proto_user">>,
-                            groups => [<<"inherited_grp">>]}]
+                users => [
+                    #{
+                        username => <<"proto_user">>,
+                        groups => [<<"inherited_grp">>]
+                    }
+                ]
             }),
 
             %% User should have inherited permissions
@@ -1138,8 +1132,10 @@ prop_prototype_inheritance(_Config) ->
             ),
 
             %% Override the group in child realm (with no grants)
-            _ = bondy_rbac_group:add(ChildUri,
-                bondy_rbac_group:new(#{name => <<"inherited_grp">>})),
+            _ = bondy_rbac_group:add(
+                ChildUri,
+                bondy_rbac_group:new(#{name => <<"inherited_grp">>})
+            ),
 
             %% After override, inherited permissions should be gone
             C2 = bondy_rbac:get_context(ChildUri, <<"proto_user">>),
@@ -1160,10 +1156,11 @@ prop_prototype_inheritance(_Config) ->
             InheritedOk andalso OverrideOk
         end
     ),
-    ?assert(proper:quickcheck(Prop, [
-        {numtests, 20}, quiet
-    ])).
-
+    ?assert(
+        proper:quickcheck(Prop, [
+            {numtests, 20}, quiet
+        ])
+    ).
 
 %% @doc Explicit groups normalization: get_context/3 with mixed-case explicit
 %% group names must produce the same authorization as with normalized names.
@@ -1207,7 +1204,7 @@ prop_explicit_groups_normalization(_Config) ->
                 catch
                     error:{not_authorized, _} -> false
                 end
-                || P <- UniquePerms
+             || P <- UniquePerms
             ],
 
             %% Context with mixed-case group name
@@ -1223,36 +1220,33 @@ prop_explicit_groups_normalization(_Config) ->
                 catch
                     error:{not_authorized, _} -> false
                 end
-                || P <- UniquePerms
+             || P <- UniquePerms
             ],
 
             %% Both must give identical results
             R1 =:= R2
         end
     ),
-    ?assert(proper:quickcheck(Prop, [
-        {numtests, ?FORALL_NUMTESTS}, quiet
-    ])).
-
-
+    ?assert(
+        proper:quickcheck(Prop, [
+            {numtests, ?FORALL_NUMTESTS}, quiet
+        ])
+    ).
 
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
 
-
-
 %% @private
 make_realm_uri(Prefix) ->
     N = erlang:unique_integer([positive]),
-    <<"com.test.proper.", Prefix/binary, ".",
-      (integer_to_binary(N))/binary>>.
-
+    <<"com.test.proper.", Prefix/binary, ".", (integer_to_binary(N))/binary>>.
 
 %% @private
 ensure_realm(RealmUri) ->
     case bondy_realm:exists(RealmUri) of
-        true -> ok;
+        true ->
+            ok;
         false ->
             _ = bondy_realm:create(#{
                 uri => RealmUri,
@@ -1261,7 +1255,6 @@ ensure_realm(RealmUri) ->
             }),
             ok
     end.
-
 
 %% @private
 cleanup_realm(RealmUri) ->
@@ -1274,7 +1267,11 @@ cleanup_realm(RealmUri) ->
                 RealmUri, bondy_rbac_user:username(User)
             )
         end,
-        try bondy_rbac_user:list(RealmUri) catch _:_ -> [] end
+        try
+            bondy_rbac_user:list(RealmUri)
+        catch
+            _:_ -> []
+        end
     ),
     %% Remove all custom groups
     lists:foreach(
@@ -1283,10 +1280,13 @@ cleanup_realm(RealmUri) ->
                 RealmUri, bondy_rbac_group:name(Group)
             )
         end,
-        try bondy_rbac_group:list(RealmUri) catch _:_ -> [] end
+        try
+            bondy_rbac_group:list(RealmUri)
+        catch
+            _:_ -> []
+        end
     ),
     ok.
-
 
 %% @private
 apply_case_style(upper, Bin) ->

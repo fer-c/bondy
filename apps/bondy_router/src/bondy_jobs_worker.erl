@@ -17,17 +17,15 @@ for asynchronous Bondy jobs.
 -define(QUEUE_NAME(Index), {?MODULE, Index, queue}).
 
 -record(state, {
-    index               :: integer(),
-    queue               :: {?MODULE, pos_integer(), queue}
+    index :: integer(),
+    queue :: {?MODULE, pos_integer(), queue}
 }).
-
 
 %% API
 -export([enqueue/2]).
 -export([pick_queue/1]).
 -export([pick_worker/1]).
 -export([start_link/1]).
-
 
 %% GEN_SERVER CALLBACKS
 -export([code_change/3]).
@@ -38,18 +36,13 @@ for asynchronous Bondy jobs.
 -export([init/1]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link(Index) ->
     ServerName = {via, gproc, bondy_gproc:local_name(?SERVER_NAME(Index))},
     gen_server:start_link(ServerName, ?MODULE, [?JOBS_POOLNAME, Index], []).
-
 
 -spec pick_queue(Value :: any()) -> Name :: any() | false.
 
@@ -59,27 +52,19 @@ pick_queue(PartitionKey) ->
     ),
     ?QUEUE_NAME(Index).
 
-
 -spec pick_worker(RealmUri :: binary()) -> pid().
 
 pick_worker(RealmUri) when is_binary(RealmUri) ->
     gproc_pool:pick_worker(?JOBS_POOLNAME, RealmUri).
-
-
 
 -spec enqueue(Fun :: function(), PartitionKey :: any()) -> ok | {error, any()}.
 
 enqueue(Fun, PartitionKey) when is_function(Fun, 0) ->
     jobs:enqueue(pick_queue(PartitionKey), Fun).
 
-
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init([PoolName, Index]) ->
     %% We create a dedicated jobs queue for the worker
@@ -90,9 +75,10 @@ init([PoolName, Index]) ->
     ),
     QOpts = [
         {type, {passive, fifo}},
-        {max_time, bondy_config:get(
-            [job_manager_queue, ttl], timer:minutes(1))
-        },
+        {max_time,
+            bondy_config:get(
+                [job_manager_queue, ttl], timer:minutes(1)
+            )},
         {max_size, MaxSize},
         {link, self()}
     ],
@@ -106,7 +92,6 @@ init([PoolName, Index]) ->
     State = #state{index = Index, queue = Queue},
     {ok, State, {continue, dequeue}}.
 
-
 handle_continue(dequeue, State) ->
     %% This will block the server until there is at least 1 job
     Jobs = jobs:dequeue(State#state.queue, 10),
@@ -114,7 +99,6 @@ handle_continue(dequeue, State) ->
     %% We wait 10 msecs just for the server to consume any inbox message
     Timeout = 10,
     {noreply, State, Timeout}.
-
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -124,7 +108,6 @@ handle_call(Event, From, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State, {continue, dequeue}}.
 
-
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -132,10 +115,8 @@ handle_cast(Event, State) ->
     }),
     {noreply, State, {continue, dequeue}}.
 
-
 handle_info(timeout, State) ->
     {noreply, State, {continue, dequeue}};
-
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
         reason => unexpected_event,
@@ -143,52 +124,35 @@ handle_info(Info, State) ->
     }),
     {noreply, State, {continue, dequeue}}.
 
-
 terminate(normal, _State) ->
     ok;
-
 terminate(shutdown, _State) ->
     ok;
-
 terminate({shutdown, _}, _State) ->
     ok;
-
 terminate(_Reason, _State) ->
     %% TODO publish metaevent
     ok.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
 safe_execute([Fun | Funs]) ->
     try
         Fun()
     catch
-      Class:Reason:Stacktrace ->
-        ?LOG_ERROR(#{
-            description => "Failed while executing job",
-            class => Class,
-            reason => Reason,
-            stacktrace => Stacktrace
-        })
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Failed while executing job",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
     end,
     safe_execute(Funs);
-
 safe_execute([]) ->
     ok.
-
-
-
-
-
-
-

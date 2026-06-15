@@ -68,9 +68,9 @@ authorization still enforced). See `bondy_connect_local_handler`.
 -define(LOCAL_PEER, {{127, 0, 0, 1}, 0}).
 
 -record(state, {
-    handler             ::  module(),
-    session             ::  term(),
-    welcome             ::  bondy_wamp_message:t()
+    handler :: module(),
+    session :: term(),
+    welcome :: bondy_wamp_message:t()
 }).
 
 %% Handler registry / availability
@@ -93,13 +93,9 @@ authorization still enforced). See `bondy_connect_local_handler`.
 -export([peername/1]).
 -export([close/1]).
 
-
-
 %% =============================================================================
 %% HANDLER BEHAVIOUR — implemented by the router app (e.g. bondy)
 %% =============================================================================
-
-
 
 -doc """
 Open an in-VM session for `RealmUri` with the client's `Roles`, returning an
@@ -108,7 +104,8 @@ MUST run in (and target replies at) the calling process — the connection — s
 router deliveries land in its mailbox.
 """.
 -callback open(RealmUri :: binary(), Roles :: map(), Opts :: map()) ->
-    {ok, Session :: term(), Welcome :: bondy_wamp_message:t()} | {error, term()}.
+    {ok, Session :: term(), Welcome :: bondy_wamp_message:t()}
+    | {error, term()}.
 
 -doc """
 Forward an outbound WAMP record to the router. Replies normally arrive
@@ -130,13 +127,9 @@ where the router's mailbox-tag shape is owned, keeping it out of
 -doc "Close the in-VM session (tearing down its registrations/subscriptions).".
 -callback close(Session :: term()) -> ok.
 
-
-
 %% =============================================================================
 %% HANDLER REGISTRY
 %% =============================================================================
-
-
 
 -doc """
 Register the singleton router-adapter handler (called by the router app at
@@ -147,38 +140,32 @@ register_handler(Mod) when is_atom(Mod) ->
     persistent_term:put(?PT_KEY, Mod),
     ok.
 
-
 -doc "Remove the registered handler (the local transport becomes unavailable).".
 -spec unregister_handler() -> ok.
 unregister_handler() ->
     _ = persistent_term:erase(?PT_KEY),
     ok.
 
-
 -doc "The registered handler module, or `undefined` if none.".
 -spec handler() -> module() | undefined.
 handler() ->
     persistent_term:get(?PT_KEY, undefined).
-
 
 -doc "Whether the in-VM transport is available on this node.".
 -spec is_available() -> boolean().
 is_available() ->
     handler() =/= undefined.
 
-
-
 %% =============================================================================
 %% bondy_connect_transport CALLBACKS
 %% =============================================================================
 
-
-
 -spec connect(bondy_connect_transport:endpoint() | local | undefined, map()) ->
     {ok, #state{}} | {error, term()}.
 
-connect(Endpoint, Opts)
-when Endpoint == local; Endpoint == undefined; element(1, Endpoint) == router ->
+connect(Endpoint, Opts) when
+    Endpoint == local; Endpoint == undefined; element(1, Endpoint) == router
+->
     case handler() of
         undefined ->
             {error, local_transport_unavailable};
@@ -190,10 +177,8 @@ when Endpoint == local; Endpoint == undefined; element(1, Endpoint) == router ->
                     {error, missing_realm}
             end
     end;
-
 connect(Endpoint, _Opts) ->
     {error, {unsupported_endpoint, Endpoint}}.
-
 
 -spec handshake(bondy_connect_transport:subprotocol(), #state{}) ->
     {ok, bondy_connect_transport:subprotocol(), #state{}} | {error, term()}.
@@ -203,22 +188,18 @@ connect(Endpoint, _Opts) ->
 handshake(_Sub, #state{} = St) ->
     {ok, {raw, binary, erl}, St}.
 
-
 -spec send(bondy_wamp_message:t(), #state{}) -> ok | {error, term()}.
 
 %% The connection's HELLO: the session is already open (connect/2), so answer
 %% locally by delivering the synthesized WELCOME to the connection mailbox.
 send(#hello{}, #state{welcome = Welcome} = St) ->
     deliver(Welcome, St);
-
 %% A client GOODBYE/ABORT: nothing to forward — the session is closed in
 %% `close/1' (which also tears down its registrations/subscriptions).
 send(#goodbye{}, #state{}) ->
     ok;
-
 send(#abort{}, #state{}) ->
     ok;
-
 %% Any other WAMP record is forwarded to the router via the handler. Replies
 %% arrive asynchronously in the connection mailbox (see handle_info/2).
 send(Msg, #state{handler = Mod, session = Session} = St) ->
@@ -231,7 +212,6 @@ send(Msg, #state{handler = Mod, session = Session} = St) ->
             Error
     end.
 
-
 -spec ping(binary(), #state{}) -> ok | {error, term()}.
 
 %% In-VM keepalive is meaningless, but answer ourselves so the connection
@@ -239,12 +219,10 @@ send(Msg, #state{handler = Mod, session = Session} = St) ->
 ping(Payload, #state{} = St) ->
     deliver({pong, Payload}, St).
 
-
 -spec pong(binary(), #state{}) -> ok | {error, term()}.
 
 pong(_Payload, #state{}) ->
     ok.
-
 
 -spec recv(timeout(), #state{}) ->
     {ok, [bondy_connect_transport:inbound()], #state{}} | {error, term()}.
@@ -263,7 +241,6 @@ recv(Timeout, #state{handler = Mod, session = Session} = St) ->
         {error, timeout}
     end.
 
-
 -spec handle_data(binary(), #state{}) ->
     {ok, [bondy_connect_transport:inbound()], #state{}}
     | {error, term(), #state{}}.
@@ -271,7 +248,6 @@ recv(Timeout, #state{handler = Mod, session = Session} = St) ->
 %% There is no byte stream in-VM; nothing to decode.
 handle_data(_Data, #state{} = St) ->
     {ok, [], St}.
-
 
 -spec handle_info(term(), #state{}) ->
     {ok, [bondy_connect_transport:inbound()], #state{}}
@@ -282,7 +258,6 @@ handle_data(_Data, #state{} = St) ->
 %% Our own self-delivered records (synthesized WELCOME, keepalive pong).
 handle_info({?LOCAL_MSG, M}, #state{} = St) ->
     {ok, [M], St};
-
 %% Anything else is interpreted by the handler (it owns the router's tag shape).
 handle_info(Info, #state{handler = Mod, session = Session} = St) ->
     case Mod:handle_info(Info, Session) of
@@ -290,24 +265,20 @@ handle_info(Info, #state{handler = Mod, session = Session} = St) ->
         ignore -> ignore
     end.
 
-
 -spec setopts(list() | map(), #state{}) -> ok | {error, term()}.
 
 %% No socket to configure; the active `{active, once}' cycle does not apply.
 setopts(_Opts, #state{}) ->
     ok.
 
-
 -spec messages() -> {atom(), atom(), atom()}.
 messages() ->
     {?LOCAL_MSG, '$bondy_connect_local_closed', '$bondy_connect_local_error'}.
-
 
 -spec peername(#state{}) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
 peername(#state{}) ->
     {ok, ?LOCAL_PEER}.
-
 
 -spec close(#state{}) -> ok.
 close(#state{handler = undefined}) ->
@@ -316,13 +287,9 @@ close(#state{handler = Mod, session = Session}) ->
     _ = catch Mod:close(Session),
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 open(Mod, RealmUri, Opts) ->
@@ -333,7 +300,6 @@ open(Mod, RealmUri, Opts) ->
         {error, _} = Error ->
             Error
     end.
-
 
 %% @private Self-deliver an inbound record to the connection mailbox so
 %% handle_info/2 turns it into an inbound record (used for the synthesized

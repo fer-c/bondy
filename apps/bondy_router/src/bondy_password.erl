@@ -61,28 +61,27 @@ At the moment this module supports two protocols:
     }
 }).
 
-
 -define(VERSION, <<"1.2">>).
--type future()          ::  fun((opts()) -> t()).
--type t()               ::  #{
-                                type := password,
-                                version := binary(),
-                                protocol := protocol(),
-                                params := params(),
-                                data := data()
-                            }.
--type protocol()        ::  cra | scram.
--type params()          ::  bondy_password_cra:params()
-                            | bondy_password_scram:params().
--type data()            ::  bondy_password_cra:data()
-                            | bondy_password_scram:data().
--type opts()            ::  #{protocol := protocol(), params := params()}.
-
+-type future() :: fun((opts()) -> t()).
+-type t() :: #{
+    type := password,
+    version := binary(),
+    protocol := protocol(),
+    params := params(),
+    data := data()
+}.
+-type protocol() :: cra | scram.
+-type params() ::
+    bondy_password_cra:params()
+    | bondy_password_scram:params().
+-type data() ::
+    bondy_password_cra:data()
+    | bondy_password_scram:data().
+-type opts() :: #{protocol := protocol(), params := params()}.
 
 -export_type([t/0]).
 -export_type([future/0]).
 -export_type([opts/0]).
-
 
 -export([data/1]).
 -export([default_opts/0]).
@@ -102,13 +101,9 @@ At the moment this module supports two protocols:
 
 -on_load(on_load/0).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Creates a functional object that takes a single argument `Opts :: opts()` that
@@ -136,7 +131,6 @@ future(Password) when is_binary(Password) ->
     ok = validate_string(Password),
     fun(Opts) -> new(Password, Opts) end.
 
-
 -doc """
 Hash a plaintext password `Password` and the protocol and protocol params
 defined in options `Opts`, returning `t()`.
@@ -148,7 +142,6 @@ size of 256 bytes, otherwise fails with error `invalid_password`.
 
 new(Future, Opts) when is_function(Future, 1), is_map(Opts) ->
     Future(Opts);
-
 new(Password, Opts0) when is_binary(Password), is_map(Opts0) ->
     ok = validate_string(Password),
 
@@ -163,7 +156,6 @@ new(Password, Opts0) when is_binary(Password), is_map(Opts0) ->
             new_scram(Password, Params)
     end.
 
-
 -doc """
 Returns a new password object from `String` applying the same protocol and
 params found in password `PWD`.
@@ -177,13 +169,11 @@ replace(Password, PWD) ->
 
     new(Password, #{protocol => Protocol, params => Params}).
 
-
 -spec default_opts() -> opts().
 
 default_opts() ->
     Protocol = bondy_config:get([security, password, protocol]),
     default_opts(Protocol).
-
 
 -spec default_opts(protocol()) -> opts().
 
@@ -193,99 +183,75 @@ default_opts(Protocol) ->
     Params = maps:put(kdf, KDF, KDFOpts),
     #{protocol => Protocol, params => Params}.
 
-
 -spec opts_validator() -> map().
 
 opts_validator() ->
     ?OPTS_VALIDATOR.
 
-
 -spec is_type(t()) -> boolean().
 
 is_type(#{type := password}) ->
     true;
-
 is_type(_) ->
     false.
-
 
 -spec protocol(t()) -> protocol() | undefined.
 
 protocol(#{type := password, version := ?VERSION, protocol := Value}) ->
     Value;
-
 protocol(#{version := <<"1.0">>}) ->
     cra;
-
 protocol(#{version := <<"1.1">>}) ->
     cra;
-
 protocol(_) ->
     undefined.
-
 
 -spec params(t()) -> params().
 
 params(#{version := ?VERSION, params := Value}) ->
     Value.
 
-
 -spec data(t()) -> data().
 
 data(#{version := ?VERSION, data := Value}) ->
     Value.
-
 
 -spec hash_length(t()) -> pos_integer().
 
 hash_length(#{version := <<"1.0">>, hash_pass := Val}) ->
     %% hash_pass is hex formatted, so two chars per original char
     trunc(byte_size(Val) / 2);
-
 hash_length(#{version := <<"1.1">>, hash_len := Val}) ->
     Val;
-
 hash_length(#{version := ?VERSION, params := #{hash_length := Val}}) ->
     Val;
-
 hash_length(#{} = PW) ->
     hash_length(maybe_add_version(PW)).
-
-
 
 -spec from_term(Term :: proplist:proplist() | map()) -> t().
 
 from_term(Term) when is_list(Term) ->
     maybe_add_version(maps:from_list(Term));
-
 from_term(Term) when is_map(Term) ->
     maybe_add_version(Term).
-
-
 
 -spec verify_hash(Hash :: binary(), Password :: t()) -> boolean().
 
 verify_hash(_Hash, #{version := ?VERSION, protocol := scram} = _PW) ->
     error(not_implemented);
-
 verify_hash(Hash, #{version := ?VERSION, protocol := cra} = PW) ->
     Salted = maps_utils:get_path([data, salted_password], PW),
     crypto:hash_equals(Hash, Salted);
-
 verify_hash(Hash, #{version := <<"1.1">>} = PW) ->
     #{hash_pass := Salted} = PW,
     %% Stored Salted is base64 encoded in 1.1
     crypto:hash_equals(Hash, Salted);
-
 verify_hash(Hash, #{version := <<"1.0">>} = PW) when is_binary(Hash) ->
     #{hash_pass := Salted} = PW,
     %% in version 1.0 the stored hash is hex encoded
     crypto:hash_equals(Hash, hex_utils:hexstr_to_bin(Salted));
-
 verify_hash(Hash, #{} = PW) ->
     verify_string(Hash, add_version(PW)).
-
-
 
 -spec verify_string(String :: binary(), Password :: t()) -> boolean().
 
@@ -296,7 +262,6 @@ verify_string(String, #{version := ?VERSION, protocol := scram} = PW) ->
     } = PW,
 
     bondy_password_scram:verify_string(String, Data, Params);
-
 verify_string(String, #{version := ?VERSION, protocol := cra} = PW) ->
     #{
         data := Data,
@@ -304,7 +269,6 @@ verify_string(String, #{version := ?VERSION, protocol := cra} = PW) ->
     } = PW,
 
     bondy_password_cra:verify_string(String, Data, Params);
-
 verify_string(String, #{version := <<"1.1">>} = PW) ->
     #{
         hash_pass := Salted,
@@ -319,7 +283,6 @@ verify_string(String, #{version := <<"1.1">>} = PW) ->
 
     %% Stored Salted is base64 encoded in 1.1
     crypto:hash_equals(Salted, base64:encode(Hash));
-
 verify_string(String, #{version := <<"1.0">>} = PW) ->
     #{
         hash_pass := Salted,
@@ -331,26 +294,22 @@ verify_string(String, #{version := <<"1.0">>} = PW) ->
     Hash = crypto:pbkdf2_hmac(HashFun, String, Salt, HashIter, HashLen),
     %% in version 1.0 the stored hash is hex encoded
     crypto:hash_equals(Hash, hex_utils:hexstr_to_bin(Salted));
-
 %% to handle the error: reason=function_clause
 %% example: [{bondy_password,verify_string,[<<\"Nes 2907\">>,[{hash_pass,<<\"adcebee9a2cbbe4e26c340f95da646a1ab60c676\">>},{auth_name,pbkdf2},{hash_func,sha},{salt,<<76,202,0,27,196,167,217,222,194,142,96,185,219,169,96,233>>},{iterations,65536}]]
 verify_string(Hash, PWList) when is_list(PWList) ->
     verify_string(Hash, maps:from_list(PWList));
-
 verify_string(Hash, #{} = PW) ->
     verify_string(Hash, add_version(PW)).
 
-
 -spec upgrade(
-    String :: tuple() | binary(), T0 :: map() | proplists:proplist()) ->
+    String :: tuple() | binary(), T0 :: map() | proplists:proplist()
+) ->
     {true, T1 :: t()} | false.
 
 upgrade(Term, BP) when is_list(BP) ->
     upgrade(Term, from_term(BP));
-
 upgrade(_, #{version := ?VERSION}) ->
     false;
-
 upgrade(Term, #{version := Version} = BP) ->
     case do_upgrade(Term, BP) of
         #{version := Version} ->
@@ -359,14 +318,9 @@ upgrade(Term, #{version := Version} = BP) ->
             {true, NewBP}
     end.
 
-
-
-
-
 %% =============================================================================
 %% PRIVATE: MIGRATIONS
 %% =============================================================================
-
 
 %% @private
 on_load() ->
@@ -380,31 +334,23 @@ on_load() ->
     ok = persistent_term:put({?MODULE, regex}, Regex),
     ok.
 
-
 %% @private
 maybe_add_version(#{version := _} = Pass) ->
     Pass;
-
 maybe_add_version(#{} = Pass) ->
     add_version(Pass).
-
 
 %% @private
 add_version(#{} = Pass) ->
     %% Version 1.0 was implicit, we make it explicit so that we can upgrade
     maps:put(version, <<"1.0">>, Pass).
 
-
-
-
 do_upgrade(_, #{version := ?VERSION} = Pass) ->
     %% We finished upgrading to latest version
     Pass;
-
 do_upgrade({hash, _}, #{version := <<"1.0">>} = Pass) ->
     %% We need the original password to be able to upgrade to 1.1
     Pass;
-
 do_upgrade({hash, SPassword}, #{version := <<"1.1">>} = Pass0) ->
     %% TODO check if we need to base64:decode
     #{
@@ -431,7 +377,6 @@ do_upgrade({hash, SPassword}, #{version := <<"1.1">>} = Pass0) ->
         }
     },
     do_upgrade({hash, SPassword}, Pass1);
-
 do_upgrade(String, #{version := Version} = Pass0) when is_binary(String) ->
     %% TODO check password here and fail with error(bad_signature).
     %% We should be doing this on authentication to avoid checking twice
@@ -442,33 +387,25 @@ do_upgrade(String, #{version := Version} = Pass0) when is_binary(String) ->
     case UpgradeProtocol of
         true ->
             do_upgrade(String, new(String, default_opts()));
-
         false when Version =:= <<"1.0">> ->
             do_upgrade(String, new(String, #{protocol => cra}));
-
         false when Version =:= <<"1.1">> ->
             SPassword = maps:get(hash_pass, Pass0),
             do_upgrade({hash, SPassword}, Pass0)
     end;
-
 do_upgrade(String, #{} = Pass) when is_binary(String) ->
     %% In version 1.0, we had no 'version' property, so we add it
     %% and continue with upgrade recursively.
     do_upgrade(String, add_version(Pass));
-
 do_upgrade(String, Pass) when is_binary(String) andalso is_list(Pass) ->
     %% Originally we stored passwords as proplists
     %% we convert to map regardless of version and
     %% continue with upgrade recursively.
     do_upgrade(String, maps:from_list(Pass)).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 -spec new_cra(binary(), bondy_password_cra:params()) -> t() | no_return().
@@ -485,8 +422,6 @@ new_cra(Password, Params) ->
     end,
     bondy_password_cra:new(Password, Params, Builder).
 
-
-
 %% @private
 -spec new_scram(binary(), bondy_password_scram:params()) -> t() | no_return().
 
@@ -502,15 +437,14 @@ new_scram(Password, Params) ->
     end,
     bondy_password_scram:new(Password, Params, Builder).
 
-
 validate_string(Password) ->
     Size = byte_size(Password),
     Regex = persistent_term:get({?MODULE, regex}),
     Min = bondy_config:get([security, password, min_length]),
     Max = bondy_config:get([security, password, max_length]),
 
-    Size >= Min andalso Size =< Max
-    andalso nomatch =:= re:run(Password, Regex)
-    orelse error(invalid_password),
+    Size >= Min andalso Size =< Max andalso
+        nomatch =:= re:run(Password, Regex) orelse
+        error(invalid_password),
 
     ok.

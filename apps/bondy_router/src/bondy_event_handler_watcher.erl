@@ -26,61 +26,47 @@ Implements the event watcher capability as designed by Lager.
 -export([handle_cast/2]).
 
 -record(state, {
-    manager         ::  module(),
-    handler         ::  module(),
-    args            ::  any()
+    manager :: module(),
+    handler :: module(),
+    args :: any()
 }).
-
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
-start(Manager, {swap, Old, New} = Args)
-when is_tuple(Old) andalso is_tuple(New) ->
+start(Manager, {swap, Old, New} = Args) when
+    is_tuple(Old) andalso is_tuple(New)
+->
     gen_server:start(?MODULE, [Manager, Args], []).
-
 
 start(Manager, Handler, Args) ->
     gen_server:start(?MODULE, [Manager, Handler, Args], []).
 
-
-start_link(Manager, {swap, Old, New} = Args)
-when is_tuple(Old) andalso is_tuple(New) ->
+start_link(Manager, {swap, Old, New} = Args) when
+    is_tuple(Old) andalso is_tuple(New)
+->
     gen_server:start_link(?MODULE, [Manager, Args], []).
-
 
 start_link(Manager, Handler, Args) when is_atom(Handler) ->
     gen_server:start_link(?MODULE, [Manager, Handler, Args], []).
-
-
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-
-
-
 init([Manager, {swap, Old, {Handler, Args} = New}]) ->
     ok = gen_event:swap_sup_handler(Manager, Old, New),
     {ok, #state{manager = Manager, handler = Handler, args = Args}};
-
 init([Manager, Handler, Args]) ->
     ok = add_sup_handler(Manager, Handler, Args),
     {ok, #state{manager = Manager, handler = Handler, args = Args}}.
 
-
 handle_call(_, _, State) ->
     {reply, ok, State}.
 
-
 handle_cast(_Event, State) ->
     {noreply, State}.
-
 
 handle_info(add_sup_handler, State) ->
     Manager = State#state.manager,
@@ -88,17 +74,17 @@ handle_info(add_sup_handler, State) ->
     Args = State#state.args,
     ok = add_sup_handler(Manager, Handler, Args),
     {noreply, State};
-
 handle_info(
-    {gen_event_EXIT, Handler, normal}, #state{handler = Handler} = State) ->
+    {gen_event_EXIT, Handler, normal}, #state{handler = Handler} = State
+) ->
     {stop, normal, State};
-
 handle_info(
-    {gen_event_EXIT, Handler, shutdown}, #state{handler = Handler} = State) ->
+    {gen_event_EXIT, Handler, shutdown}, #state{handler = Handler} = State
+) ->
     {stop, normal, State};
-
 handle_info(
-    {gen_event_EXIT, Handler, Reason}, #state{handler = Handler} = State) ->
+    {gen_event_EXIT, Handler, Reason}, #state{handler = Handler} = State
+) ->
     ?LOG_WARNING(#{
         description => "Event handler exited, re-installing",
         reason => Reason,
@@ -106,7 +92,6 @@ handle_info(
     }),
     ok = add_sup_handler(State#state.manager, Handler, State#state.args),
     {noreply, State};
-
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         description => "Unexpected event",
@@ -114,20 +99,15 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(_Reason, _State) ->
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 add_sup_handler(Manager, Handler, Args) ->
@@ -136,7 +116,8 @@ add_sup_handler(Manager, Handler, Args) ->
             ok;
         {error, {fatal, Reason}} ->
             ?LOG_ERROR(#{
-                description => "Fatally failed to install event handler, not retrying",
+                description =>
+                    "Fatally failed to install event handler, not retrying",
                 reason => Reason,
                 handler => Handler,
                 manager => Manager
@@ -146,7 +127,8 @@ add_sup_handler(Manager, Handler, Args) ->
         {error, Reason} ->
             Timeout = 5000,
             ?LOG_WARNING(#{
-                description => "Failed to install event handler, retrying later",
+                description =>
+                    "Failed to install event handler, retrying later",
                 reason => Reason,
                 handler => Handler,
                 timeout => 5000,
@@ -155,4 +137,3 @@ add_sup_handler(Manager, Handler, Args) ->
             erlang:send_after(Timeout, self(), add_sup_handler),
             ok
     end.
-

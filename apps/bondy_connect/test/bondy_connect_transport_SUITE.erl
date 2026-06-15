@@ -25,14 +25,12 @@ layer turns the WELCOME record into an established session — no gen_statem yet
 -define(HOST, "127.0.0.1").
 -define(PORT, 18082).
 
-
 all() ->
     [
         handshake_succeeds,
         serializer_negotiated,
         hello_welcome_round_trip
     ].
-
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -41,7 +39,6 @@ init_per_suite(Config) ->
 
 end_per_suite(_) ->
     ok.
-
 
 %% @private An anonymous-only realm reachable from any IP.
 add_anon_realm(RealmUri) ->
@@ -68,14 +65,12 @@ add_anon_realm(RealmUri) ->
     _ = bondy_realm:create(Cfg),
     ok.
 
-
 %% @private Connect + raw handshake, returning the transport state.
 connected(Enc) ->
     {ok, T0} = bondy_connect_transport_tcp:connect({?HOST, ?PORT}, #{}),
     {ok, Negotiated, T1} =
         bondy_connect_transport_tcp:handshake({raw, binary, Enc}, T0),
     {Negotiated, T1}.
-
 
 %% @private Recv until at least one WAMP message record arrives (skip control
 %% frames), or fail loudly.
@@ -90,26 +85,20 @@ recv_message(T, Timeout) ->
             ct:fail({recv_failed, Reason})
     end.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 handshake_succeeds(_) ->
     {Negotiated, T} = connected(json),
     ?assertEqual({raw, binary, json}, Negotiated),
     ok = bondy_connect_transport_tcp:close(T).
 
-
 serializer_negotiated(_) ->
     %% The router accepts and echoes our requested serializer.
     {Negotiated, T} = connected(msgpack),
     ?assertEqual({raw, binary, msgpack}, Negotiated),
     ok = bondy_connect_transport_tcp:close(T).
-
 
 hello_welcome_round_trip(_) ->
     {ok, Cfg} = bondy_connect_config:validate(#{

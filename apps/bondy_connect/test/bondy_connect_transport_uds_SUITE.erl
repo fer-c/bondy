@@ -26,14 +26,12 @@ live Bondy `wamp_uds` listener (enabled in `bondy_ct`, bound to the path from
 
 -define(REALM, <<"com.example.bondy_connect.m5.uds">>).
 
-
 all() ->
     [
         uds_call_round_trip,
         uds_pubsub_round_trip,
         connect_missing_path_fails
     ].
-
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -44,23 +42,20 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
-
 
 %% A full register→call works over the Unix domain socket transport.
 uds_call_round_trip(_) ->
     Conn = connect(),
     ?assertEqual(established, bondy_connect:status(Conn)),
-    {ok, _} = bondy_connect:register(Conn, <<"com.example.res.uds">>, echo_handler()),
+    {ok, _} = bondy_connect:register(
+        Conn, <<"com.example.res.uds">>, echo_handler()
+    ),
     {ok, R} = bondy_connect:call(Conn, <<"com.example.res.uds">>, [<<"hi">>]),
     ?assertEqual([<<"hi">>], maps:get(args, R)),
     ok = bondy_connect:disconnect(Conn).
-
 
 %% A subscribe→publish→event round trip works over the UDS transport, proving the
 %% EVENT path (not just request/response) survives the local link.
@@ -82,7 +77,6 @@ uds_pubsub_round_trip(_) ->
     ok = bondy_connect:disconnect(Sub),
     ok = bondy_connect:disconnect(Pub).
 
-
 %% Dialing a path with no listener fails cleanly rather than hanging or crashing.
 connect_missing_path_fails(_) ->
     Result = bondy_connect:connect(#{
@@ -94,23 +88,20 @@ connect_missing_path_fails(_) ->
     }),
     ?assertMatch({error, _}, Result).
 
-
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
-
 
 %% @private
 echo_handler() ->
     fun(Args, _, _) -> {reply, Args} end.
 
-
 %% @private An event handler that forwards each event's args to `Pid`.
 event_handler(Pid) ->
-    fun(Args, _, _) -> Pid ! {event, Args}, ok end.
-
+    fun(Args, _, _) ->
+        Pid ! {event, Args},
+        ok
+    end.
 
 %% @private Connect over the live Bondy `wamp_uds` listener's socket path.
 connect() ->
@@ -122,7 +113,6 @@ connect() ->
         serializers => [json]
     }),
     Conn.
-
 
 %% @private
 add_anon_realm(RealmUri) ->

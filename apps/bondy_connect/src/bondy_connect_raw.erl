@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_connect_raw).
 
 -moduledoc """
@@ -26,17 +25,17 @@ state (review D2).
 """.
 
 -record(raw, {
-    backend             ::  backend(),
-    socket              ::  socket(),
-    codec               ::  bondy_connect_codec:t() | undefined,
-    max_message_length  ::  pos_integer()
+    backend :: backend(),
+    socket :: socket(),
+    codec :: bondy_connect_codec:t() | undefined,
+    max_message_length :: pos_integer()
 }).
 
 -define(DEFAULT_HANDSHAKE_TIMEOUT, 5000).
 
--type backend()     ::  tcp | tls.
--type socket()      ::  gen_tcp:socket() | ssl:sslsocket().
--type t()           ::  #raw{}.
+-type backend() :: tcp | tls.
+-type socket() :: gen_tcp:socket() | ssl:sslsocket().
+-type t() :: #raw{}.
 
 -export_type([backend/0]).
 -export_type([t/0]).
@@ -57,13 +56,9 @@ state (review D2).
 -export([peername/1]).
 -export([close/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Wrap an already-connected `Socket` in raw-transport state. `Backend` selects the
@@ -72,16 +67,18 @@ socket backend (`tcp` → `gen_tcp`/`inet`/`{tcp, _, _}`; `tls` → `ssl`/
 """.
 -spec new(backend(), socket(), pos_integer()) -> t().
 
-new(Backend, Socket, Max)
-when (Backend == tcp orelse Backend == tls), is_integer(Max), Max > 0 ->
+new(Backend, Socket, Max) when
+    (Backend == tcp orelse Backend == tls), is_integer(Max), Max > 0
+->
     #raw{backend = Backend, socket = Socket, max_message_length = Max}.
-
 
 -doc "Perform the 4-octet raw-socket handshake and negotiate the codec.".
 -spec handshake(bondy_connect_transport:subprotocol(), t()) ->
     {ok, bondy_connect_transport:subprotocol(), t()} | {error, term()}.
 
-handshake({raw, binary, Enc}, #raw{socket = Socket, max_message_length = Max} = St) ->
+handshake(
+    {raw, binary, Enc}, #raw{socket = Socket, max_message_length = Max} = St
+) ->
     Mod = data_mod(St),
     Code = bondy_connect_framing:serializer_code(Enc),
     Exp = bondy_connect_framing:length_exponent(Max),
@@ -98,7 +95,6 @@ handshake({raw, binary, Enc}, #raw{socket = Socket, max_message_length = Max} = 
             Error
     end.
 
-
 -doc "Encode, frame and send a WAMP record.".
 -spec send(bondy_wamp_message:t(), t()) -> ok | {error, term()}.
 
@@ -110,20 +106,17 @@ send(Msg, #raw{socket = Socket, codec = Codec} = St) when Codec =/= undefined ->
             Error
     end.
 
-
 -doc "Send a transport keepalive ping carrying `Payload`.".
 -spec ping(binary(), t()) -> ok | {error, term()}.
 
 ping(Payload, #raw{socket = Socket} = St) ->
     (data_mod(St)):send(Socket, bondy_connect_framing:ping_frame(Payload)).
 
-
 -doc "Send a transport keepalive pong (the reply to an inbound ping).".
 -spec pong(binary(), t()) -> ok | {error, term()}.
 
 pong(Payload, #raw{socket = Socket} = St) ->
     (data_mod(St)):send(Socket, bondy_connect_framing:pong_frame(Payload)).
-
 
 -doc "Synchronously read available bytes and decode them.".
 -spec recv(timeout(), t()) ->
@@ -142,7 +135,6 @@ recv(Timeout, #raw{socket = Socket} = St) ->
             Error
     end.
 
-
 -doc "Decode bytes delivered as an active-socket `info` message.".
 -spec handle_data(binary(), t()) ->
     {ok, [bondy_connect_transport:inbound()], t()} | {error, term(), t()}.
@@ -154,7 +146,6 @@ handle_data(Data, #raw{codec = Codec} = St) when Codec =/= undefined ->
         {error, Reason, Codec1} ->
             {error, Reason, St#raw{codec = Codec1}}
     end.
-
 
 -doc "Interpret an active-socket `info` message (data / closed / error).".
 -spec handle_info(term(), t()) ->
@@ -184,23 +175,19 @@ handle_info(Info, #raw{backend = B, socket = Socket} = St) ->
             ignore
     end.
 
-
 -doc "Set socket options (e.g. toggle active mode).".
 -spec setopts(list() | map(), t()) -> ok | {error, term()}.
 
 setopts(Opts, #raw{socket = Socket} = St) when is_list(Opts) ->
     (ctl_mod(St)):setopts(Socket, Opts);
-
 setopts(_, _) ->
     {error, badarg}.
-
 
 -doc "The `{OK, Closed, Error}` inbound message tags for `Backend`.".
 -spec messages(backend()) -> {atom(), atom(), atom()}.
 
 messages(tcp) -> {tcp, tcp_closed, tcp_error};
 messages(tls) -> {ssl, ssl_closed, ssl_error}.
-
 
 -doc "The remote peer address.".
 -spec peername(t()) ->
@@ -209,7 +196,6 @@ messages(tls) -> {ssl, ssl_closed, ssl_error}.
 peername(#raw{socket = Socket} = St) ->
     (ctl_mod(St)):peername(Socket).
 
-
 -doc "Close the transport.".
 -spec close(t()) -> ok.
 
@@ -217,23 +203,17 @@ close(#raw{socket = Socket} = St) ->
     _ = (data_mod(St)):close(Socket),
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private The data module (send/recv/close).
 data_mod(#raw{backend = tcp}) -> gen_tcp;
 data_mod(#raw{backend = tls}) -> ssl.
 
-
 %% @private The control module (setopts/peername).
 ctl_mod(#raw{backend = tcp}) -> inet;
 ctl_mod(#raw{backend = tls}) -> ssl.
-
 
 %% @private Negotiate the codec from the peer's 4-octet handshake reply.
 negotiate(Reply, Enc, OurExp, St) ->

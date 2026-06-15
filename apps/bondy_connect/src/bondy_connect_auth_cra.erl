@@ -21,21 +21,16 @@ Config: `#{password => binary()}`.
 -export([authextra/1]).
 -export([authenticate/2]).
 
-
-
 -spec init(Config :: map()) -> {ok, binary()} | {error, missing_password}.
 
 init(#{password := Password}) when is_binary(Password) ->
     {ok, Password};
-
 init(_) ->
     {error, missing_password}.
-
 
 -spec authextra(term()) -> map().
 authextra(_State) ->
     #{}.
-
 
 -spec authenticate(Extra :: map(), Password :: binary()) ->
     {ok, binary(), map(), binary()} | {error, invalid_challenge}.

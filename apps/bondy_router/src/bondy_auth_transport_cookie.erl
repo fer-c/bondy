@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_auth_transport_cookie).
 -moduledoc """
 Implements the `bondy_auth` behaviour for the `cookie` authentication method.
@@ -24,9 +23,7 @@ Cookies are actually Tickets (JWT).
 
 -include("bondy_security.hrl").
 
-
--type state()       :: map().
-
+-type state() :: map().
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
@@ -34,14 +31,9 @@ Cookies are actually Tickets (JWT).
 -export([challenge/3]).
 -export([authenticate/4]).
 
-
-
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
-
-
 
 -doc false.
 -spec init(bondy_auth:context()) ->
@@ -49,7 +41,6 @@ Cookies are actually Tickets (JWT).
 
 init(_Ctxt) ->
     {ok, maps:new()}.
-
 
 -doc false.
 requirements() ->
@@ -60,12 +51,10 @@ requirements() ->
         identification => true
     }.
 
-
 -doc false.
 challenge(_, _, State) ->
     %% No challenge we've been authenticated
     {false, State}.
-
 
 -doc """
 Authenticates by verifying the provided ticket.
@@ -85,7 +74,6 @@ match the user's authid and realm.
 authenticate(Claims, _, Ctxt, State) when is_map(Claims) ->
     %% Claims already verified at transport open time
     validate_claims(Claims, Ctxt, State);
-
 authenticate(Ticket, _, Ctxt, State) when is_binary(Ticket) ->
     case bondy_ticket:verify(Ticket) of
         {ok, Claims} ->
@@ -94,12 +82,9 @@ authenticate(Ticket, _, Ctxt, State) when is_binary(Ticket) ->
             {error, Reason, State}
     end.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 validate_claims(#{scope := #{realm := Uri}} = Claims, Ctxt, State) ->
@@ -127,6 +112,5 @@ validate_claims(#{scope := #{realm := Uri}} = Claims, Ctxt, State) ->
         false ->
             {error, invalid_cookie, State}
     end;
-
 validate_claims(_Claims, _Ctxt, State) ->
     {error, invalid_cookie, State}.

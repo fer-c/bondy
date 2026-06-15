@@ -21,7 +21,6 @@ globally (for now). Entries are immutable.
     {remove_tombstones, true}
 ]).
 
-
 %% The WAMP spec defines that the id MUST be drawn randomly from a uniform
 %% distribution over the complete range [1, 2^53], but in a distributed
 %% setting we might have 2 or more nodes generating the same ID.
@@ -30,81 +29,81 @@ globally (for now). Entries are immutable.
 %% It would be much better is this IDs where 128-bit strings e.g. UUID or
 %% KSUID.
 -record(entry_key, {
-    realm_uri           ::  uri(),
-    session_id          ::  wildcard(optional(bondy_session_id:t())),
-    entry_id            ::  wildcard(id())
+    realm_uri :: uri(),
+    session_id :: wildcard(optional(bondy_session_id:t())),
+    entry_id :: wildcard(id())
 }).
 
 -record(entry, {
-    key                 ::  key(),
-    type                ::  wildcard(entry_type()),
-    uri                 ::  uri() | atom(),
-    match_policy        ::  match_policy(),
-    wildcard_degree     ::  optional([integer()]),
-    invocation_policy   ::  optional(invocation_policy()),
-    ref                 ::  bondy_ref:t(),
-    callback_args       ::  optional(list(term())),
-    created             ::  pos_integer(),
-    options             ::  options(),
-    is_proxy = false    ::  wildcard(boolean()),
+    key :: key(),
+    type :: wildcard(entry_type()),
+    uri :: uri() | atom(),
+    match_policy :: match_policy(),
+    wildcard_degree :: optional([integer()]),
+    invocation_policy :: optional(invocation_policy()),
+    ref :: bondy_ref:t(),
+    callback_args :: optional(list(term())),
+    created :: pos_integer(),
+    options :: options(),
+    is_proxy = false :: wildcard(boolean()),
     %% If a proxy, this is the registration|subscription id
     %% of the origin client
-    origin_id           ::  wildcard(id()),
+    origin_id :: wildcard(id()),
     %% If a proxy, this is the ref for the origin client
-    origin_ref          ::  wildcard(optional(bondy_ref:t()))
+    origin_ref :: wildcard(optional(bondy_ref:t()))
 }).
 
-
--opaque t()             ::  #entry{}.
--type key()             ::  #entry_key{}.
--type t_or_key()        ::  t() | key().
--type entry_type()      ::  registration | subscription.
--type wildcard(T)       ::  T | '_'.
--type mfargs()          ::  {
-                                M :: module(),
-                                F :: atom(),
-                                A :: optional([term()])
-                            }.
--type options()         ::  map().
--type ext()                 ::  default_ext()
-                                | wamp_meta_ext()
-                                | bridge_relay_ext().
--type default_ext()         ::  #{
-    type             :=  entry_type(),
-    realm_uri        :=  uri(),
-    entry_id         :=  id(),
-    uri              :=  uri(),
-    match_policy     :=  binary(),
-    ref              :=  bondy_ref:t(),
-    callback_args    :=  list(term()),
-    created          :=  pos_integer(),
-    options          :=  options(),
-    origin_id        :=  optional(id()),
-    origin_ref       :=  optional(bondy_ref:t())
+-opaque t() :: #entry{}.
+-type key() :: #entry_key{}.
+-type t_or_key() :: t() | key().
+-type entry_type() :: registration | subscription.
+-type wildcard(T) :: T | '_'.
+-type mfargs() :: {
+    M :: module(),
+    F :: atom(),
+    A :: optional([term()])
 }.
--type wamp_meta_ext()     ::  #{
+-type options() :: map().
+-type ext() ::
+    default_ext()
+    | wamp_meta_ext()
+    | bridge_relay_ext().
+-type default_ext() :: #{
+    type := entry_type(),
+    realm_uri := uri(),
+    entry_id := id(),
+    uri := uri(),
+    match_policy := binary(),
+    ref := bondy_ref:t(),
+    callback_args := list(term()),
+    created := pos_integer(),
+    options := options(),
+    origin_id := optional(id()),
+    origin_ref := optional(bondy_ref:t())
+}.
+-type wamp_meta_ext() :: #{
     id => id(),
     created => calendar:date(),
     uri => uri(),
     match => binary()
 }.
--type bridge_relay_ext()         ::  #{
-    type             :=  entry_type(),
-    realm_uri        :=  uri(),
-    entry_id         :=  id(),
-    uri              :=  uri(),
-    match_policy     :=  binary(),
-    ref              :=  bondy_ref:t(),
-    callback_args    :=  list(term()),
-    created          :=  pos_integer(),
-    options          :=  options(),
-    origin_id        :=  optional(id()),
-    origin_ref       :=  optional(bondy_ref:t())
+-type bridge_relay_ext() :: #{
+    type := entry_type(),
+    realm_uri := uri(),
+    entry_id := id(),
+    uri := uri(),
+    match_policy := binary(),
+    ref := bondy_ref:t(),
+    callback_args := list(term()),
+    created := pos_integer(),
+    options := options(),
+    origin_id := optional(id()),
+    origin_ref := optional(bondy_ref:t())
 }.
 
--type comparator()          ::  fun(({t(), t()}) -> boolean()).
--type match_policy()        ::  binary().
--type invocation_policy()   ::  binary().
+-type comparator() :: fun(({t(), t()}) -> boolean()).
+-type match_policy() :: binary().
+-type invocation_policy() :: binary().
 
 -export_type([t/0]).
 -export_type([key/0]).
@@ -160,13 +159,9 @@ globally (for now). Entries are immutable.
 -export([type/1]).
 -export([uri/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
@@ -174,11 +169,11 @@ new(Type, RealmUri, Ref, Uri, Opts) ->
     RegId = bondy_message_id:router(RealmUri),
     new(Type, RegId, RealmUri, Ref, Uri, Opts).
 
-
 -spec new(entry_type(), id(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, RegId, RealmUri, Ref, Uri, Opts0)
-when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_TYPE(Type) ->
+new(Type, RegId, RealmUri, Ref, Uri, Opts0) when
+    is_binary(Uri) andalso is_map(Opts0) andalso ?IS_TYPE(Type)
+->
     SessionId = bondy_ref:session_id(Ref),
 
     Key = #entry_key{
@@ -221,23 +216,23 @@ when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_TYPE(Type) ->
         options = Opts
     }.
 
-
 -spec pattern(
     Type :: entry_type(),
     RealmUri :: uri(),
     ProcedureOrTopic :: uri(),
-    Options :: map()) -> t().
+    Options :: map()
+) -> t().
 
 pattern(Type, RealmUri, ProcedureOrTopic, Options) ->
     pattern(Type, RealmUri, ProcedureOrTopic, Options, #{}).
-
 
 -spec pattern(
     Type :: entry_type(),
     RealmUri :: uri(),
     ProcedureOrTopic :: uri(),
     Options :: map(),
-    Extra :: map()) -> t().
+    Extra :: map()
+) -> t().
 
 pattern(Type, RealmUri, RegUri, Options, Extra) ->
     SessionId = maps:get(session_id, Extra, '_'),
@@ -263,45 +258,38 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
     }.
 
 -spec key_pattern(
-    RealmUri    ::  uri(),
-    SessionId   ::  wildcard(bondy_session_id:t()),
-    EntryId     ::  wildcard(id())) -> key().
+    RealmUri :: uri(),
+    SessionId :: wildcard(bondy_session_id:t()),
+    EntryId :: wildcard(id())
+) -> key().
 
 key_pattern(RealmUri, SessionId, EntryId) when
-is_binary(RealmUri) andalso
-(is_binary(SessionId) orelse SessionId == '_') andalso
-(is_integer(EntryId) orelse EntryId == '_')  ->
-
+    is_binary(RealmUri) andalso
+        (is_binary(SessionId) orelse SessionId == '_') andalso
+        (is_integer(EntryId) orelse EntryId == '_')
+->
     #entry_key{
         realm_uri = RealmUri,
         session_id = SessionId,
         entry_id = EntryId
     }.
 
-
 field_index(realm_uri) ->
     #entry_key.realm_uri;
-
 field_index(session_id) ->
     #entry_key.session_id;
-
 field_index(entry_id) ->
     #entry_key.entry_id.
 
-
 is_entry(#entry{}) ->
     true;
-
 is_entry(_) ->
     false.
 
-
 is_key(#entry_key{}) ->
     true;
-
 is_key(_) ->
     false.
-
 
 -doc """
 Returns the value of the subscription's or registration's id
@@ -311,10 +299,8 @@ property.
 
 id(#entry{key = Key}) ->
     Key#entry_key.entry_id;
-
 id(#entry_key{entry_id = Val}) ->
     Val.
-
 
 -doc """
 Returns the type of the entry, the atom `registration` or `subscription`.
@@ -324,7 +310,6 @@ Returns the type of the entry, the atom `registration` or `subscription`.
 type(#entry{type = Val}) ->
     Val.
 
-
 -doc """
 Returns the value of the subscription's or registration's realm_uri property.
 """.
@@ -332,7 +317,6 @@ Returns the value of the subscription's or registration's realm_uri property.
 
 key(#entry{key = Key}) ->
     Key.
-
 
 -doc """
 Returns either a session identifier, a `pid()` or a callback module
@@ -344,7 +328,6 @@ entry is used as a pattern (See `pattern/5`).
 target(#entry{ref = Ref}) ->
     bondy_ref:target(Ref).
 
-
 -doc """
 Returns the value of the subscription's or registration's realm_uri
 property.
@@ -353,10 +336,8 @@ property.
 
 realm_uri(#entry{key = Key}) ->
     Key#entry_key.realm_uri;
-
 realm_uri(#entry_key{realm_uri = Val}) ->
     Val.
-
 
 -doc """
 Returns the value of the subscription's or registration's nodestring
@@ -368,10 +349,8 @@ binary
 
 nodestring(#entry{ref = '_'}) ->
     '_';
-
 nodestring(#entry{ref = Ref}) ->
     bondy_ref:nodestring(Ref).
-
 
 -doc """
 Returns the value of the subscription's or registration's node property.
@@ -381,10 +360,8 @@ This is always the Bondy cluster peer node where the handler exists.
 
 node(#entry{ref = '_'}) ->
     '_';
-
 node(#entry{ref = Ref}) ->
     bondy_ref:node(Ref).
-
 
 -doc """
 Returns true if the entry represents a handler local to the caller's
@@ -395,7 +372,6 @@ node and false when the target is located in a cluster peer.
 is_local(#entry{ref = Ref}) ->
     bondy_ref:is_local(Ref).
 
-
 -doc """
 Returns `true` if the entry represents a handler local to the node
 represented by `Nodestring`. Otherwise returns `false`.
@@ -404,7 +380,6 @@ represented by `Nodestring`. Otherwise returns `false`.
 
 is_local(#entry{ref = Ref}, Nodestring) ->
     bondy_ref:is_local(Ref, Nodestring).
-
 
 -doc """
 Returns `false` if the entry is local and its target is a process which
@@ -421,8 +396,6 @@ been pruned.
 is_alive(#entry{ref = Ref}) ->
     bondy_ref:is_alive(Ref).
 
-
-
 -doc """
 Returns true if the entry target is a callback registration.
 Callback registrations are only used by Bondy itself to provide some of the
@@ -433,7 +406,6 @@ admin and meta APIs.
 is_callback(#entry{ref = Ref}) ->
     callback == bondy_ref:target_type(Ref).
 
-
 -doc """
 Returns the callback arguments when target is a callback, otherwise
 returns `undefined` or the wildcard value `'_'` when the entry was used as a
@@ -443,7 +415,6 @@ pattern (See `pattern/5`).
 
 callback_args(#entry{callback_args = Val}) ->
     Val.
-
 
 -doc """
 Returns the callback module when target is a callback, otherwise
@@ -459,7 +430,6 @@ callback(#entry{ref = Ref} = E) ->
             undefined
     end.
 
-
 -doc """
 Returns the value of the subscription's or registration's pid
 property when target is a `pid()` or a session identifier. Otherwise
@@ -471,7 +441,6 @@ pattern (See `pattern/5`).
 pid(#entry{ref = Ref}) ->
     bondy_ref:pid(Ref).
 
-
 -doc """
 Returns the value of the subscription's or registration's session `key`
 property.
@@ -480,7 +449,6 @@ property.
 
 session_id(#entry{key = Key}) ->
     session_id(Key);
-
 session_id(#entry_key{session_id = Val}) ->
     Val.
 
@@ -489,7 +457,6 @@ session_id(#entry_key{session_id = Val}) ->
 
 ref(#entry{ref = Val}) ->
     Val.
-
 
 -doc """
 Returns the origin `ref()` of the subscription or registration
@@ -500,7 +467,6 @@ This value is only present when the entry is a proxy.
 origin_ref(#entry{origin_ref = Val}) ->
     Val.
 
-
 -doc """
 Returns the origin `ref()` of the subscription or registration.
 This value is only present when the entry is a proxy.
@@ -510,7 +476,6 @@ This value is only present when the entry is a proxy.
 origin_id(#entry{origin_id = Val}) ->
     Val.
 
-
 -doc """
 Returns the uri this entry is about i.e. either a subscription topic_uri or
 a registration procedure_uri.
@@ -519,14 +484,12 @@ a registration procedure_uri.
 
 uri(#entry{uri = Val}) -> Val.
 
-
 -doc """
 Returns the match_policy used by this subscription or regitration.
 """.
 -spec match_policy(t()) -> binary().
 
 match_policy(#entry{match_policy = Val}) -> Val.
-
 
 -doc """
 Returns the match_policy used by this subscription or regitration.
@@ -535,10 +498,8 @@ Returns the match_policy used by this subscription or regitration.
 
 invocation_policy(#entry{type = subscription}) ->
     undefined;
-
 invocation_policy(#entry{invocation_policy = Val}) ->
     Val.
-
 
 -doc """
 Returns the time when this entry was created. Its value is a timestamp in
@@ -548,24 +509,20 @@ milliseconds.
 
 created(#entry{created = Val}) -> Val.
 
-
 -doc "Returns the value of the `options` property of the entry.".
 -spec options(t()) -> map().
 
 options(#entry{options = Val}) -> Val.
-
 
 -spec get_option(any(), t(), any()) -> any().
 
 get_option(Key, #entry{options = Opts}, Default) ->
     maps:get(Key, Opts, Default).
 
-
 -spec find_option(any(), t()) -> {ok, any()} | error.
 
 find_option(Key, #entry{options = Opts}) ->
     maps:find(Key, Opts).
-
 
 -doc """
 Converts the entry into a map according to the WAMP protocol Details
@@ -575,7 +532,6 @@ dictionary format.
 
 to_external(Entry) ->
     to_external(Entry, default).
-
 
 -doc """
 Converts the entry into a map. Certain values of type atom such as
@@ -591,7 +547,7 @@ Formats:
 
 to_external(#entry{key = Key} = E, wamp_meta) ->
     Details = #{
-        id =>  Key#entry_key.entry_id,
+        id => Key#entry_key.entry_id,
         created => created_format(E#entry.created),
         uri => E#entry.uri,
         match => E#entry.match_policy
@@ -604,7 +560,6 @@ to_external(#entry{key = Key} = E, wamp_meta) ->
         _ ->
             Details
     end;
-
 to_external(#entry{key = Key} = E, default) ->
     Ref = bondy_stdlib:and_then(E#entry.ref, fun bondy_ref:to_uri/1),
     ORef = bondy_stdlib:and_then(E#entry.origin_ref, fun bondy_ref:to_uri/1),
@@ -621,7 +576,6 @@ to_external(#entry{key = Key} = E, default) ->
         options => E#entry.options,
         origin_ref => ORef
     };
-
 to_external(#entry{key = Key} = E, bridge_relay) ->
     #{
         type => E#entry.type,
@@ -635,8 +589,6 @@ to_external(#entry{key = Key} = E, bridge_relay) ->
         options => E#entry.options,
         origin_ref => E#entry.origin_ref
     }.
-
-
 
 -doc """
 Returns a copy of the entry where the node component of the ref has
@@ -697,12 +649,10 @@ proxy(Ref, External) ->
         origin_id = OriginId
     }.
 
-
 -spec is_proxy(Entry :: t()) -> wildcard(boolean()).
 
 is_proxy(#entry{is_proxy = Val}) ->
     Val.
-
 
 -spec proxy_details(t()) -> map().
 
@@ -712,7 +662,6 @@ proxy_details(#entry{} = E) ->
         origin_ref => E#entry.origin_ref
     }.
 
-
 -spec time_comparator() -> comparator().
 
 time_comparator() ->
@@ -720,19 +669,15 @@ time_comparator() ->
         TA =< TB
     end.
 
-
 -spec time_comparator(comparator()) -> comparator().
 
 time_comparator(Fun) ->
     fun
         (#entry{created = T} = A, #entry{created = T} = B) ->
             Fun(A, B);
-
         (#entry{created = TA}, #entry{created = TB}) ->
             TA < TB
     end.
-
-
 
 -doc """
 Most general comparator.
@@ -757,7 +702,6 @@ exists — use it.
 
 mg_comparator() ->
     mg_comparator(invocation_policy_comparator()).
-
 
 -doc """
 Most general comparator.
@@ -784,18 +728,17 @@ exists — use it.
 
 mg_comparator(Fun) ->
     fun
-        (#entry{match_policy = P} = A, #entry{match_policy = P} = B)
-        when P == ?EXACT_MATCH ->
+        (#entry{match_policy = P} = A, #entry{match_policy = P} = B) when
+            P == ?EXACT_MATCH
+        ->
             Fun(A, B);
-
         (#entry{match_policy = ?EXACT_MATCH}, #entry{}) ->
             true;
-
         (#entry{}, #entry{match_policy = ?EXACT_MATCH}) ->
             false;
-
-        (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
-        when P == ?PREFIX_MATCH ->
+        (#entry{match_policy = P} = A, #entry{match_policy = P} = B) when
+            P == ?PREFIX_MATCH
+        ->
             case A#entry.uri == B#entry.uri of
                 true ->
                     Fun(A, B);
@@ -804,24 +747,20 @@ mg_comparator(Fun) ->
                 false ->
                     false
             end;
-
-        (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
-        when P == ?WILDCARD_MATCH ->
+        (#entry{match_policy = P} = A, #entry{match_policy = P} = B) when
+            P == ?WILDCARD_MATCH
+        ->
             case A#entry.uri == B#entry.uri of
                 true ->
                     Fun(A, B);
                 false ->
                     A#entry.wildcard_degree >= B#entry.wildcard_degree
             end;
-
         (#entry{match_policy = ?PREFIX_MATCH}, #entry{}) ->
             true;
-
         (#entry{}, #entry{match_policy = ?PREFIX_MATCH}) ->
             false
-
     end.
-
 
 -doc """
 Sorts entries based in their invocation_policy in the following order:
@@ -832,7 +771,6 @@ Sorts entries based in their invocation_policy in the following order:
 invocation_policy_comparator() ->
     invocation_policy_comparator(time_comparator()).
 
-
 -doc """
 Sorts entries based in their invocation_policy in the following order:
 `single < first < jch < last < qll < qlls < random < roundrobin`.
@@ -841,10 +779,10 @@ Meant to work on registration type entries only.
 -spec invocation_policy_comparator(comparator()) -> comparator().
 
 invocation_policy_comparator(Fun) ->
-     fun(
+    fun(
         #entry{invocation_policy = PA} = A,
         #entry{invocation_policy = PB} = B
-        ) ->
+    ) ->
         case {PA, PB} of
             {?INVOKE_SINGLE, ?INVOKE_SINGLE} ->
                 Fun(A, B);
@@ -859,7 +797,6 @@ invocation_policy_comparator(Fun) ->
         end
     end.
 
-
 -doc """
 Orders entries by locality, with local entries first. Then applies
 `time_comparator/1`.
@@ -868,7 +805,6 @@ Orders entries by locality, with local entries first. Then applies
 
 locality_comparator() ->
     locality_comparator(time_comparator()).
-
 
 -doc """
 Orders entries by locality, with local entries first. Then applies
@@ -897,22 +833,17 @@ locality_comparator(Fun) ->
         end
     end.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 validate_match_policy(Options) ->
     validate_match_policy(key, Options).
 
-
 %% @private
 validate_match_policy(pattern, '_') ->
     '_';
-
 validate_match_policy(_, Options) when is_map(Options) ->
     case maps:get(match, Options, ?EXACT_MATCH) of
         ?EXACT_MATCH = P ->
@@ -925,11 +856,9 @@ validate_match_policy(_, Options) when is_map(Options) ->
             error({invalid_match_policy, P})
     end.
 
-
 %% @private
 created_format(Secs) ->
     calendar:system_time_to_universal_time(Secs, millisecond).
-
 
 %% @private
 -doc """
@@ -955,17 +884,11 @@ wildcard_degree(Uri) ->
     L = binary:split(Uri, <<$.>>, [global]),
     wildcard_degree(L, length(L) - 1, 0).
 
-
 %% @private
 wildcard_degree([], _, Acc) ->
     Acc;
-
-wildcard_degree([<<>>|T], Len, Acc) ->
+wildcard_degree([<<>> | T], Len, Acc) ->
     wildcard_degree(T, Len - 1, Acc);
-
-wildcard_degree([_|T], Len, Acc) ->
+wildcard_degree([_ | T], Len, Acc) ->
     Val = 1 bsl Len,
     wildcard_degree(T, Len - 1, Acc + Val).
-
-
-

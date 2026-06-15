@@ -10,7 +10,6 @@
 
 -compile([nowarn_export_all, export_all]).
 
-
 all() ->
     [
         add_anonymous_creates_table,
@@ -25,30 +24,22 @@ all() ->
         anonymous_table_survives_caller_death
     ].
 
-
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
     Config.
 
-
 end_per_suite(Config) ->
     {save_config, Config}.
-
 
 init_per_testcase(_TestCase, Config) ->
     Config.
 
-
 end_per_testcase(_TestCase, _Config) ->
     ok.
-
-
 
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 add_anonymous_creates_table(_Config) ->
     Key = {?MODULE, add_anon, erlang:unique_integer([positive])},
@@ -67,7 +58,6 @@ add_anonymous_creates_table(_Config) ->
     %% Cleanup
     true = bondy_table_manager:delete_anonymous(Key).
 
-
 add_anonymous_rejects_duplicate_key(_Config) ->
     Key = {?MODULE, dup_key, erlang:unique_integer([positive])},
     {ok, _} = bondy_table_manager:add_anonymous(Key, [set, public]),
@@ -78,7 +68,6 @@ add_anonymous_rejects_duplicate_key(_Config) ->
     ),
 
     true = bondy_table_manager:delete_anonymous(Key).
-
 
 get_or_create_anonymous_is_idempotent(_Config) ->
     Key = {?MODULE, idempotent, erlang:unique_integer([positive])},
@@ -99,11 +88,9 @@ get_or_create_anonymous_is_idempotent(_Config) ->
 
     true = bondy_table_manager:delete_anonymous(Key).
 
-
 lookup_anonymous_returns_error_for_missing_key(_Config) ->
     Key = {?MODULE, missing, erlang:unique_integer([positive])},
     ?assertEqual(error, bondy_table_manager:lookup_anonymous(Key)).
-
 
 delete_anonymous_removes_table_and_registry(_Config) ->
     Key = {?MODULE, del, erlang:unique_integer([positive])},
@@ -120,25 +107,26 @@ delete_anonymous_removes_table_and_registry(_Config) ->
     %% Underlying ETS table is gone
     ?assertEqual(undefined, ets:info(Tab, size)).
 
-
 delete_anonymous_returns_false_for_missing_key(_Config) ->
     Key = {?MODULE, del_missing, erlang:unique_integer([positive])},
     ?assertEqual(false, bondy_table_manager:delete_anonymous(Key)).
-
 
 get_or_create_named_is_idempotent(_Config) ->
     Name = list_to_atom(
         "bondy_tm_test_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
 
-    {ok, T1} = bondy_table_manager:get_or_create(Name, [set, public, named_table]),
-    {ok, T2} = bondy_table_manager:get_or_create(Name, [set, public, named_table]),
+    {ok, T1} = bondy_table_manager:get_or_create(Name, [
+        set, public, named_table
+    ]),
+    {ok, T2} = bondy_table_manager:get_or_create(Name, [
+        set, public, named_table
+    ]),
 
     ?assertEqual(T1, T2),
     ?assertEqual(Name, T1),
 
     true = bondy_table_manager:delete(Name).
-
 
 anonymous_table_has_no_registered_name(_Config) ->
     %% A named table appears in `ets:info(Tab, named_table)' as true. An
@@ -148,7 +136,6 @@ anonymous_table_has_no_registered_name(_Config) ->
     {ok, Tab} = bondy_table_manager:add_anonymous(Key, [set, public]),
     ?assertEqual(false, ets:info(Tab, named_table)),
     true = bondy_table_manager:delete_anonymous(Key).
-
 
 anonymous_table_strips_named_table_from_opts(_Config) ->
     %% Callers may reuse the same opts list they pass to named variants.
@@ -162,7 +149,6 @@ anonymous_table_strips_named_table_from_opts(_Config) ->
     ?assertEqual(false, ets:info(Tab, named_table)),
     ?assertEqual(ordered_set, ets:info(Tab, type)),
     true = bondy_table_manager:delete_anonymous(Key).
-
 
 anonymous_table_survives_caller_death(_Config) ->
     %% Anonymous tables are owned by bondy_table_manager, not the caller.
@@ -179,15 +165,24 @@ anonymous_table_survives_caller_death(_Config) ->
         true = ets:insert(Tab, {alive, yes}),
         Parent ! {ok, Tab},
         %% Wait to be killed
-        receive die -> ok end
+        receive
+            die -> ok
+        end
     end),
 
-    Tab = receive {ok, T} -> T after 2000 -> error(timeout) end,
+    Tab =
+        receive
+            {ok, T} -> T
+        after 2000 -> error(timeout)
+        end,
 
     %% Kill the caller
     MRef = erlang:monitor(process, Pid),
     exit(Pid, kill),
-    receive {'DOWN', MRef, process, Pid, _} -> ok after 1000 -> error(timeout) end,
+    receive
+        {'DOWN', MRef, process, Pid, _} -> ok
+    after 1000 -> error(timeout)
+    end,
 
     %% Table and registry must still be intact
     ?assertEqual({ok, Tab}, bondy_table_manager:lookup_anonymous(Key)),

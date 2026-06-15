@@ -16,24 +16,16 @@ Load regulation.
 -export([enqueue/2]).
 -export([enqueue/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec enqueue(Fun :: function()) -> ok | {error, any()}.
 
 enqueue(Fun) ->
     enqueue(Fun, undefined).
 
-
 -spec enqueue(Fun :: function(), PartitionKey :: any()) -> ok | {error, any()}.
 
 enqueue(Fun, PartitionKey) ->
     bondy_jobs_worker:enqueue(Fun, PartitionKey).
-
-
-

@@ -15,13 +15,13 @@ protection.
 -define(VARIANT2, ~"2").
 -define(REFRESH_TOKEN_LEN, 32).
 
--type secret_key()      ::  binary().
--type timestamp()       ::  non_neg_integer().
--type components()      ::  #{
-                                variant := binary(),
-                                key => term(),
-                                id => binary()
-                            }.
+-type secret_key() :: binary().
+-type timestamp() :: non_neg_integer().
+-type components() :: #{
+    variant := binary(),
+    key => term(),
+    id => binary()
+}.
 
 -export_type([secret_key/0]).
 -export_type([timestamp/0]).
@@ -33,13 +33,9 @@ protection.
 -export([verify/2]).
 -export([parse/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec new(Key :: term()) -> {Id :: binary(), Token :: binary()}.
 
@@ -48,7 +44,9 @@ new(Key) ->
     UUID = bondy_uuidv7:new(),
 
     %% Add additional random bytes for extra entropy
-    MinRandomBytes = 8, % 64 additional random bits
+
+    % 64 additional random bits
+    MinRandomBytes = 8,
     ConfigLen = crypto:strong_rand_bytes(?REFRESH_TOKEN_LEN),
     Len = min(byte_size(UUID) + MinRandomBytes, ConfigLen) - MinRandomBytes,
     ExtraEntropy = crypto:strong_rand_bytes(Len),
@@ -56,7 +54,6 @@ new(Key) ->
     Id = base64_encode(<<UUID/binary, ExtraEntropy/binary>>),
     TokenData = iolist_to_binary([?SCHEME, ?VARIANT1, ":", Id, ".", KeyPart]),
     {Id, TokenData}.
-
 
 -doc """
 Generate HMAC-protected sortable token (for improved security).
@@ -70,37 +67,32 @@ new(Key, SecretKey) ->
 
     %% Create HMAC for integrity protection
     HMAC = crypto:mac(hmac, sha256, SecretKey, UUID),
-    HMACTruncated = binary:part(HMAC, 0, 16), % Use first 128 bits
+    % Use first 128 bits
+    HMACTruncated = binary:part(HMAC, 0, 16),
 
     Id = base64_encode(<<UUID/binary, HMACTruncated/binary>>),
     TokenData = iolist_to_binary([?SCHEME, ?VARIANT2, ":", Id, $., KeyPart]),
     {Id, TokenData}.
 
-
-
-parse(<<?SCHEME, Variant:1/binary, ":", TokenData/binary>>)
-when Variant == ?VARIANT1 orelse Variant == ?VARIANT2 ->
+parse(<<?SCHEME, Variant:1/binary, ":", TokenData/binary>>) when
+    Variant == ?VARIANT1 orelse Variant == ?VARIANT2
+->
     try
         case binary:split(TokenData, ~".", [global]) of
             [IdBin, KeyBin] ->
                 Components = do_parse(Variant, IdBin, KeyBin),
                 {ok, Components};
-
             _ ->
                 throw(invalid_token)
         end
-
     catch
         throw:Reason ->
             {error, Reason};
-
         _:_ ->
             {error, invalid_token}
     end;
-
 parse(_) ->
     {error, invalid_token}.
-
 
 -doc """
 Returns `true` if refresh token is valid, otherwise `false`.
@@ -110,7 +102,6 @@ Returns `true` if refresh token is valid, otherwise `false`.
 is_valid(Token) ->
     resulto:is_ok(parse(Token)).
 
-
 -doc """
 Returns `true` if refresh token is valid, otherwise `false`.
 """.
@@ -119,47 +110,40 @@ Returns `true` if refresh token is valid, otherwise `false`.
 is_valid(Token, SecretKey) ->
     resulto:is_ok(verify(Token, SecretKey)).
 
-
 -doc """
 Verify HMAC-protected token.
 """.
 -spec verify(binary(), secret_key()) ->
     {ok, components()} | {error, invalid_token | invalid_hmac}.
 
-verify(<<?SCHEME, Variant:1/binary, ":", TokenData/binary>>, SecretKey)
-when Variant == ?VARIANT2 ->
+verify(<<?SCHEME, Variant:1/binary, ":", TokenData/binary>>, SecretKey) when
+    Variant == ?VARIANT2
+->
     try
         case binary:split(TokenData, ~".", [global]) of
             [IdBin, KeyBin] ->
                 Components = do_parse(?VARIANT2, IdBin, KeyBin),
                 ok = do_verify(Components, SecretKey),
                 {ok, Components};
-
             _ ->
                 throw(invalid_token)
         end
-
     catch
         throw:Reason ->
             {error, Reason};
-
         _:_ ->
             {error, invalid_token}
     end;
-
 verify(_, _) ->
     {error, invalid_token}.
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
 %% @private
 encode_key_part(Term) ->
     base64_encode(term_to_binary(Term)).
-
 
 %% @private
 decode_key_part(Term) when is_binary(Term) ->
@@ -167,16 +151,13 @@ decode_key_part(Term) when is_binary(Term) ->
     %% `parse/1` already catches the resulting `badarg` as `invalid_token`.
     binary_to_term(base64_decode(Term), [safe]).
 
-
 %% @private
 base64_encode(Term) ->
     base64:encode(Term, #{mode => urlsafe, padding => false}).
 
-
 %% @private
 base64_decode(Bin) ->
     base64:decode(Bin, #{mode => urlsafe, padding => false}).
-
 
 %% @private
 do_parse(Variant, IdBin, KeyBin) ->
@@ -192,18 +173,17 @@ do_verify(#{variant := ?VARIANT2, id := IdBin}, SecretKey) ->
     IdPart = base64_decode(IdBin),
     byte_size(IdPart) == 32 orelse throw(invalid_token),
 
-     %% UUID (16) + HMAC (16)
+    %% UUID (16) + HMAC (16)
     <<UUID:16/binary, ReceivedHMAC:16/binary>> = IdPart,
 
     %% Verify HMAC
     ExpectedHMAC = crypto:mac(hmac, sha256, SecretKey, UUID),
     ExpectedHMACTruncated = binary:part(ExpectedHMAC, 0, 16),
 
-    crypto:hash_equals(ReceivedHMAC, ExpectedHMACTruncated)
-        orelse throw(invalid_hmac),
+    crypto:hash_equals(ReceivedHMAC, ExpectedHMACTruncated) orelse
+        throw(invalid_hmac),
 
     ok.
-
 
 %% =============================================================================
 %% EUNIT
@@ -213,11 +193,9 @@ do_verify(#{variant := ?VARIANT2, id := IdBin}, SecretKey) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-
 %% =============================================================================
 %% TEST FIXTURES
 %% =============================================================================
-
 
 %% Test secret key for HMAC testing
 test_secret_key() ->
@@ -643,10 +621,15 @@ hmac_security_test() ->
     ?assertMatch({ok, _}, bondy_oauth_refresh_token:verify(Token, SecretKey)),
 
     %% Token should fail with wrong secret
-    ?assertEqual({error, invalid_hmac}, bondy_oauth_refresh_token:verify(Token, wrong_secret_key())),
+    ?assertEqual(
+        {error, invalid_hmac},
+        bondy_oauth_refresh_token:verify(Token, wrong_secret_key())
+    ),
 
     %% Token should fail with empty secret
-    ?assertEqual({error, invalid_hmac}, bondy_oauth_refresh_token:verify(Token, <<>>)).
+    ?assertEqual(
+        {error, invalid_hmac}, bondy_oauth_refresh_token:verify(Token, <<>>)
+    ).
 
 token_tampering_resistance_test() ->
     Key = test_binary_key(),
@@ -658,13 +641,18 @@ token_tampering_resistance_test() ->
 
     %% Tampered token should fail verification
     TamperedToken = <<Token/binary, "x">>,
-    ?assertEqual({error, invalid_token}, bondy_oauth_refresh_token:verify(TamperedToken, SecretKey)),
+    ?assertEqual(
+        {error, invalid_token},
+        bondy_oauth_refresh_token:verify(TamperedToken, SecretKey)
+    ),
 
     %% Flipped bit should fail verification
     <<Prefix:8/binary, Byte:8, Rest/binary>> = Token,
     FlippedToken = <<Prefix/binary, (Byte bxor 1):8, Rest/binary>>,
     Result = bondy_oauth_refresh_token:verify(FlippedToken, SecretKey),
-    ?assert(Result == {error, invalid_token} orelse Result == {error, invalid_hmac}).
+    ?assert(
+        Result == {error, invalid_token} orelse Result == {error, invalid_hmac}
+    ).
 
 %% -----------------------------------------------------------------------------
 %% Edge cases and error handling
@@ -738,7 +726,10 @@ entropy_with_hmac_test() ->
     %% Generate multiple HMAC tokens and ensure they're all different
     Key = test_binary_key(),
     SecretKey = test_secret_key(),
-    Tokens = [bondy_oauth_refresh_token:new(Key, SecretKey) || _ <- lists:seq(1, 50)],
+    Tokens = [
+        bondy_oauth_refresh_token:new(Key, SecretKey)
+     || _ <- lists:seq(1, 50)
+    ],
 
     %% Extract IDs and tokens
     {Ids, TokenStrings} = lists:unzip(Tokens),
@@ -825,7 +816,10 @@ cross_variant_test() ->
     ?assert(bondy_oauth_refresh_token:is_valid(Token2, SecretKey)),
 
     %% Only variant 2 should verify
-    ?assertEqual({error, invalid_token}, bondy_oauth_refresh_token:verify(Token1, SecretKey)),
+    ?assertEqual(
+        {error, invalid_token},
+        bondy_oauth_refresh_token:verify(Token1, SecretKey)
+    ),
     ?assertMatch({ok, _}, bondy_oauth_refresh_token:verify(Token2, SecretKey)).
 
 %% -----------------------------------------------------------------------------
@@ -871,7 +865,9 @@ consistency_property_test() ->
 
     %% Both parse and verify should succeed
     {ok, ParsedComponents} = bondy_oauth_refresh_token:parse(Token),
-    {ok, VerifiedComponents} = bondy_oauth_refresh_token:verify(Token, SecretKey),
+    {ok, VerifiedComponents} = bondy_oauth_refresh_token:verify(
+        Token, SecretKey
+    ),
 
     %% Should return identical components
     ?assertEqual(ParsedComponents, VerifiedComponents).

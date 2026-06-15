@@ -15,48 +15,36 @@ It uses Jump Consistent Hash algorithm described in
 -export([bucket/2]).
 -export([bucket/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec bucket(Key :: term(), Buckets :: pos_integer()) -> Bucket :: integer().
 
 bucket(Key, Buckets) ->
     bucket(Key, Buckets, jch).
 
-
 -spec bucket(Key :: term(), Buckets :: pos_integer(), Algo :: atom()) ->
     Bucket :: integer().
 
 bucket(_, 1, _) ->
     0;
-
-bucket(Key, Buckets, jch)
-when is_integer(Key) andalso is_integer(Buckets) andalso Buckets > 1 ->
+bucket(Key, Buckets, jch) when
+    is_integer(Key) andalso is_integer(Buckets) andalso Buckets > 1
+->
     jump_consistent_hash(Key, Buckets);
-
 bucket(Key, _, _) when is_integer(Key) ->
     %% Unknown algorithm
     error(badarg);
-
 bucket(Key, Buckets, Algo) ->
     bucket(erlang:phash2(Key), Buckets, Algo).
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 jump_consistent_hash(Key, N) ->
     jump_consistent_hash(Key, N, -1, 0).
-
 
 %% @private
 -doc """
@@ -77,13 +65,10 @@ The following is the C++ implementation in
 jump_consistent_hash(Key, N, _, J0) when J0 < N ->
     %% B1 = J0,
     NewKey = (Key * ?MAGIC + 1) band ?MASK,
-    J1 = trunc((J0 + 1) * ((1 bsl 31) / ((NewKey bsr 33) + 1)) ),
+    J1 = trunc((J0 + 1) * ((1 bsl 31) / ((NewKey bsr 33) + 1))),
     jump_consistent_hash(NewKey, N, J0, J1);
-
 jump_consistent_hash(_, _, B, _) ->
     B.
-
-
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
