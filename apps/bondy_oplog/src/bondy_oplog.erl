@@ -82,6 +82,7 @@ Per-instance event operations pass through to
 -export([append_remote/2]).
 -export([await_apply/1]).
 -export([await_apply/2]).
+-export([await_drain/1]).
 -export([get/2]).
 -export([root_hash/1]).
 -export([fold_range/5]).
@@ -283,6 +284,23 @@ await_apply(InstanceId) ->
 
 await_apply(InstanceId, Timeout) ->
     bondy_oplog_instance:await_apply(InstanceId, Timeout).
+
+-spec await_drain(instance_id()) -> ok | {error, term()}.
+
+-doc """
+Block until the instance's applier has drained its WAL to end-of-log (the
+cold-start rebuild barrier — see `bondy_oplog_applier:await_drain/1`). Resolves
+the applier pid from the registry; `{error, no_applier}` if it is not yet
+published.
+""".
+
+await_drain(InstanceId) ->
+    case bondy_oplog_registry:applier_pid(InstanceId) of
+        Pid when is_pid(Pid) ->
+            bondy_oplog_applier:await_drain(Pid);
+        _ ->
+            {error, no_applier}
+    end.
 
 -spec get(instance_id(), bondy_oplog_event:event_key()) ->
     {ok, bondy_oplog_event:t()} | not_found.

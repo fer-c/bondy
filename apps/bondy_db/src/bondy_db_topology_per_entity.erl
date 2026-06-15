@@ -87,6 +87,7 @@ encoding.
 -export([open_table/4]).
 -export([route/2]).
 -export([bucket_for/3]).
+-export([index_clear_scope/2]).
 -export([close_table/2]).
 -export([shutdown/1]).
 
@@ -148,6 +149,14 @@ to isolate realms inside that Bookie, so it is just the Realm verbatim.
 """.
 bucket_for(_EntityType, Realm, _TableState) when is_binary(Realm) ->
     Realm.
+
+-doc """
+Per-entity gives each `(EntityType, Shard)` its own Bookie, so the only index
+buckets present are this table's. The bare-suffix scope is therefore exact —
+there is no co-located sibling to over-wipe.
+""".
+index_clear_scope(IndexName, _TableState) when is_atom(IndexName) ->
+    {suffix, IndexName}.
 
 close_table(#{shards := Shards}, State) ->
     %% T2 owns one Bookie per (EntityType, Shard); close_table stops

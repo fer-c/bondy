@@ -90,6 +90,7 @@ per_entity, since the Bookie already partitions by shard.
 -export([open_table/4]).
 -export([route/2]).
 -export([bucket_for/3]).
+-export([index_clear_scope/2]).
 -export([close_table/2]).
 -export([shutdown/1]).
 
@@ -152,6 +153,14 @@ facade.
 """.
 bucket_for(EntityType, Realm, _TableState) when is_binary(Realm) ->
     atom_to_binary(EntityType, utf8).
+
+-doc """
+Shared-shards co-locates every entity type in the shared Bookies, so an index
+wipe must be confined to this table's entity type — otherwise a sibling table
+declaring the same `IndexName` would be over-wiped.
+""".
+index_clear_scope(IndexName, #{entity_type := ET}) when is_atom(IndexName) ->
+    {entity, atom_to_binary(ET, utf8), IndexName}.
 
 close_table(_TableState, State) ->
     %% Bookies are shared — closing one table must not stop them; they

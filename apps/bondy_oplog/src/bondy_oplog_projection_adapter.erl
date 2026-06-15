@@ -56,11 +56,12 @@ passes a new Bucket value to `get/3`, `put_batch/2`, `range/5`, or
   it; adapters that don't can omit the export and the substrate falls
   back to `get/3 + bondy_oplog_cell_frame:extract_head/1`.
 - `clear/2` — bucket-scoped wipe of one index's cells, used by the
-  secondary-index rebuild before a re-fold. Takes the
-  `bondy_oplog_index_key:bucket_suffix/1` of the index so the wipe stays
-  scoped to that index even on a backend that co-locates tables in one
-  keyspace. Adapters that cannot wipe degrade gracefully (the rebuild
-  re-puts every live term regardless; only orphaned terms would survive).
+  secondary-index rebuild before a re-fold. Takes a `clear_scope()`
+  descriptor (see the type) so the wipe stays scoped to the right index —
+  and, on a backend that co-locates several tables in one keyspace
+  (`shared_shards`, `single_bookie`), to the right **entity type** as well.
+  Adapters that cannot wipe degrade gracefully (the rebuild re-puts every
+  live term regardless; only orphaned terms would survive).
 
 Adapters MUST be safe under concurrent readers; `put_batch/2` may be
 single-writer (the substrate guarantees one applier per shard).
@@ -81,7 +82,8 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -export_type([
     handle/0,
     bucket/0,
-    range_opts/0
+    range_opts/0,
+    clear_scope/0
 ]).
 
 -type handle() :: any().
@@ -91,6 +93,25 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
     direction => asc | desc,
     atom() => term()
 }.
+
+%% The scope of a `clear/2` index wipe. The owner (`bondy_db`, via its
+%% topology) chooses the scope from the backend's keyspace layout:
+%%
+%% - `{suffix, IndexName}` — wipe every bucket ending with
+%%   `bondy_oplog_index_key:bucket_suffix(IndexName)` (`<<"/$idx/", IndexName>>`).
+%%   Correct on a backend whose handle holds a **single logical table**
+%%   (`per_entity`'s dedicated Bookie, the ETS adapter's per-`(NS, Index, Shard)`
+%%   table), where the only buckets present are this table's.
+%%
+%% - `{entity, EntityType, IndexName}` — wipe only the index buckets of
+%%   `EntityType` (`<<EntityType, "/$idx/", IndexName>>` in `shared_shards`, or
+%%   `<<Realm, "/", EntityType, "/$idx/", IndexName>>` in `single_bookie`).
+%%   Required on a backend whose handle (Bookie) **co-locates several entity
+%%   types**, where a bare-suffix wipe would also drop a sibling table that
+%%   declared the same `IndexName`.
+-type clear_scope() ::
+    {suffix, IndexName :: atom()}
+    | {entity, EntityType :: binary(), IndexName :: atom()}.
 
 %% =============================================================================
 %% BEHAVIOUR CALLBACKS
@@ -134,15 +155,16 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -callback head(handle(), bucket(), Key :: term()) ->
     {ok, HeadBytes :: binary()} | not_found.
 
-%% Wipe every cell whose Bucket ends with `BucketSuffix` from the handle's
-%% keyspace (used by the secondary-index rebuild before a re-fold, to drop
-%% orphaned terms). `BucketSuffix` is `bondy_oplog_index_key:bucket_suffix/1`
-%% (`<<"/$idx/", IndexName>>`), so the wipe is **bucket-scoped to one index**
-%% — correct even when the handle's backend co-locates several logical
-%% tables (`shared_shards`, `single_bookie`), which a whole-keyspace wipe
-%% would corrupt. Optional: the rebuild guards the call with
+%% Wipe an index's cells from the handle's keyspace (used by the
+%% secondary-index rebuild before a re-fold, to drop orphaned terms). `Scope`
+%% is a `clear_scope()` descriptor: `{suffix, IndexName}` wipes every bucket
+%% ending with that index's suffix (correct on a single-table handle), while
+%% `{entity, EntityType, IndexName}` additionally confines the wipe to one
+%% entity type (required on a handle that co-locates several tables —
+%% `shared_shards`, `single_bookie` — so a sibling table sharing the same
+%% `IndexName` is not corrupted). Optional: the rebuild guards the call with
 %% `function_exported(Adapter, clear, 2)` and degrades to live-term re-puts
 %% when absent.
--callback clear(handle(), BucketSuffix :: binary()) -> ok.
+-callback clear(handle(), Scope :: clear_scope()) -> ok.
 
 -optional_callbacks([head/3, clear/2]).

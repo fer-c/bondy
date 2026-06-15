@@ -167,6 +167,29 @@ Examples:
 ) -> bucket().
 
 -doc """
+The `bondy_oplog_projection_adapter:clear_scope()` the secondary-index rebuild
+must use when wiping an index of the table represented by `TableState` before a
+re-fold. The topology owns this because the right scope is a property of its
+**Bookie/handle layout**, not of the index:
+
+- A topology whose handle co-locates several entity types in one keyspace
+  (`shared_shards`, `single_bookie`) returns `{entity, EntityTypeBin, IndexName}`
+  so the wipe stays confined to this table — a sibling table sharing the same
+  `IndexName` in the same Bookie is left untouched.
+- A topology whose handle holds a single logical table (`per_entity`'s dedicated
+  Bookie, `memory`'s per-`(NS, Index, Shard)` table) returns `{suffix, IndexName}`
+  — there is no sibling to over-wipe, so the cheaper bare-suffix scope suffices.
+
+`EntityType` (an atom) is the same value passed to `bucket_for/3`; the binary in
+the `{entity, _, _}` scope MUST equal `bucket_for/3`'s `EntityType` component
+(`atom_to_binary(EntityType, utf8)`).
+""".
+-callback index_clear_scope(
+    IndexName :: atom(),
+    TableState :: table_state()
+) -> bondy_oplog_projection_adapter:clear_scope().
+
+-doc """
 Release the resources owned by `TableState`. Returns the updated
 process-wide `State`.
 

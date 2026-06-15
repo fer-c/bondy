@@ -78,6 +78,7 @@ Bookie.
 -export([open_table/4]).
 -export([route/2]).
 -export([bucket_for/3]).
+-export([index_clear_scope/2]).
 -export([close_table/2]).
 -export([shutdown/1]).
 
@@ -158,6 +159,14 @@ bucket_for(EntityType, Realm, #{entity_type := EntityType}) when
     is_binary(Realm)
 ->
     <<Realm/binary, "/", (atom_to_binary(EntityType, utf8))/binary>>.
+
+-doc """
+Single-bookie holds every table for every realm in one Bookie, so an index wipe
+must be confined to this table's entity type — otherwise a co-located table
+declaring the same `IndexName` would be over-wiped.
+""".
+index_clear_scope(IndexName, #{entity_type := ET}) when is_atom(IndexName) ->
+    {entity, atom_to_binary(ET, utf8), IndexName}.
 
 close_table(_TableState, State) ->
     %% No-op: the Bookie is shared and outlives table close. Stopping

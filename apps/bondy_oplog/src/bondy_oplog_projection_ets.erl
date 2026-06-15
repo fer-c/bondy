@@ -170,15 +170,16 @@ used by the secondary-index rebuild (IDX-4) to wipe a stale index shard
 before re-folding it from the primary, so orphaned terms (entries the
 primary value no longer yields) do not survive the rebuild.
 
-`BucketSuffix` is accepted for behaviour conformance but **ignored**: this
-adapter creates one anonymous table per `(NS, Index, Shard)` (see `open/4`),
-so every row already belongs to the one index being rebuilt — clearing the
-whole table *is* the bucket-scoped wipe, and is O(index size). (The suffix
-matters only on backends that co-locate several tables in one keyspace; ETS
-never does.) Safe to call from any process — `ets:delete_all_objects/1` only
-needs object-write access, which the `public` table grants.
+`Scope` (a `bondy_oplog_projection_adapter:clear_scope()`) is accepted for
+behaviour conformance but **ignored**: this adapter creates one anonymous table
+per `(NS, Index, Shard)` (see `open/4`), so every row already belongs to the one
+index being rebuilt — clearing the whole table *is* the bucket-scoped wipe, and
+is O(index size). (The scope's entity confinement matters only on backends that
+co-locate several tables in one keyspace; ETS never does.) Safe to call from any
+process — `ets:delete_all_objects/1` only needs object-write access, which the
+`public` table grants.
 """.
-clear(Tab, BucketSuffix) when is_binary(BucketSuffix) ->
+clear(Tab, _Scope) ->
     true = ets:delete_all_objects(Tab),
     ok.
 

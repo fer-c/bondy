@@ -164,7 +164,19 @@ keeps reads parallel.
     %% table's writes (`architecture_regrounding_plan.md` tier_2 path).
     %% Appended last so existing `#entry`-index `ets:update_element`
     %% writes stay valid.
-    causal_tier = tier_0 :: bondy_oplog_crdt:tier()
+    causal_tier = tier_0 :: bondy_oplog_crdt:tier(),
+    %% Index shards only. The `bondy_oplog_projection_adapter:clear_scope()`
+    %% the rebuild passes to `Adapter:clear/2` when wiping this shard before a
+    %% re-fold. The owner (`bondy_db`) computes it from the topology's keyspace
+    %% layout: `{entity, ET, IndexName}` on a backend that co-locates several
+    %% tables in one Bookie (`shared_shards`, `single_bookie`) so a sibling
+    %% table sharing the same `IndexName` is not over-wiped; `{suffix, _}` on a
+    %% single-table handle. `undefined` for primary shards and as a backward-
+    %% compatible default — `reset_target_shard/1` then falls back to the
+    %% bare-suffix scope. Appended last so existing `#entry`-index
+    %% `ets:update_element` writes stay valid.
+    index_clear_scope = undefined ::
+        bondy_oplog_projection_adapter:clear_scope() | undefined
 }).
 
 -record(state, {
@@ -218,7 +230,12 @@ keeps reads parallel.
     inflight_atomics => atomics:atomics_ref(),
     %% Optional. The owning oplog `instance_id` for a primary shard, so a
     %% rebuild can find the primary applier. Absent for index shards.
-    instance_id => binary()
+    instance_id => binary(),
+    %% Optional. Index shards only. The
+    %% `bondy_oplog_projection_adapter:clear_scope()` the rebuild passes to
+    %% `Adapter:clear/2`. Absent ⇒ `reset_target_shard/1` falls back to the
+    %% bare-suffix scope.
+    index_clear_scope => bondy_oplog_projection_adapter:clear_scope()
 }.
 
 -export_type([shard_entry/0, config/0]).
@@ -267,6 +284,7 @@ keeps reads parallel.
 -export([entry_instance_id/1]).
 -export([entry_crdt_module/1]).
 -export([entry_causal_tier/1]).
+-export([entry_index_clear_scope/1]).
 -export([entry_last_ae/1]).
 -export([entry_ever_freshened/1]).
 
@@ -281,6 +299,9 @@ keeps reads parallel.
 -export([index_clear_rebuild/1]).
 -export([index_needs_rebuild/1]).
 -export([index_load_rebuild_marker/1]).
+-export([index_mark_clean/1]).
+-export([index_has_clean/1]).
+-export([index_clear_clean/1]).
 -export([reset_stale_ae/1]).
 
 %% Namespace-level consistency_class lookup (`MST_DB_DESIGN.md` §15).
@@ -626,6 +647,16 @@ entry_crdt_module(#entry{crdt_module = V}) -> V.
 
 entry_causal_tier(#entry{causal_tier = V}) -> V.
 
+-doc """
+The index shard's `bondy_oplog_projection_adapter:clear_scope()` (the scope the
+rebuild passes to `Adapter:clear/2`), or `undefined` for a primary shard or a
+registration that predates the field.
+""".
+-spec entry_index_clear_scope(shard_entry()) ->
+    bondy_oplog_projection_adapter:clear_scope() | undefined.
+
+entry_index_clear_scope(#entry{index_clear_scope = V}) -> V.
+
 %% Last AE-freshness timestamp (monotonic ms), read straight off the
 %% entry's atomics — the sentinel `?STALE_SENTINEL` for a never-freshened
 %% shard. Lets a caller that already holds the entry compute the lag
@@ -863,6 +894,77 @@ trust_marker_frame() ->
     bondy_oplog_cell_frame:encode(0, <<>>, undefined, true).
 
 %% =============================================================================
+%% API: durable index clean-shutdown flag
+%% =============================================================================
+%% The cold-start trust decision's second gate (F1-minimal, §6.6). The trust
+%% marker says a shard was *built*; this flag says it was *cleanly closed* — its
+%% in-flight coalesce buffer reached disk before shutdown. A shard is trusted on
+%% open only if both are present; otherwise it is rebuilt. `bondy_db:close_table/1`
+%% sets it after `flush_sync`; cold-start reads then clears it (so a crash this
+%% run leaves the shard dirty → rebuilt next open). Presence-only, reusing the
+%% trust marker's payload-free frame. Stored at
+%% `bondy_oplog_index_key:clean_flag_loc/3` (reserved bucket `<<"$idx_clean">>`,
+%% outside the index keyspace). All best-effort (`catch`): a persistence failure
+%% degrades to a rebuild on the next open, never raising into the caller.
+
+-doc """
+Write the durable clean-shutdown flag for an index shard, certifying it was
+flushed to head at a clean shutdown. Called by `bondy_db:close_table/1` after
+`flush_sync`. No-op for a primary or an entry without a projection.
+""".
+-spec index_mark_clean(shard_entry()) -> ok.
+
+index_mark_clean(#entry{
+    key = {NS, IndexName, Shard},
+    projection_adapter = A,
+    projection_handle = H
+}) when A =/= undefined ->
+    {B, K} = bondy_oplog_index_key:clean_flag_loc(NS, IndexName, Shard),
+    _ = catch A:put_batch(H, [{B, K, trust_marker_frame()}]),
+    ok;
+index_mark_clean(_) ->
+    ok.
+
+-doc """
+Whether the index shard's durable clean-shutdown flag is present. Read by
+cold-start as the second trust gate. `false` for a primary, an entry without a
+projection, or any unreadable/absent flag (the safe default — rebuild).
+""".
+-spec index_has_clean(shard_entry()) -> boolean().
+
+index_has_clean(#entry{
+    key = {NS, IndexName, Shard},
+    projection_adapter = A,
+    projection_handle = H
+}) when A =/= undefined ->
+    {B, K} = bondy_oplog_index_key:clean_flag_loc(NS, IndexName, Shard),
+    case catch A:get(H, B, K) of
+        {ok, _} -> true;
+        _ -> false
+    end;
+index_has_clean(_) ->
+    false.
+
+-doc """
+Clear the durable clean-shutdown flag for an index shard, marking it dirty for
+this lifetime. Called by cold-start on open (after reading it), so a crash
+before the next clean `close_table/1` rebuilds the shard. No-op for a primary or
+an entry without a projection.
+""".
+-spec index_clear_clean(shard_entry()) -> ok.
+
+index_clear_clean(#entry{
+    key = {NS, IndexName, Shard},
+    projection_adapter = A,
+    projection_handle = H
+}) when A =/= undefined ->
+    {B, K} = bondy_oplog_index_key:clean_flag_loc(NS, IndexName, Shard),
+    _ = catch A:delete(H, B, K),
+    ok;
+index_clear_clean(_) ->
+    ok.
+
+%% =============================================================================
 %% gen_server callbacks
 %% =============================================================================
 
@@ -915,7 +1017,8 @@ handle_call({register, NS, Index, Shard, Owner, Config}, _From, State0) ->
         inflight_ref = maps:get(inflight_atomics, Config, undefined),
         instance_id = maps:get(instance_id, Config, undefined),
         crdt_module = maps:get(crdt_module, Config, undefined),
-        causal_tier = maps:get(causal_tier, Config, tier_0)
+        causal_tier = maps:get(causal_tier, Config, tier_0),
+        index_clear_scope = maps:get(index_clear_scope, Config, undefined)
     },
     true = ets:insert(?TABLE, Entry),
     State2 = State1#state{

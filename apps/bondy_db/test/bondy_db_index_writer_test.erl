@@ -319,17 +319,25 @@ clear_index(Table, IndexName) ->
     Info = bondy_db:info(Table),
     NS = maps:get(namespace, Info),
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
-    Suffix = bondy_oplog_index_key:bucket_suffix(IndexName),
     lists:foreach(
         fun(Shard) ->
             {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
             %% Backend-agnostic: the durable table backs its indices with
             %% leveled, so use the projection adapter's clear/2 (exported by
             %% both the ets and leveled adapters) rather than assuming ETS.
-            %% The bucket suffix scopes the wipe to this index.
+            %% Use the entry's own `clear_scope()` — exactly what the rebuild
+            %% passes — so the wipe is correctly entity-scoped on a shared
+            %% Bookie.
             Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
             Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-            ok = Adapter:clear(Handle, Suffix)
+            Scope =
+                case
+                    bondy_oplog_core_registry:entry_index_clear_scope(Entry)
+                of
+                    undefined -> {suffix, IndexName};
+                    S -> S
+                end,
+            ok = Adapter:clear(Handle, Scope)
         end,
         lists:seq(0, N - 1)
     ).

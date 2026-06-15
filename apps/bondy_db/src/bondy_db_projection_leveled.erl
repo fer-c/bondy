@@ -116,6 +116,7 @@ every cell is guaranteed to have — `value_equals_state` cells omit
     range/5,
     delete/3,
     clear/2,
+    cell_keys/2,
     info/1
 ]).
 
@@ -337,36 +338,74 @@ delete(#{bookie := Pid}, Bucket, Key) when
 
 -doc """
 Bucket-scoped wipe of one index's cells (the optional `clear/2` callback).
-`BucketSuffix` is `bondy_oplog_index_key:bucket_suffix/1`
-(`<<"/$idx/", IndexName>>`); every index bucket ends with it
-(`bondy_oplog_index_key:bucket/2`), regardless of realm.
+`Scope` is a `bondy_oplog_projection_adapter:clear_scope()` chosen by the
+owner's topology:
 
-Two phases, ledger-only:
+- `{suffix, IndexName}` — wipe every bucket whose binary **ends with**
+  `bondy_oplog_index_key:bucket_suffix(IndexName)` (`<<"/$idx/", IndexName>>`).
+  Used on a `per_entity` Bookie, which holds a single logical table, so every
+  index bucket present is this index's (across realms).
 
-1. `book_bucketlist/4` enumerates the Bookie's buckets and keeps those whose
-   binary **ends with** `BucketSuffix`. This is cheap — there are few buckets
-   — and skips the keys of every co-located table.
+- `{entity, ET, IndexName}` — wipe only `ET`'s index buckets:
+  `<<ET, "/$idx/", IndexName>>` (`shared_shards`) or
+  `<<Realm, "/", ET, "/$idx/", IndexName>>` (`single_bookie`). Required on a
+  Bookie that **co-locates several entity types**, so a sibling table that
+  declared the same `IndexName` (a different `ET` prefix) is left untouched.
+
+Two phases, ledger-only, for either scope:
+
+1. `book_bucketlist/4` enumerates the Bookie's buckets and keeps the in-scope
+   ones. This is cheap — there are few buckets — and skips the keys of every
+   co-located table.
 2. For each matching bucket, `book_keylist/4` folds its keys (keyed off the
    always-present `?SK_STATE` subkey so each cell is counted once) into
    `remove` specs for both subkeys, then one atomic `book_mput/2` per bucket.
 
-**Scope correctness.** Because only buckets ending with `BucketSuffix` are
-touched, this is correct on **every** topology — including `shared_shards`
-and `single_bookie` where the Bookie holds other tables' cells (their
-primary buckets have no `/$idx/` infix; their other indexes have a different
-suffix). The one residual constraint: two logical tables co-located in the
-**same** Bookie must not declare the **same** `IndexName` — the suffix omits
-the `EntityType`, so they would share it. See
-`bondy_oplog_index_key:bucket_suffix/1`.
-
 Used by `bondy_oplog_index_rebuild` to drop orphaned index terms before
 re-folding a secondary index from the primary.
 """.
--spec clear(handle(), BucketSuffix :: binary()) -> ok.
+-spec clear(handle(), bondy_oplog_projection_adapter:clear_scope()) -> ok.
 
-clear(#{bookie := Pid}, BucketSuffix) when is_binary(BucketSuffix) ->
-    Buckets = matching_buckets(Pid, BucketSuffix),
+clear(#{bookie := Pid}, {suffix, IndexName}) when is_atom(IndexName) ->
+    Suffix = bondy_oplog_index_key:bucket_suffix(IndexName),
+    Buckets = matching_buckets(Pid, Suffix),
+    lists:foreach(fun(Bucket) -> clear_bucket(Pid, Bucket) end, Buckets);
+clear(#{bookie := Pid}, {entity, ET, IndexName}) when
+    is_binary(ET), is_atom(IndexName)
+->
+    Buckets = entity_index_buckets(Pid, ET, IndexName),
     lists:foreach(fun(Bucket) -> clear_bucket(Pid, Bucket) end, Buckets).
+
+-doc """
+Enumerate the `{Bucket, Key}` of every PRIMARY cell of entity type `ET` in this
+handle — the durable cell directory for a secondary-index rebuild
+(`PLUM_DB_TO_BONDY_DB_DESIGN.md` D-9).
+
+The rebuild MUST read its cell directory from the projection, not the MST: the
+MST is a truncatable recent-events structure (compaction drops events `<=` the
+watermark, and a no-checkpoint crash loses its in-memory tail), whereas the
+projection is the durable, complete materialised state. Reading the directory
+from the MST would silently miss every already-compacted cell.
+
+A primary bucket of `ET` is one that **equals `ET`** (`shared_shards`, where the
+realm is folded into the key) or **ends with `/ET`** (`single_bookie`, where the
+bucket is `<<Realm,"/",ET>>`), and that contains no `/$idx/` infix (excluding
+this and other tables' index buckets). Other tables' primaries (`ET2`,
+`<<Realm,"/",ET2>>`) and the reserved `$idx_*` buckets match neither test, so a
+shared Bookie is correctly scoped to just `ET`'s cells. Each cell is counted
+once off its always-present `?SK_STATE` subkey.
+
+Note: `per_entity` (bucket = `<<Realm>>`, no `ET`) is not covered by this
+`ET`-based scope and is not used in v1; it would need the dedicated-Bookie
+"every non-index bucket" variant.
+""".
+-spec cell_keys(handle(), EntityType :: binary()) -> [{binary(), term()}].
+
+cell_keys(#{bookie := Pid}, ET) when is_binary(ET) ->
+    lists:flatmap(
+        fun(Bucket) -> bucket_cell_keys(Pid, Bucket) end,
+        primary_buckets(Pid, ET)
+    ).
 
 -spec info(handle()) -> #{atom() => term()}.
 
@@ -396,6 +435,61 @@ matching_buckets(Pid, Suffix) ->
         end,
     {async, Folder} =
         leveled_bookie:book_bucketlist(Pid, ?HEAD_TAG, {FoldFun, []}, all),
+    Folder().
+
+%% List every INDEX bucket of `IndexName` belonging to entity type `ET`:
+%% `<<ET, "/$idx/", IndexName>>` (shared_shards) or
+%% `<<Realm, "/", ET, "/$idx/", IndexName>>` (single_bookie). A sibling table's
+%% same-named index (`<<ET2, "/$idx/", IndexName>>`) has a different `ET`
+%% prefix and so is excluded — the entity-scoped fix. Mirrors
+%% `is_primary_bucket/3`: exact-match the no-realm form, suffix-match the
+%% realm-prefixed form. Ledger-only fold over buckets (cheap).
+entity_index_buckets(Pid, ET, IndexName) ->
+    Exact = bondy_oplog_index_key:bucket(ET, IndexName),
+    Suffix = <<"/", Exact/binary>>,
+    FoldFun =
+        fun(Bucket, Acc) ->
+            case Bucket =:= Exact orelse is_bucket_suffix(Suffix, Bucket) of
+                true -> [Bucket | Acc];
+                false -> Acc
+            end
+        end,
+    {async, Folder} =
+        leveled_bookie:book_bucketlist(Pid, ?HEAD_TAG, {FoldFun, []}, all),
+    Folder().
+
+%% List every PRIMARY bucket of entity type `ET`: equals `ET` (shared_shards)
+%% or ends with `/ET` (single_bookie), and has no `/$idx/` infix (so index
+%% buckets are excluded). Ledger-only fold over buckets (cheap).
+primary_buckets(Pid, ET) ->
+    Suffix = <<"/", ET/binary>>,
+    FoldFun =
+        fun(Bucket, Acc) ->
+            case is_primary_bucket(ET, Suffix, Bucket) of
+                true -> [Bucket | Acc];
+                false -> Acc
+            end
+        end,
+    {async, Folder} =
+        leveled_bookie:book_bucketlist(Pid, ?HEAD_TAG, {FoldFun, []}, all),
+    Folder().
+
+is_primary_bucket(ET, Suffix, Bucket) when is_binary(Bucket) ->
+    binary:match(Bucket, <<"/$idx/">>) =:= nomatch andalso
+        (Bucket =:= ET orelse is_bucket_suffix(Suffix, Bucket));
+is_primary_bucket(_ET, _Suffix, _Bucket) ->
+    false.
+
+%% Every `{Bucket, Key}` of one bucket, keyed off the always-present
+%% `?SK_STATE` subkey so each cell is counted once.
+bucket_cell_keys(Pid, Bucket) ->
+    FoldFun =
+        fun
+            (B, {Key, ?SK_STATE}, Acc) -> [{B, Key} | Acc];
+            (_B, {_Key, _SubKey}, Acc) -> Acc
+        end,
+    {async, Folder} =
+        leveled_bookie:book_keylist(Pid, ?HEAD_TAG, Bucket, {FoldFun, []}),
     Folder().
 
 %% True when binary `Bucket` ends with binary `Suffix`.

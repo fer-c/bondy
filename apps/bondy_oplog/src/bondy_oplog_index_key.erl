@@ -84,6 +84,7 @@ off-by-one.
 -export([bucket/2]).
 -export([bucket_suffix/1]).
 -export([trust_marker_loc/3]).
+-export([clean_flag_loc/3]).
 -export([shard/3]).
 
 -type term_value() :: binary() | integer().
@@ -185,16 +186,17 @@ The trailing fragment every index bucket ends with, in every topology:
 IndexName` after the topology's primary bucket, this suffix uniquely
 identifies index `IndexName`'s cells *within a Bookie/handle that holds a
 single logical table* (`per_entity`'s dedicated Bookie, the ETS adapter's
-per-`(NS, Index, Shard)` table).
+per-`(NS, Index, Shard)` table). The rebuild's wipe uses it for the
+`{suffix, IndexName}` `clear_scope()` on exactly those single-table handles.
 
-**Constraint on shared backends.** On a backend that co-locates several
-logical tables in one keyspace (`shared_shards`, `single_bookie`) this
-suffix does NOT include the `EntityType`, so two co-located tables that
-declare the **same** `IndexName` would share it. Such tables MUST NOT
-declare a colliding index name, or a suffix-scoped `clear` (the rebuild's
-orphan-wipe, `bondy_oplog_index_rebuild:reset_target_shard/1`) would also
-wipe the sibling table's index. Drives the `clear(Handle, Suffix)`
-projection callback.
+**Shared backends use a different scope.** On a backend that co-locates
+several logical tables in one keyspace (`shared_shards`, `single_bookie`)
+this suffix does NOT include the `EntityType`, so two co-located tables that
+declare the **same** `IndexName` would share it. Those topologies therefore
+do NOT use this suffix for the wipe — they return the `{entity, ET, IndexName}`
+`clear_scope()` (see `bondy_db_topology:index_clear_scope/2`), which confines
+the wipe to one entity type's index buckets. Co-located tables may thus safely
+declare the same `IndexName`.
 """.
 -spec bucket_suffix(atom()) -> binary().
 
@@ -248,6 +250,47 @@ trust_marker_loc(NS, IndexName, Shard) when
         (integer_to_binary(Shard))/binary
     >>,
     {<<"$idx_trusted">>, Key}.
+
+-doc """
+Storage location `{Bucket, Key}` of an index shard's **durable
+clean-shutdown flag** — a reserved cell whose **presence means the shard
+was durably flushed to the primary head at a clean shutdown**
+(`PLUM_DB_TO_BONDY_DB_DESIGN.md` §6.6, F1-minimal).
+
+It is the second gate of the cold-start trust decision, alongside the trust
+marker (`trust_marker_loc/3`): a shard is trusted on open only if it is both
+*built* (trust marker present) **and** *cleanly closed* (this flag present).
+`bondy_db:close_table/1` writes it after `flush_sync`-ing the writer; cold-start
+**clears** it on open (so a crash this run leaves the shard dirty → rebuilt next
+open). The clear is safe under leveled's prefix recovery: it is journalled
+before any post-open index write, so a partial crash either keeps the clear
+(→ rebuild, safe) or loses both clear and writes (→ nothing new lost, trust is
+correct).
+
+Unlike the trust marker — written once at build completion, content-blind —
+this flag is per-run: it certifies that *this lifetime's* writes reached disk,
+which the trust marker alone cannot (it would trust a built-then-crashed shard
+that lost its in-flight coalesce buffer).
+
+Lives in the reserved bucket `<<"$idx_clean">>`, outside the index keyspace for
+the same reasons as the trust marker (no `?IDX_INFIX`, so `clear/2` and range
+scans never touch it). The key encodes `(NS, IndexName, Shard)` so a shared
+backend keeps every shard's flag distinct.
+""".
+-spec clean_flag_loc(atom(), atom(), non_neg_integer()) ->
+    {binary(), binary()}.
+
+clean_flag_loc(NS, IndexName, Shard) when
+    is_atom(NS), is_atom(IndexName), is_integer(Shard), Shard >= 0
+->
+    Key = <<
+        (atom_to_binary(NS, utf8))/binary,
+        ?SEP,
+        (atom_to_binary(IndexName, utf8))/binary,
+        ?SEP,
+        (integer_to_binary(Shard))/binary
+    >>,
+    {<<"$idx_clean">>, Key}.
 
 -doc """
 The secondary shard a term lands in: `phash2({Bucket, Term}, ShardCount)`.

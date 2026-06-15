@@ -488,7 +488,7 @@ open_table_provision(
                             %% tail-replay, never a full re-derive. Freshening
                             %% (or the rebuild's own freshen) keeps a finite
                             %% `max_lag` read passing even on an empty shard.
-                            ok = cold_start_indexes(NS, IndexMap),
+                            ok = cold_start_indexes(NS, InstanceIds, IndexMap),
                             {ok, #{
                                 db_name => DbName,
                                 db_topology => Topology,
@@ -1924,6 +1924,13 @@ provision_index_shard(
                         %% IDX-4 back-pressure atomics (in-flight count +
                         %% needs_rebuild flag). Index shards only.
                         inflight_atomics => atomics:new(2, [{signed, true}]),
+                        %% The rebuild's wipe scope. The topology owns it (it
+                        %% knows whether its Bookie co-locates entity types):
+                        %% `{entity, ET, Name}` on a shared Bookie so a sibling
+                        %% table sharing this `IndexName` is not over-wiped;
+                        %% `{suffix, Name}` on a single-table handle.
+                        index_clear_scope =>
+                            Topology:index_clear_scope(Name, TableState),
                         owner => Owner
                     },
                     case
@@ -1996,6 +2003,12 @@ teardown_indexes(NS, IndexMap) ->
 teardown_index_shard(
     NS, Name, Shard, CacheHandles, Writers, Topology, TableState
 ) ->
+    %% F1-minimal clean-shutdown (§6.6): durably flush this shard's writer and
+    %% stamp its clean flag BEFORE the writer/registry row are torn down, so a
+    %% graceful close leaves the index complete-to-head and the next open trusts
+    %% it (`cold_start_indexes/2`). Must precede `teardown_shard_common`, which
+    %% unregisters the entry whose projection handle the flag is written through.
+    ok = flush_and_mark_clean(NS, Name, Shard, Writers),
     teardown_shard_common(
         NS,
         Name,
@@ -2006,6 +2019,26 @@ teardown_index_shard(
         Topology,
         TableState
     ).
+
+%% @private
+%% `flush_sync` the shard's writer (so its coalesce buffer reaches disk) then
+%% stamp the durable clean-shutdown flag, both via the still-registered entry.
+%% Best-effort: a dead/wedged writer or a gone row just leaves the shard dirty,
+%% which a rebuild on the next open recovers. On an ephemeral (ets) index the
+%% flag is wiped with the table on restart — harmless (the index rebuilds).
+flush_and_mark_clean(NS, Name, Shard, Writers) ->
+    case maps:get(Shard, Writers, undefined) of
+        Pid when is_pid(Pid) ->
+            _ = catch bondy_oplog_secondary_writer:flush_sync(Pid);
+        _ ->
+            ok
+    end,
+    case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
+        {ok, Entry} ->
+            bondy_oplog_core_registry:index_mark_clean(Entry);
+        _ ->
+            ok
+    end.
 
 %% @private
 %% Build the static secondary-index descriptors handed to each primary
@@ -2036,17 +2069,31 @@ index_descriptors(Specs, DefaultShardCount) ->
 %% otherwise just freshen the trusted shards so a finite `max_lag` read passes.
 %% Best-effort — a failure leaves the index marked for rebuild (reads refuse),
 %% recoverable by a later trigger — so it never fails `open_table`.
-cold_start_indexes(NS, IndexMap) ->
+cold_start_indexes(_NS, _InstanceIds, IndexMap) when map_size(IndexMap) =:= 0 ->
+    %% No secondary indexes ⇒ no trust/rebuild decision and no barrier. Skipping
+    %% keeps the WAL drain ASYNC for index-less tables (forcing it here would
+    %% serialise every `open_table` behind a full drain — and `read/3` is meant
+    %% to return from the overlay before the drain completes).
+    ok;
+cold_start_indexes(NS, InstanceIds, IndexMap) ->
+    %% Barrier the primary shards FIRST: drain each WAL to end-of-log and install
+    %% the overlay into the MST, so the trust/rebuild decision and any rebuild
+    %% observe a fully-replayed primary. Without this a `rebuild_sync` re-derives
+    %% from `distinct_cell_keys(MST)` while the tail is still being applied (the
+    %% MST lags the projection via the async overlay install), yielding an empty
+    %% or partial index (`PLUM_DB_TO_BONDY_DB_DESIGN.md` D-9). Best-effort: a
+    %% missing applier just leaves the prior (racy) behaviour, never blocks open.
+    ok = await_primary_shards(InstanceIds),
     maps:foreach(
         fun(Name, #{sec_shard_count := SecShardCount}) ->
             case load_index_trust_markers(NS, Name, SecShardCount) of
                 trusted ->
-                    %% Every shard built + clean: trust the persisted cells,
-                    %% just freshen so finite-`max_lag` reads pass.
+                    %% Every shard built + cleanly closed: trust the persisted
+                    %% cells, just freshen so finite-`max_lag` reads pass.
                     freshen_index_shards(NS, Name, SecShardCount);
                 needs_rebuild ->
-                    %% At least one shard is unmarked — rebuild the index from
-                    %% the primary (re-derives + freshens all shards).
+                    %% A shard is unbuilt or was not cleanly closed — rebuild
+                    %% the index from the (now fully-replayed) primary.
                     _ = bondy_oplog_index_rebuild:rebuild_sync(NS, Name)
             end
         end,
@@ -2054,9 +2101,26 @@ cold_start_indexes(NS, IndexMap) ->
     ).
 
 %% @private
-%% Load every shard's durable trust marker into its in-memory `needs_rebuild`
-%% flag and report whether the whole index is trusted. Loading sets the flag
-%% from disk even for trusted shards (so a later read sees the right state).
+%% Drain + install every primary shard to end-of-log before the cold-start index
+%% decision (D-9 barrier). `await_drain` flushes the WAL tail into the overlay;
+%% `await_apply` installs the overlay into the MST. Both best-effort.
+await_primary_shards(InstanceIds) ->
+    maps:foreach(
+        fun(_Shard, InstanceId) ->
+            _ = catch bondy_oplog:await_drain(InstanceId),
+            _ = catch bondy_oplog:await_apply(InstanceId)
+        end,
+        InstanceIds
+    ).
+
+%% @private
+%% Decide trust-vs-rebuild for the whole index and prime per-shard state. Per
+%% shard it applies BOTH cold-start gates (F1-minimal, §6.6): the durable trust
+%% marker (built?) AND the durable clean-shutdown flag (cleanly closed to head
+%% last lifetime?). The index is trusted only if every shard passes both. As a
+%% side effect it loads the trust marker into the in-memory `needs_rebuild` flag
+%% (so a later read sees the right state) and CLEARS the clean-shutdown flag
+%% (so a crash this lifetime leaves the shard dirty → rebuilt on the next open).
 load_index_trust_markers(NS, Name, SecShardCount) ->
     Flags = [
         shard_needs_rebuild(NS, Name, Shard)
@@ -2071,7 +2135,17 @@ load_index_trust_markers(NS, Name, SecShardCount) ->
 shard_needs_rebuild(NS, Name, Shard) ->
     case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
         {ok, Entry} ->
-            bondy_oplog_core_registry:index_load_rebuild_marker(Entry);
+            %% Gate 1 — built? (loads the durable trust marker into the
+            %% in-memory `needs_rebuild` flag as a side effect).
+            MarkerNeedsRebuild =
+                bondy_oplog_core_registry:index_load_rebuild_marker(Entry),
+            %% Gate 2 — cleanly closed to head last lifetime? Read the
+            %% clean-shutdown flag, then clear it so a crash this lifetime
+            %% rebuilds (the clear is journalled before any post-open index
+            %% write; leveled's prefix recovery makes a partial crash safe).
+            WasClean = bondy_oplog_core_registry:index_has_clean(Entry),
+            ok = bondy_oplog_core_registry:index_clear_clean(Entry),
+            MarkerNeedsRebuild orelse (not WasClean);
         _ ->
             %% No registry entry (shouldn't happen post-provision) — be safe
             %% and force a rebuild.

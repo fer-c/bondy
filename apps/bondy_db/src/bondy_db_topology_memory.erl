@@ -87,6 +87,7 @@ realms inside it — exactly like `bondy_db_topology_per_entity`.
 -export([open_table/4]).
 -export([route/2]).
 -export([bucket_for/3]).
+-export([index_clear_scope/2]).
 -export([close_table/2]).
 -export([shutdown/1]).
 -export([provision_cache/5]).
@@ -146,6 +147,14 @@ isolate realms inside it — the Realm verbatim.
 """.
 bucket_for(_EntityType, Realm, _TableState) when is_binary(Realm) ->
     Realm.
+
+-doc """
+Memory gives each `(EntityType, Shard)` its own ETS table (the ETS projection
+adapter ignores the scope and clears its single backing table), so the
+bare-suffix scope is exact — there is no co-located sibling to over-wipe.
+""".
+index_clear_scope(IndexName, _TableState) when is_atom(IndexName) ->
+    {suffix, IndexName}.
 
 close_table(#{shards := Shards, owner := Owner}, State) ->
     %% The owner performs the whole-table `ets:delete/1` (the only

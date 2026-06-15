@@ -251,16 +251,18 @@ reset_target_shard(Entry) ->
     end,
     Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-    %% Bucket-scoped wipe: pass the index's bucket suffix so a backend that
-    %% co-locates several tables in one keyspace (`shared_shards`,
-    %% `single_bookie`) only drops THIS index's cells. The suffix is derived
-    %% from the entry's IndexName — the only table-identifying datum the
-    %% registry entry carries at this layer.
-    {_NS, IndexName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
-    Suffix = bondy_oplog_index_key:bucket_suffix(IndexName),
+    %% Bucket-scoped wipe: pass the `clear_scope()` the owner stamped on the
+    %% entry at registration. On a backend that co-locates several tables in
+    %% one Bookie (`shared_shards`, `single_bookie`) it is `{entity, ET, Idx}`,
+    %% so the wipe drops only THIS table's index cells — never a sibling table
+    %% that declared the same `IndexName`. On a single-table handle it is
+    %% `{suffix, Idx}`. A registration that predates the field (or a primary
+    %% shard) leaves it `undefined`; fall back to the bare-suffix scope, which
+    %% is correct on every single-table backend.
+    Scope = clear_scope(Entry),
     case erlang:function_exported(Adapter, clear, 2) of
         true ->
-            _ = catch Adapter:clear(Handle, Suffix);
+            _ = catch Adapter:clear(Handle, Scope);
         false ->
             %% Without a clear, the re-fold still re-puts every live term;
             %% only orphaned terms (no longer yielded) would survive. Both
@@ -276,6 +278,17 @@ reset_target_shard(Entry) ->
     bondy_oplog_core_registry:index_inflight_reset(Entry),
     bondy_oplog_core_registry:reset_stale_ae(Entry),
     ok.
+
+%% @private
+clear_scope(Entry) ->
+    case bondy_oplog_core_registry:entry_index_clear_scope(Entry) of
+        undefined ->
+            {_NS, IndexName, _Shard} =
+                bondy_oplog_core_registry:entry_key(Entry),
+            {suffix, IndexName};
+        Scope ->
+            Scope
+    end.
 
 %% @private
 refold_primary(Entry) ->

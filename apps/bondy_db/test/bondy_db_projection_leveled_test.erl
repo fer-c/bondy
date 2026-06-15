@@ -55,6 +55,8 @@ adapter_test_() ->
         fun range_asc_returns_ascending/1,
         fun range_desc_returns_reversed/1,
         fun clear_is_bucket_scoped/1,
+        fun clear_is_entity_scoped/1,
+        fun cell_keys_is_entity_scoped/1,
         fun info_reports_backend_and_bookie/1
     ]}.
 
@@ -301,10 +303,10 @@ clear_is_bucket_scoped({Pid, _Dir}) ->
             {Sibling, <<"s1">>, F},
             {Primary, <<"p1">>, F}
         ]),
-        %% Suffix from the index name via the production codec.
-        Suffix = bondy_oplog_index_key:bucket_suffix(by_name),
-        ?assertEqual(<<"/$idx/by_name">>, Suffix),
-        ok = ?MOD:clear(H, Suffix),
+        %% `{suffix, IndexName}` scope — the single-table-handle path
+        %% (per_entity / memory). Documents the codec it resolves to.
+        ?assertEqual(<<"/$idx/by_name">>, bondy_oplog_index_key:bucket_suffix(by_name)),
+        ok = ?MOD:clear(H, {suffix, by_name}),
         %% Target index fully wiped (including the state-only cell)...
         ?assertEqual(not_found, ?MOD:get(H, Target, <<"t1">>)),
         ?assertEqual(not_found, ?MOD:get(H, Target, <<"t2">>)),
@@ -312,6 +314,104 @@ clear_is_bucket_scoped({Pid, _Dir}) ->
         %% ...sibling index and primary table spared.
         ?assertEqual({ok, F}, ?MOD:get(H, Sibling, <<"s1">>)),
         ?assertEqual({ok, F}, ?MOD:get(H, Primary, <<"p1">>))
+    end.
+
+%% The `{entity, ET, IndexName}` scope is the shared-backend wipe
+%% (`shared_shards` / `single_bookie`): it must drop ONLY the target entity
+%% type's index cells, sparing a co-located sibling table that declared the
+%% SAME `IndexName` — the over-wipe this fix closes.
+clear_is_entity_scoped({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        F = mk_frame(<<"v">>),
+        S = mk_state_frame(<<"sv">>),
+        ok = ?MOD:put_batch(H, [
+            %% TARGET — `users`/`by_name`, both shared-backend layouts:
+            {<<"users/$idx/by_name">>, <<"t1">>, F},        %% shared_shards
+            {<<"users/$idx/by_name">>, <<"t2">>, S},        %% state-only cell
+            {<<"r1/users/$idx/by_name">>, <<"t3">>, F},     %% single_bookie, r1
+            {<<"r2/users/$idx/by_name">>, <<"t4">>, F},     %% single_bookie, r2
+            %% SIBLING table sharing the SAME index name — must survive:
+            {<<"items/$idx/by_name">>, <<"s1">>, F},        %% shared_shards
+            {<<"r1/items/$idx/by_name">>, <<"s2">>, F},     %% single_bookie
+            %% Same ET, DIFFERENT index name — must survive:
+            {<<"users/$idx/by_email">>, <<"e1">>, F},
+            %% substring traps: `power_users` is NOT `users` (ends `_users`,
+            %% not `/users`) — must survive:
+            {<<"power_users/$idx/by_name">>, <<"x1">>, F},
+            {<<"r1/power_users/$idx/by_name">>, <<"x2">>, F},
+            %% primary tables (no `/$idx/`) — must survive:
+            {<<"users">>, <<"p1">>, F},
+            {<<"r1/users">>, <<"p2">>, F},
+            {<<"items">>, <<"p3">>, F}
+        ]),
+        ok = ?MOD:clear(H, {entity, <<"users">>, by_name}),
+        %% TARGET wiped across both layouts and all realms (incl. state-only):
+        [
+            ?assertEqual(not_found, ?MOD:get(H, B, K))
+         || {B, K} <- [
+                {<<"users/$idx/by_name">>, <<"t1">>},
+                {<<"users/$idx/by_name">>, <<"t2">>},
+                {<<"r1/users/$idx/by_name">>, <<"t3">>},
+                {<<"r2/users/$idx/by_name">>, <<"t4">>}
+            ]
+        ],
+        %% Everything else spared — the sibling same-named index above all:
+        [
+            ?assertMatch({ok, _}, ?MOD:get(H, B, K))
+         || {B, K} <- [
+                {<<"items/$idx/by_name">>, <<"s1">>},
+                {<<"r1/items/$idx/by_name">>, <<"s2">>},
+                {<<"users/$idx/by_email">>, <<"e1">>},
+                {<<"power_users/$idx/by_name">>, <<"x1">>},
+                {<<"r1/power_users/$idx/by_name">>, <<"x2">>},
+                {<<"users">>, <<"p1">>},
+                {<<"r1/users">>, <<"p2">>},
+                {<<"items">>, <<"p3">>}
+            ]
+        ]
+    end.
+
+%% `cell_keys/2` is the rebuild's cell directory (D-9). It must return EXACTLY
+%% the primary cells of the given entity type, across both shared-backend bucket
+%% layouts, while excluding index buckets, the reserved marker/flag buckets, and
+%% every other table's cells co-located in the same Bookie.
+cell_keys_is_entity_scoped({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        F = mk_frame(<<"v">>),
+        ok = ?MOD:put_batch(H, [
+            %% `users` PRIMARY cells we expect back:
+            {<<"users">>, <<"u_ss">>, F},        %% shared_shards (bucket = ET)
+            {<<"r1/users">>, <<"u_r1">>, F},      %% single_bookie (Realm/ET), r1
+            {<<"r2/users">>, <<"u_r2">>, F},      %% single_bookie, r2
+            %% `users` INDEX cells — excluded (the `/$idx/` infix):
+            {<<"users/$idx/by_name">>, <<"active">>, F},
+            {<<"r1/users/$idx/by_name">>, <<"active">>, F},
+            %% reserved marker/flag buckets — excluded:
+            {<<"$idx_trusted">>, <<"m">>, F},
+            {<<"$idx_clean">>, <<"m">>, F},
+            %% OTHER tables co-located in the Bookie — excluded (not `users`):
+            {<<"items">>, <<"i1">>, F},           %% shared_shards other table
+            {<<"r1/items">>, <<"i2">>, F},        %% single_bookie other table
+            %% substring traps: `power_users` must NOT match ET `users`
+            %% (equals it? no; ends with `/users`? no — ends with `_users`):
+            {<<"power_users">>, <<"pu1">>, F},
+            {<<"r1/power_users">>, <<"pu2">>, F}
+        ]),
+        Got = lists:sort(?MOD:cell_keys(H, <<"users">>)),
+        Expected = lists:sort([
+            {<<"users">>, <<"u_ss">>},
+            {<<"r1/users">>, <<"u_r1">>},
+            {<<"r2/users">>, <<"u_r2">>}
+        ]),
+        ?assertEqual(Expected, Got),
+        %% A different entity type sees only ITS cells (cross-table isolation
+        %% holds symmetrically).
+        ?assertEqual(
+            lists:sort([{<<"items">>, <<"i1">>}, {<<"r1/items">>, <<"i2">>}]),
+            lists:sort(?MOD:cell_keys(H, <<"items">>))
+        )
     end.
 
 info_reports_backend_and_bookie({Pid, _Dir}) ->

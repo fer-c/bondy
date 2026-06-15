@@ -277,7 +277,11 @@ configured; defaults are no-ops so existing instances are unaffected.
     %% draining or about to. The helper blocks on the WAL's
     %% `await_durable/3`; its monitor `DOWN` wakes the applier to
     %% re-drain. Event-driven replacement for the historical busy poll.
-    idle_waiter = undefined :: undefined | reference()
+    idle_waiter = undefined :: undefined | reference(),
+    %% Callers parked on `await_drain/1` (the cold-start rebuild barrier),
+    %% replied `ok` the next time the WAL drain reaches end-of-log. Empty in
+    %% steady state.
+    drain_waiters = [] :: [gen_server:from()]
 }).
 
 -type shard_key() :: {atom(), atom(), non_neg_integer()}.
@@ -357,6 +361,7 @@ configured; defaults are no-ops so existing instances are unaffected.
 -export([rederive_projection_sync/1]).
 -export([rebuild_indexes/1]).
 -export([rebuild_indexes_sync/1]).
+-export([await_drain/1]).
 -export([reap_origins_sync/2]).
 -export([cell_apply_target/1]).
 -export([install_catalogue_batch/2]).
@@ -650,6 +655,18 @@ rebuild_indexes(ApplierPid) when is_pid(ApplierPid) ->
 -doc "Synchronous variant of `rebuild_indexes/1` (the rebuild barrier).".
 rebuild_indexes_sync(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, rebuild_indexes, infinity).
+
+-spec await_drain(pid()) -> ok.
+
+-doc """
+Block until the applier has drained its WAL to end-of-log — the cold-start
+rebuild barrier. Queues the caller and triggers a drain; replies `ok` the moment
+the drain next reaches end-of-log, so a `rebuild_indexes_sync/1` (or a freshen on
+the trust path) issued afterwards observes a fully-replayed MST/projection rather
+than racing the not-yet-applied tail (`PLUM_DB_TO_BONDY_DB_DESIGN.md` D-9).
+""".
+await_drain(ApplierPid) when is_pid(ApplierPid) ->
+    gen_server:call(ApplierPid, await_drain, infinity).
 
 -spec reap_origins_sync(pid(), [term()]) ->
     {ok, reap_report()} | {error, term()}.
@@ -1114,6 +1131,13 @@ handle_call(rebuild_indexes, _From, State) ->
     %% each cell's current projection value with the back-pressure cap
     %% bypassed, re-dispatching to the secondary writers.
     {reply, ok, do_rebuild_indexes(State)};
+handle_call(await_drain, From, State) ->
+    %% Cold-start rebuild barrier: queue the caller and ensure a drain runs.
+    %% The waiter is replied `ok` once the drain reaches end-of-log (the
+    %% `{ok, _}` branch of `handle_info(drain, _)`, via `reply_drain_waiters/1`),
+    %% so a subsequent rebuild/freshen observes a fully-replayed MST.
+    self() ! drain,
+    {noreply, State#state{drain_waiters = [From | State#state.drain_waiters]}};
 handle_call(
     {reap_origins, _Retired},
     _From,
@@ -1221,7 +1245,11 @@ handle_info(drain, State0) ->
             %% that cross-node sync depends on). The waiter fires the
             %% instant a new frame becomes durable — immediate apply
             %% latency, near-zero idle CPU, responsive mailbox.
-            {noreply, arm_idle_waiter(State2)};
+            %%
+            %% Reaching end-of-log is also the signal any `await_drain/1`
+            %% callers (the cold-start rebuild barrier) wait on, so reply to
+            %% them here before parking.
+            {noreply, arm_idle_waiter(reply_drain_waiters(State2))};
         {paused, State2} ->
             %% Hit the demand cap. Stay parked — the instance will
             %% send `drain_resume` once it processes a batch. The
@@ -1899,17 +1927,17 @@ vv_merge(A, B) ->
 %% one read + one term-diff per distinct cell, vs one kernel re-apply per
 %% event.
 %%
-%% Cell directory: the MST is the authoritative set of cell keys (every
-%% projection cell has at least one `cell_apply` event). We walk it for the
-%% distinct `{Bucket, Key}` set but read each cell's VALUE from the
-%% projection. The projection is current here by mailbox ordering: a
-%% cold-start `replay_cell_events` cast (queued in `init/1`) is processed
-%% before any `rebuild_indexes` call, and local writes reach the projection
-%% via `bondy_oplog_cell_apply:apply_cell_batch/3` before their MST install.
-%% A cell present in the
-%% MST but not yet in the projection (e.g. a peer cell awaiting
-%% `do_replay_cell_events/1`) is skipped; the replay that lands it in the
-%% projection also dispatches its index ops, so it is self-healing.
+%% Cell directory: read from the PROJECTION, not the MST (D-9). The MST is a
+%% truncatable recent-events structure — compaction drops events `<=` the
+%% watermark (`bondy_oplog_instance:truncate_below_or_equal/2`), and a
+%% no-checkpoint crash loses its in-memory tail — so its cell set is generally
+%% INCOMPLETE relative to the durable projection. Deriving the directory from
+%% `distinct_cell_keys(MST)` would silently miss every already-compacted (or
+%% crash-lost) cell, leaving a half-built index that is nonetheless marked
+%% trusted. The projection is the durable, complete materialised state, so the
+%% rebuild enumerates the primary's own cells there (`Adapter:cell_keys/2`,
+%% scoped to this entity type) and reads each value from it. The MST walk
+%% remains the fallback for an adapter that cannot enumerate.
 do_rebuild_indexes(#state{cell_apply_ctx = undefined} = State) ->
     State;
 do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
@@ -1928,43 +1956,66 @@ do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
 %% projection rather than replaying events. Dispatch bypasses the
 %% back-pressure cap so the full working set lands in one pass even when a
 %% prior saturation left the cap tripped.
-reindex_from_projection(Ctx, Id, SecIdx) ->
-    case bondy_oplog_registry:mst(Id) of
-        undefined ->
-            ok;
-        MST ->
-            #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
-            {IdxAcc, MaxHlc} = lists:foldl(
-                fun({Bucket, Key}, {IAcc, HAcc}) ->
-                    case
-                        reindex_one_cell(
-                            Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key
-                        )
-                    of
-                        {ok, IdxOps, Hlc} ->
-                            {
-                                bondy_oplog_cell_apply:merge_idx_ops(
-                                    IAcc, IdxOps
-                                ),
-                                bondy_oplog_cell_apply:max_hlc(HAcc, Hlc)
-                            };
-                        skip ->
-                            {IAcc, HAcc}
-                    end
-                end,
-                {#{}, undefined},
-                distinct_cell_keys(MST)
-            ),
-            bondy_oplog_cell_apply:dispatch_index_ops(
-                SecIdx, IdxAcc, MaxHlc, true
-            ),
-            ok
+reindex_from_projection(#{adapter := Adapter, handle := Handle, kernel := Kernel}, Id, SecIdx) ->
+    CellKeys = primary_cell_directory(Adapter, Handle, Id),
+    {IdxAcc, MaxHlc} = lists:foldl(
+        fun({Bucket, Key}, {IAcc, HAcc}) ->
+            case reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) of
+                {ok, IdxOps, Hlc} ->
+                    {
+                        bondy_oplog_cell_apply:merge_idx_ops(IAcc, IdxOps),
+                        bondy_oplog_cell_apply:max_hlc(HAcc, Hlc)
+                    };
+                skip ->
+                    {IAcc, HAcc}
+            end
+        end,
+        {#{}, undefined},
+        CellKeys
+    ),
+    bondy_oplog_cell_apply:dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, true),
+    ok.
+
+%% @private
+%% The cell directory for a rebuild: the UNION of
+%%   1. the durable PROJECTION cells of this entity type (`Adapter:cell_keys/2`),
+%%      the authoritative directory for `shared_shards`/`single_bookie` — present
+%%      even after a crash that emptied the MST (D-9, the reason this exists);
+%%   2. the MST `cell_apply` cells (`distinct_cell_keys/1`), which cover
+%%      `per_entity` (bucket = `<<Realm>>`, carries no `ET`, so the `ET`-scoped
+%%      `cell_keys/2` cannot see it) while the MST is intact.
+%% Both sources are per-table-scoped — `cell_keys/2` by `ET`, the MST by being
+%% per-instance — so the union never pulls in another table's cells; `usort`
+%% de-dups the overlap. Caveat: a `per_entity` table whose MST was emptied by a
+%% no-checkpoint crash is not covered (neither source yields its cells); that
+%% topology is not used in v1.
+primary_cell_directory(Adapter, Handle, Id) ->
+    FromProjection =
+        case erlang:function_exported(Adapter, cell_keys, 2) of
+            true -> Adapter:cell_keys(Handle, entity_type_of(Id));
+            false -> []
+        end,
+    FromMST =
+        case bondy_oplog_registry:mst(Id) of
+            undefined -> [];
+            MST -> distinct_cell_keys(MST)
+        end,
+    lists:usort(FromProjection ++ FromMST).
+
+%% @private
+%% The entity type embedded in an instance id `<<DbName, "/", ET, "/", Shard>>`
+%% (`bondy_db:encode_instance_id/3`). Used to scope the rebuild's projection
+%% enumeration to this table's primary buckets.
+entity_type_of(Id) when is_binary(Id) ->
+    case binary:split(Id, <<"/">>, [global]) of
+        [_DbName, ET, _Shard] -> ET;
+        _ -> Id
     end.
 
 %% @private
 %% The distinct `{Bucket, Key}` cell keys named by the MST's `cell_apply`
-%% events (the authoritative cell directory), de-duplicated so a cell with
-%% N events is read and re-indexed once.
+%% events, de-duplicated. Fallback directory only (the MST is truncatable; see
+%% `primary_cell_directory/3`).
 distinct_cell_keys(MST) ->
     lists:usort([
         {Bucket, Key}
@@ -2972,6 +3023,16 @@ arm_idle_waiter(#state{iter = Iter, wal_pid = WalPid} = State) ->
         )
     end),
     State#state{idle_waiter = MRef}.
+
+%% @private
+%% Reply `ok` to every caller parked on `await_drain/1`. Called from the drain's
+%% end-of-log branch, so a cold-start rebuild barrier unblocks the instant the
+%% WAL is fully replayed.
+reply_drain_waiters(#state{drain_waiters = []} = State) ->
+    State;
+reply_drain_waiters(#state{drain_waiters = Ws} = State) ->
+    _ = [gen_server:reply(W, ok) || W <- Ws],
+    State#state{drain_waiters = []}.
 
 %% @private
 %% Drop a parked idle waiter (if any). The orphaned helper is harmless:
