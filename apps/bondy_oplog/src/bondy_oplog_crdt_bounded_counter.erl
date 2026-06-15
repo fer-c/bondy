@@ -15,9 +15,9 @@ Zero-bounded counter — the first **non-commutative** operation-based CRDT.
 
 A counter that increments and decrements but is **clamped at zero**: it
 never reports a negative value. This is Canteen's `zero_bounded_counter`,
-and it is the flagship demonstration that the operation-based
-re-grounding unlocks CRDTs whose concurrent operations do **not**
-commute — something the state-based folds could never express.
+and it is the flagship demonstration that the operation-based approach
+unlocks CRDTs whose concurrent operations do **not** commute — something
+the state-based folds could never express.
 
 It implements `bondy_oplog_crdt` directly (it is **not** a
 `bondy_oplog_crdt_commutative`) and declares `order_independent() ->

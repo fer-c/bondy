@@ -49,20 +49,18 @@ never corrupts term order even when one term is a byte-prefix of
 another. Recovering the primary key is a scan to the first (and only)
 `0x00`.
 
-### Deviation from the design's literal byte values
+### Deviation from the naïve byte values
 
-`MST_DB_DESIGN.md §13` sketches the escape as `0x00 -> 0x00 0x01` with a
-*bare* `0x00` separator. That scheme is not order-preserving for an
-arbitrary appended primary key: when term `T1` is a prefix of term
-`T2`, the byte following `T1`'s separator is the primary key's first
-byte, which can compare greater than the `0x01` that opens `T2`'s
-escaped continuation — inverting the intended `T1 < T2` order. We use a
-prefix-free *monotone* code (escape into the `0x01` range, reserve
-`0x00` solely as the separator) which is provably order-preserving for
-any primary-key suffix. Same goal as the design (order-preserving,
-self-delimiting, recover the key by scanning to the separator), correct
-construction. See the project convention on preferring empirically
-correct implementations over paper-design contracts.
+An alternative escape maps `0x00 -> 0x00 0x01` with a *bare* `0x00`
+separator. That scheme is not order-preserving for an arbitrary appended
+primary key: when term `T1` is a prefix of term `T2`, the byte following
+`T1`'s separator is the primary key's first byte, which can compare
+greater than the `0x01` that opens `T2`'s escaped continuation —
+inverting the intended `T1 < T2` order. We use a prefix-free *monotone*
+code (escape into the `0x01` range, reserve `0x00` solely as the
+separator) which is provably order-preserving for any primary-key suffix.
+Same goal (order-preserving, self-delimiting, recover the key by scanning
+to the separator), correct construction.
 
 ## Bounds
 
@@ -169,8 +167,8 @@ The storage-layer bucket for an index's cells:
 `<<PrimaryBucket, "/$idx/", IndexName>>`. Each `(NS, IndexName, SecShard)`
 already has its own shard-set, so this only needs to isolate realms (the
 `PrimaryBucket` prefix); the `IndexName` suffix keeps the bucket
-self-describing and matches `MST_DB_DESIGN.md §13`. Reader and writer
-MUST agree on this layout — it is the single source of truth.
+self-describing. Reader and writer MUST agree on this layout — it is the
+single source of truth.
 """.
 -spec bucket(binary(), atom()) -> binary().
 
@@ -207,7 +205,7 @@ bucket_suffix(IndexName) when is_atom(IndexName) ->
 Storage location `{Bucket, Key}` of an index shard's **durable trust
 marker** — a reserved cell whose **presence means the shard is built and
 clean** (trustworthy on cold-start) and whose **absence means it must be
-rebuilt** (`PLUM_DB_TO_BONDY_DB_DESIGN.md` §6.6.2, the durable-marker option).
+rebuilt** using the durable-marker approach.
 
 Inverted ("trusted") rather than "dirty" semantics so that *absence* — the
 default with no on-disk state — uniformly covers BOTH cases that require a
@@ -219,8 +217,8 @@ rebuild on open:
   removed the marker → rebuild).
 
 A clean build/rebuild writes the marker (`index_clear_rebuild/1`); a drop
-removes it (`index_mark_rebuild/1`). The §6.6.2 compaction flush barrier keeps
-a trusted shard's durable cells complete `≤ snapshot_wm`, so a restart trusts
+removes it (`index_mark_rebuild/1`). The compaction flush barrier keeps a
+trusted shard's durable cells complete `≤ snapshot_wm`, so a restart trusts
 + freshens + tail-replays — never an O(table) re-derive.
 
 The marker lives in the reserved bucket `<<"$idx_trusted">>`, deliberately
@@ -254,8 +252,7 @@ trust_marker_loc(NS, IndexName, Shard) when
 -doc """
 Storage location `{Bucket, Key}` of an index shard's **durable
 clean-shutdown flag** — a reserved cell whose **presence means the shard
-was durably flushed to the primary head at a clean shutdown**
-(`PLUM_DB_TO_BONDY_DB_DESIGN.md` §6.6, F1-minimal).
+was durably flushed to the primary head at a clean shutdown**.
 
 It is the second gate of the cold-start trust decision, alongside the trust
 marker (`trust_marker_loc/3`): a shard is trusted on open only if it is both

@@ -11,7 +11,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Top-level library supervisor (`_design/10_new_design.md` §11.1).
+Top-level library supervisor.
 
 Children, in start order:
 

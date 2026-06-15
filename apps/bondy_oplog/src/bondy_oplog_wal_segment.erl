@@ -13,10 +13,10 @@
 ?MODULEDOC("""
 Segment header read/write and segment file lifecycle primitives.
 
-See `_design/WAL_DESIGN.md` §4. A WAL segment file (`.qdata`) starts
-with a fixed 48-byte header followed by a stream of frames written by
-`bondy_oplog_wal_frame`. The header is written once on segment
-creation, fsynced, and never updated afterwards.
+A WAL segment file (`.qdata`) starts with a fixed 48-byte header
+followed by a stream of frames written by `bondy_oplog_wal_frame`.
+The header is written once on segment creation, fsynced, and never
+updated afterwards.
 
 ```
 Offset  Size  Field           Description
@@ -97,7 +97,7 @@ Returns the 8-byte instance id hash used in segment headers.
 
 It is the leading 8 bytes of `crypto:hash(sha256, InstanceId)`. The hash
 makes the segment header self-describing — a segment file restored onto
-the wrong instance directory is detected via header mismatch (§4.1).
+the wrong instance directory is detected via header mismatch.
 """).
 -spec instance_id_hash(instance_id()) -> binary().
 
@@ -241,8 +241,8 @@ Verifies a parsed header belongs to the expected instance/origin.
 
 Returns `ok` if every identity field matches the caller's expectation,
 or `{error, {orphan_segment, Reason}}` where `Reason` describes the
-first mismatched field. The recovery procedure (§12) uses this to
-refuse orphan segments (e.g., a backup tarball restored onto the wrong
+first mismatched field. The recovery procedure uses this to refuse
+orphan segments (e.g., a backup tarball restored onto the wrong
 instance or replica).
 
 Identity check fields:

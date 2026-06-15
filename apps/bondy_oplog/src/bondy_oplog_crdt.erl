@@ -10,7 +10,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Behaviour for consumer-defined CRDTs (`_design/10_new_design.md` §9).
+Behaviour for consumer-defined CRDTs.
 
 A *CRDT module* binds an oplog instance to a domain semantics. The
 library is otherwise agnostic to event payload meaning; it is the
@@ -57,8 +57,8 @@ machinery; the consumer supplies the interpretation function.
 ## Projection-seam callbacks
 
 These let the applier keep a materialised projection value current on
-write (the eager-materialised projection, `architecture_regrounding_plan.md`
-§6 Option B), with `interpret_cog/2` as the sole convergence kernel.
+write (the eager-materialised projection path), with `interpret_cog/2`
+as the sole convergence kernel.
 
 - `to_value(State) -> Value` projects a CRDT state to the user-facing
   value stored in the projection / served on reads. Pure.

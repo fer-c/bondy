@@ -17,9 +17,8 @@ CRDTs whose concurrent operations **commute** — registers, sets, counters,
 presence.
 
 It depends only on `bondy_oplog_event`; there is no longer any state-based
-fold family to depend on (the re-grounding removed it in PR-Z), so building
-on it cannot re-introduce the state-based drift this re-grounding exists to
-remove.
+fold family to depend on, so building on it cannot re-introduce state-based
+drift.
 
 ## The contract
 
@@ -52,8 +51,7 @@ change the result. Therefore:
 - **Eager O(1) write path** (`apply_op/5`): apply a single new operation
   onto the materialised state as it arrives. Because the CRDT commutes,
   this converges to exactly the batch result without re-folding the
-  cell's history — the cheap projection-maintenance path
-  (`architecture_regrounding_plan.md` §6, Option B).
+  cell's history — the cheap eager projection-maintenance path.
 
 ## tier_0 vs tier_2 step
 

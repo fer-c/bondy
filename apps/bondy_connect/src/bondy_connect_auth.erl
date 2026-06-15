@@ -12,7 +12,7 @@ This is the client mirror of the router's `auth_challenge`/`bondy_auth`
 round: given the configured method and an inbound `CHALLENGE.Extra`, it
 produces the `AUTHENTICATE` signature. The cryptographic primitives are the
 single source of truth shared with the router (`bondy_wamp_cryptosign`,
-`bondy_wamp_cra`, Decision 4).
+`bondy_wamp_cra`).
 
 A client is configured with exactly one method (the common case). The
 implementations are:

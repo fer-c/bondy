@@ -12,8 +12,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Serialised rebuild orchestrator for the secondary indexes
-(`MST_DB_DESIGN.md` §13, IDX-4).
+Serialised rebuild orchestrator for the secondary indexes.
 
 A secondary index is a deterministic function of the primary. It is
 therefore *rebuildable* at any time from the primary's converged

@@ -8,8 +8,8 @@
 -moduledoc """
 The connection process: a `gen_statem` that owns the transport, drives the
 session handshake through the pure `bondy_connect_protocol` layer, and
-correlates requests/replies (Decision 3 — it speaks **records** to both the
-transport and the protocol).
+correlates requests/replies — it speaks **records** to both the transport and
+the protocol.
 
 ## Transport states
 
@@ -53,8 +53,8 @@ is fail-fast by default (configurable via `reconnect.retry_initial_connect`).
 Correlation, the registry, the per-subscription dispatch queues and the load
 counter all live in the `gen_statem` data — never shared ETS (fixes the awre
 race), auto-reclaimed on death. `process_flag(sensitive, true)` is set while
-authenticating and cleared on `established` (Decision 12). Reconnect/ping and
-CANCEL/INTERRUPT/progressive arrive in Phases 5–6.
+authenticating and cleared on `established`. Reconnect/ping and
+CANCEL/INTERRUPT/progressive arrive in later phases.
 """.
 
 -behaviour(gen_statem).

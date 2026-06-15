@@ -12,8 +12,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Reference subscription dispatcher for `bondy_oplog_core:subscribe/2`
-(`MST_DB_DESIGN.md` §12).
+Reference subscription dispatcher for `bondy_oplog_core:subscribe/2`.
 
 Subscriptions are local-only (do not cross nodes). The dispatcher owns
 a `public set` ETS table of `(SubRef, Namespace, Pid, MonitorRef,
@@ -109,7 +108,7 @@ does not police this.
 -export([subscription_count/0]).
 -export([subscription_count/1]).
 
-%% Restart-recovery protocol (`MST_DB_DESIGN.md` §12.3, §18 item 11).
+%% Restart-recovery protocol.
 -export([current_epoch/0]).
 
 -export([
@@ -200,7 +199,7 @@ current_epoch() ->
     gen_server:call(?MODULE, current_epoch).
 
 %% =============================================================================
-%% Telemetry (`MST_DB_DESIGN.md` §16)
+%% Telemetry
 %% =============================================================================
 
 emit_subscribe_event(NS, Pattern) ->

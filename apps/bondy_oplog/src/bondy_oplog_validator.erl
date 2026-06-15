@@ -9,8 +9,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Behaviour for the pluggable event validator (`_design/10_new_design.md`
-§10).
+Behaviour for the pluggable event validator.
 
 The library wires `sign_event/2` on local appends and `verify_event/2`
 on remote receipts; consumers configure the validator per instance

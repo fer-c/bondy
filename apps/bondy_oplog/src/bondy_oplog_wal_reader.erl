@@ -14,10 +14,9 @@
 ?MODULEDOC("""
 WAL reader / iterator.
 
-See `_design/WAL_DESIGN.md` §11.2, §13.2. The reader is the consumer
-side of the WAL: it walks the on-disk frame stream forward, one frame
-(one batch) at a time, across segment boundaries, and is the path the
-applier uses to consume events.
+The reader is the consumer side of the WAL: it walks the on-disk
+frame stream forward, one frame (one batch) at a time, across segment
+boundaries, and is the path the applier uses to consume events.
 
 Two cooperating reader contracts are supported in v1:
 
@@ -341,7 +340,7 @@ live_segment_ids(View) ->
 %% @private
 %% Resolves a `{hlc, T}` start to a concrete `{SegId, Offset}` pair plus
 %% the seek target the reader uses to filter the first batch of frames
-%% it decodes. See WAL_DESIGN.md §7.4.
+%% it decodes.
 %%
 %% 1. Pick the candidate segment by walking `live_segments` (with the
 %%    head segment patched in from `head_first_hlc`) and selecting the

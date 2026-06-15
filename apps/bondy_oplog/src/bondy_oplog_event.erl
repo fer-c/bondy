@@ -16,8 +16,7 @@ replication layer.
 ## Identity
 
 An *event key* is a `{HLC, Origin, Seq}` triple that is globally unique
-*by construction* (see `_design/0_architecture.md` §4.2 and
-`_design/4_event_key_uniqueness.md`):
+*by construction*:
 
 - `HLC` — a 64-bit Hybrid Logical Clock value (see `bondy_oplog_hlc`).
 - `Origin` — the opaque binary id of the creating replica.
@@ -31,9 +30,8 @@ the order in which events are delivered to the COG-Interpreter.
 ## Event payload
 
 The `op` and `meta` fields are opaque to the replication layer. They
-carry, respectively, the operation (the client's intention; see
-`_design/event_payload_design.md`) and the tier-specific causal metadata
-(see `_design/2_mst_causal_clocks.md`).
+carry, respectively, the operation (the client's intention) and the
+tier-specific causal metadata.
 
 ## Public surface
 

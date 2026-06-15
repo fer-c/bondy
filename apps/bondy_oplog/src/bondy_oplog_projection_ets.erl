@@ -118,7 +118,7 @@ direction, capped at `limit` (default 1000).
 
 `High` may be the atom `infinity` for an open-ended scan (every key
 `>= Low` in the bucket) — the form the secondary-index primary-scan
-fallback (IDX-4) uses, since no finite binary exceeds every possible key.
+fallback uses, since no finite binary exceeds every possible key.
 """.
 range(Tab, Bucket, Low, High, Opts) ->
     Limit = maps:get(limit, Opts, 1000),
@@ -166,9 +166,9 @@ delete(Tab, Bucket, Key) ->
 
 -doc """
 Delete every row in the backing table (the optional `clear/2` callback),
-used by the secondary-index rebuild (IDX-4) to wipe a stale index shard
-before re-folding it from the primary, so orphaned terms (entries the
-primary value no longer yields) do not survive the rebuild.
+used by the secondary-index rebuild to wipe a stale index shard before
+re-folding it from the primary, so orphaned terms (entries the primary
+value no longer yields) do not survive the rebuild.
 
 `Scope` (a `bondy_oplog_projection_adapter:clear_scope()`) is accepted for
 behaviour conformance but **ignored**: this adapter creates one anonymous table

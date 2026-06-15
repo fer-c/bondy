@@ -43,7 +43,7 @@ Default leveled `book_start/1` options for a Bookie rooted at `Dir`.
 
 `head_only=with_lookup` enables `book_mput/2` (atomic batched writes)
 and `book_headonly/4` (ledger-only point reads), both required by
-`bondy_db_projection_leveled` (PR-PS-15b). With the flag on,
+`bondy_db_projection_leveled`. With the flag on,
 `book_get`/`book_put` are unsupported; the adapter uses `book_headonly`
 + `book_mput` exclusively.
 

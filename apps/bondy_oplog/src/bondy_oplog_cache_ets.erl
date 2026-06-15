@@ -10,8 +10,7 @@
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
 Reference `bondy_oplog_cache_adapter` implementation backed by a single
-`public set` ETS table per `(NS, Index, Shard)` triple
-(`MST_DB_DESIGN.md` §5).
+`public set` ETS table per `(NS, Index, Shard)` triple.
 
 This adapter is bundled with the substrate primarily as a **contract
 validator**: the PropEr suite for `bondy_oplog_core` runs against this

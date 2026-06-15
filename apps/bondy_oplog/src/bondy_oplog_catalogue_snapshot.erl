@@ -11,8 +11,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Peer-side responder for the catalogue-snapshot bootstrap protocol
-(`_design/catalogue_expansion_plan.md` §4.12).
+Peer-side responder for the catalogue-snapshot bootstrap protocol.
 
 Two entry points:
 
@@ -35,18 +34,17 @@ hits the applier (to discover `cell_apply_target`).
 This v1 services single-shard catalogues that store all cells in one
 bucket. The default bucket is `<<>>` (matching the convention in
 existing test instances). Multi-shard / multi-bucket catalogue
-bootstrap is a follow-up; see Architecture QA §4.12.
+bootstrap is a follow-up.
 
 ## Snapshot consistency
 
 The cursor captures the high-water HLC at session start. Cells
 returned in subsequent batches MAY include writes past that HLC — the
 range scan is live, not a frozen snapshot. The bootstrap install
-contract (PR-D2 §3) does NOT depend on snapshot freezing: each cell is
+contract does NOT depend on snapshot freezing: each cell is
 applied via the fold's idempotent `apply_event/3`, and live events
 arriving during the bootstrap window are guarded by the per-cell HLC
-skip-if-older check on `pre_bootstrap`. See [[project-prd1-landed-2026-05-22]]
-for the consistency contract.
+skip-if-older check on `pre_bootstrap`.
 """).
 
 -export([init/1]).

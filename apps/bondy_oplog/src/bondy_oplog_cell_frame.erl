@@ -9,8 +9,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Codec for **projection cell value frames** (V2) — see
-`_design/catalogue_expansion_plan.md` §3.3.
+Codec for **projection cell value frames** (V2).
 
 A projection adapter stores each cell as a binary frame:
 

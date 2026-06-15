@@ -22,9 +22,9 @@
 -define(PRIMARY_INDEX, primary).
 
 %% Bounded wait for a secondary-index writer flush during the compaction
-%% flush barrier (§6.6.2). Generous — a normal flush drains only a ~5 ms
+%% flush barrier. Generous — a normal flush drains only a ~5 ms
 %% coalesce buffer — so it only ever trips on a genuinely wedged/dead
-%% writer, which then takes the §6.6.3 rebuild backstop.
+%% writer, which then takes the rebuild backstop.
 -define(IDX_FLUSH_TIMEOUT_MS, 5000).
 
 %% Ephemeral fused-writer mode (fused-writer rollout, Step 3). When
@@ -48,8 +48,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-The per-instance Merkle Search Tree owner
-(`_design/10_new_design.md` §11.3).
+The per-instance Merkle Search Tree owner.
 
 Exactly one process per running instance; one MST per instance; one
 storage backend handle per instance.
@@ -77,9 +76,8 @@ storage backend handle per instance.
 
 The library is **agnostic** to lifecycle policy. This module does not
 do lazy loading, LRU eviction, cold-tier offload, or per-tenant
-naming. Those are *consumer* concerns (`_design/10_new_design.md`
-§1.2, §12). The instance is started eagerly via
-`bondy_oplog:start_instance/1,2`.
+naming. Those are consumer concerns. The instance is started eagerly
+via `bondy_oplog:start_instance/1,2`.
 
 Anti-entropy and GC scheduling live in dedicated modules; they *use*
 this one.
@@ -156,7 +154,7 @@ without protocol changes.
     backend :: backend(),
     validator_module :: module(),
     validator_state :: term(),
-    %% Per-namespace fold strategy (FOLD_STRATEGY_DESIGN §6/§7). The
+    %% Per-namespace fold strategy. The
     %% applier consumes WAL events and folds them into per-cell
     %% projection state via this module's callbacks. `undefined`
     %% means no fold is configured for the instance and the applier
@@ -266,8 +264,7 @@ without protocol changes.
     %% Bootstrap lifecycle (`bondy_oplog_bootstrap_lifecycle`). Opened
     %% at `init/1` and published via the registry so the applier can
     %% gate its WAL drain on the durable two-state machine
-    %% (`pre_bootstrap | live`). See
-    %% `_design/catalogue_expansion_plan.md` §2.
+    %% (`pre_bootstrap | live`).
     lifecycle :: bondy_oplog_bootstrap_lifecycle:handle(),
     %% Set when a peer-merged (remote) event has entered the MST since the
     %% last catalogue compaction. ONLY remote events need the pre-truncate
@@ -344,7 +341,7 @@ without protocol changes.
     validator_opts => map(),
     %% Per-table CRDT, named by a `fold_module` label for backward
     %% compatibility. Resolves to its native `bondy_oplog_crdt` twin via
-    %% `bondy_oplog_cell_kernel:default_crdt_for_fold/1` (PR-Z): a
+    %% `bondy_oplog_cell_kernel:default_crdt_for_fold/1`: a
     %% shorthand atom (`lww_register`, `g_counter`, `pn_counter`, `g_set`,
     %% `max_register`, `min_register`, `index_entry`), the fully-qualified
     %% `bondy_oplog_fold_*` form, or a native `bondy_oplog_crdt_*` module
@@ -388,8 +385,7 @@ without protocol changes.
     %% `pre_bootstrap` until `bondy_oplog_sync_session:bootstrap/3`
     %% completes against a live peer. Ephemeral instances (no
     %% `storage_path`) default to `live` regardless of `seed` —
-    %% there is no persistent state to bootstrap from. See
-    %% `_design/catalogue_expansion_plan.md` §2.
+    %% there is no persistent state to bootstrap from.
     seed => boolean()
 }.
 
@@ -1205,7 +1201,7 @@ refresh_validator(Target, Reason) ->
 
 ?DOC("""
 Reap the per-cell causal-context entries of permanently-retired origins
-from this shard's projection (the dead-origin GC; PR-H, #24). A tier_2
+from this shard's projection (the dead-origin GC). A tier_2
 CRDT carries one version-vector entry per origin that ever wrote a cell;
 a decommissioned node leaves those entries behind forever — the one cost
 that grows with cluster *churn*. This drops only the value-preserving
@@ -1455,8 +1451,7 @@ installed the peer snapshot and the watermark has been advanced.
 
 Idempotent. Order matters: `mark_live/1` MUST be the **last** step in
 the bootstrap completion sequence — the durable flag file is the
-crash-recovery marker that "everything before me succeeded". See
-`_design/catalogue_expansion_plan.md` §2.4.
+crash-recovery marker that "everything before me succeeded".
 """).
 -spec mark_live(instance_id() | pid()) -> ok.
 
@@ -1550,7 +1545,7 @@ install_catalogue_batch(InstanceId, Cells) when
 install_catalogue_batch(InstanceId, {replace, Cells}) when
     is_binary(InstanceId)
 ->
-    %% `replace` is the only mode — PR-G removed the CvRDT `merge` mode.
+    %% `replace` is the only supported mode; `merge` was removed.
     %% Guard fails fast on a stray `{merge, _}` here rather than letting it
     %% reach the applier (which would function_clause).
     case bondy_oplog_registry:fused(InstanceId) of
@@ -1728,7 +1723,7 @@ init({InstanceId, Opts}) ->
             ok
     end,
     MST = open_mst(InstanceId, Backend, Opts),
-    %% Stage 5: compaction checkpoint + watermark recovery.
+    %% Compaction checkpoint + watermark recovery.
     %% Default backend resolution: prefer the file backend when the
     %% instance has any durable storage configured (`storage_path` or
     %% an explicit `compaction_checkpoint_opts.path`); otherwise fall
@@ -1862,10 +1857,9 @@ init({InstanceId, Opts}) ->
     %% outlived a one_for_all restart) is overwritten. Symmetric with
     %% `set_wal_pid/2` / `set_applier_pid/2`.
     ok = bondy_oplog_registry:set_overlay_tab(InstanceId, Overlay),
-    %% Publish the substrate read-side AE targets (`MST_DB_DESIGN.md`
-    %% §18 items 6 & 8). Top-level instance opt; immutable for the
-    %% instance's lifetime. Validation is deferred to startup: a
-    %% malformed list crashes init before any peer can interact.
+    %% Publish the substrate read-side AE targets. Top-level instance opt;
+    %% immutable for the instance's lifetime. Validation is deferred to
+    %% startup: a malformed list crashes init before any peer can interact.
     AeTargets = validate_ae_targets(maps:get(ae_targets, Opts, [])),
     ok = bondy_oplog_registry:set_ae_targets(InstanceId, AeTargets),
     %% Publish the lock-free `append_fast` bundle iff the validator
@@ -2808,8 +2802,7 @@ fused_batch_summary(Batch) ->
 %% `bondy_oplog_wal_state` consumer-offset (which guards `Off >= header bytes`
 %% and persists to disk) does not apply. There is nothing to resume from on a
 %% fresh BEAM (re-sync from peers), so we only track the uncommitted count for
-%% the AE-freshness commit cadence. (Communicating the committed Seq to the mem
-%% WAL for GC is PR-3.)
+%% the AE-freshness commit cadence.
 fused_bump_offset(
     #fused_drain{wal_backend = mem, uncommitted = U} = FD,
     _Seg,
@@ -3128,7 +3121,7 @@ unstage_overlay(#state{overlay = Tab, overlay_counters = Ctrs}, Events) ->
 %% byte-estimate counters used by `overlay_admit/2`. Origin is `local`
 %% for events that went through the WAL; a future eager-push receiver
 %% will insert with `eager_pushed` so the applier's eviction protocol
-%% can distinguish the two (§10.3 of the applier design).
+%% can distinguish the two.
 stage_to_overlay(
     #state{overlay = Overlay, overlay_counters = Ctrs} = State, Events
 ) ->
@@ -3867,8 +3860,7 @@ run_compaction(
                 %% projection-backed instance (every `bondy_db` table:
                 %% the applier's cell kernel maintains each cell via
                 %% `interpret_cog` on write) takes the catalogue path even
-                %% though it also has a `crdt_module`. See
-                %% `architecture_regrounding_plan.md` §7 step 4.
+                %% though it also has a `crdt_module`.
                 %% `HasProjection` is the memoised value (see
                 %% `resolve_has_projection/1`) — NOT a per-cycle applier call.
                 case HasProjection of
@@ -4193,7 +4185,7 @@ begin_async_catch_up(State, Started, Frontier) ->
 %% Verified by
 %% `bondy_oplog_catalogue_compaction_test:crdt_kernel_compaction_matches_from_scratch`.
 finalize_catalogue_compaction(State0, Started, Frontier) ->
-    %% Index flush barrier (§6.6.2). Drive the secondary indexes durably to
+    %% Index flush barrier. Drive the secondary indexes durably to
     %% >= Frontier BEFORE the MST tail is truncated. Every index op for an
     %% event <= Frontier has already been DISPATCHED to the secondary writers
     %% (local events at apply time; remote events by the async catch-up that
@@ -4209,13 +4201,13 @@ finalize_catalogue_compaction(State0, Started, Frontier) ->
     %% never calls back into the instance or applier (one-directional edge —
     %% contrast the instance<->applier cycle that forced the async catch-up).
     %% A wedged/dead writer is caught and its shard marked for rebuild (the
-    %% §6.6.3 backstop) so truncation still proceeds.
+    %% rebuild backstop) so truncation still proceeds.
     %%
-    %% NOTE (§6.6.2, partial): this covers the common case where the ops were
-    %% dispatched. The saturation/drop case (index ops never dispatched) still
-    %% relies on the writer-crash/drop `needs_rebuild` + background rebuild
-    %% from the (un-truncated) projection; re-deriving the dropped window here
-    %% needs the applier and therefore the async path (see the design note).
+    %% NOTE: this covers the common case where the ops were dispatched. The
+    %% saturation/drop case (index ops never dispatched) still relies on the
+    %% writer-crash/drop `needs_rebuild` + background rebuild from the
+    %% (un-truncated) projection; re-deriving the dropped window here needs
+    %% the applier and therefore the async path.
     State = drive_secondary_indexes(State0),
     {ok, CkptUs} = tc(fun() ->
         (State#state.compaction_checkpoint):put_checkpoint(
@@ -4283,7 +4275,7 @@ fused_reanchor_cursor(#fused_drain{} = FD, NewRoot) ->
     FD#fused_drain{last_replayed_root = NewRoot}.
 
 %% @private
-%% Compaction flush barrier (§6.6.2). flush_sync every **durable** secondary-
+%% Compaction flush barrier. flush_sync every **durable** secondary-
 %% index writer of this instance's `bondy_db` table so dispatched index ops are
 %% durable before the MST tail is truncated. Returns State with the NS memoised
 %% (see `resolve_secondary_index_ns/1`). A no-op for an instance with no
@@ -4365,7 +4357,7 @@ is_durable_index_shard(E) ->
 %% @private
 %% flush_sync every DURABLE secondary-index writer registered under `NS`. A
 %% writer that cannot flush in `?IDX_FLUSH_TIMEOUT_MS` (dead/wedged) is skipped
-%% and its shard marked for rebuild (the §6.6.3 backstop) so truncation still
+%% and its shard marked for rebuild (the rebuild backstop) so truncation still
 %% proceeds and the shard is recovered in the background from the
 %% (un-truncated) projection.
 flush_secondary_index_writers(NS) ->
@@ -4394,7 +4386,7 @@ flush_or_backstop(Entry) ->
                             "bondy_oplog_instance compaction flush barrier "
                             "could not flush a secondary-index writer; "
                             "marking the shard for rebuild and proceeding "
-                            "with the truncate (§6.6.3 backstop).",
+                            "with the truncate.",
                         entry_key => bondy_oplog_core_registry:entry_key(Entry),
                         class => Class,
                         reason => Reason
@@ -4599,8 +4591,8 @@ open_mst(InstanceId, Backend, Opts) ->
 %% so the only legitimate caller is an idempotent peer re-receive, where
 %% the two values must be equal. A divergent merge for the same key is a
 %% system-invariant violation and is surfaced loudly rather than silently
-%% absorbed. CRDT-valued tables converge via their `fold_module`
-%% (FOLD_STRATEGY_DESIGN §6/§7), not through this hook.
+%% absorbed. CRDT-valued tables converge via their configured `fold_module`,
+%% not through this hook.
 merge_page_value(_Key, V, V) ->
     V;
 merge_page_value(Key, V1, V2) ->
@@ -4983,9 +4975,9 @@ resolve_fold_config(InstanceId, Opts) ->
             ok = assert_fold_opts(FoldOpts0),
             {undefined, FoldOpts0};
         Strategy ->
-            %% PR-Z: the per-instance projection runs the native CRDT twin
-            %% of the `fold_module` label. A label is valid iff it resolves
-            %% to a twin; an unknown label has none.
+            %% The per-instance projection runs the native CRDT twin of the
+            %% `fold_module` label. A label is valid iff it resolves to a
+            %% twin; an unknown label has none.
             case bondy_oplog_cell_kernel:default_crdt_for_fold(Strategy) of
                 undefined ->
                     erlang:error(

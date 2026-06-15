@@ -93,7 +93,7 @@ under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
                        | noop
                        | {error, cas_exhausted}.
 
-%% Adaptive child-container shapes (PART §4.3). Path copying allocates a
+%% Adaptive child-container shapes. Path copying allocates a
 %% fresh node on every mutation, so "adaptive sizing" collapses to:
 %% pick the smallest container type that fits the current child count.
 %%
@@ -507,7 +507,7 @@ Safety: a node `N` is reclaimable iff every live reader is pinning an epoch
 strictly greater than `N`'s retirement tag. The protocol ensures the writer
 bumped the epoch *after* the CAS that made `N` unreachable; any reader with
 a slot >= that bumped value saw the post-CAS root and thus cannot reach
-`N`. See `_design/PATTERN_MATCHING_DESIGN_v2.md` §4.6.
+`N`.
 """.
 -spec reclaim(Handle :: handle()) -> non_neg_integer().
 

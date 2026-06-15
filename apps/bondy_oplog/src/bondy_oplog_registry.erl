@@ -108,10 +108,9 @@ table's lifecycle tied to a supervisor child.
     %%   WAL directly, inserts the overlay row itself, and bumps the
     %%   shared atomics.
     fast_path :: undefined | fast_path(),
-    %% Substrate read-side freshness targets (MST_DB_DESIGN §11/§18
-    %% items 6 & 8). The list of `{Namespace, Index, Shard}` tuples
-    %% that the applier (on every successful commit) and AE rounds
-    %% (on every successful sync) bump via
+    %% Substrate read-side freshness targets. The list of
+    %% `{Namespace, Index, Shard}` tuples that the applier (on every
+    %% successful commit) and AE rounds (on every successful sync) bump via
     %% `bondy_oplog_core_registry:bump_ae_targets/1,2`. Published once at
     %% instance init via `set_ae_targets/2`; unchanged for the
     %% instance's lifetime. Empty list = wiring disabled.
@@ -136,7 +135,7 @@ table's lifecycle tied to a supervisor child.
     %% the handle; the gate check in the drain loop is then a single
     %% atomic read. `undefined` between the entry's creation and the
     %% instance's `init/1` finishing; treated as "live" by the
-    %% applier when missing, matching pre-PR-1 behaviour (no gate).
+    %% applier when missing (no gate).
     lifecycle :: bondy_oplog_bootstrap_lifecycle:handle() | undefined,
     %% Ephemeral fused-writer flag. `true` only for ephemeral (ets
     %% projection) instances that opt into the single-process write
@@ -600,9 +599,9 @@ set_fast_path(InstanceId, FastPath) when is_binary(InstanceId) ->
     ok.
 
 ?DOC("""
-Stores the substrate read-side AE targets for `InstanceId` (`MST_DB_DESIGN.md`
-§18 items 6 & 8). Symmetric with `set_overlay_tab/2`; published once
-at instance init and never updated for the instance's lifetime.
+Stores the substrate read-side AE targets for `InstanceId`. Symmetric
+with `set_overlay_tab/2`; published once at instance init and never
+updated for the instance's lifetime.
 """).
 -spec set_ae_targets(
     instance_id(), [{atom(), atom(), non_neg_integer()}]

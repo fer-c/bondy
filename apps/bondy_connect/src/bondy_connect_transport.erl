@@ -6,10 +6,10 @@
 -module(bondy_connect_transport).
 
 -moduledoc """
-Behaviour for `bondy_connect` transports — the **record-oriented** boundary
-(Decision 3): a transport owns the socket, the codec and the framing, so the
-connection process (`bondy_connect_connection`, Phase 3) and the protocol layer
-deal only in WAMP **records**.
+Behaviour for `bondy_connect` transports — the **record-oriented** boundary:
+a transport owns the socket, the codec and the framing, so the connection
+process (`bondy_connect_connection`) and the protocol layer deal only in WAMP
+**records**.
 
 Implementations:
 

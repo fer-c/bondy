@@ -13,8 +13,8 @@ The per-cell projection **kernel** — the single seam through which the
 applier maintains a catalogue cell's materialised state and value.
 
 A kernel is `{crdt, Mod}` where `Mod` is a native `bondy_oplog_crdt`
-operation-based CRDT. (The legacy state-based fold path was retired in
-PR-Z; every cell type is now a native CRDT.)
+operation-based CRDT. Every cell type is a native CRDT; the legacy
+state-based fold path has been retired.
 
 `from_modules/2` selects the module: a configured `crdt_module` wins;
 otherwise the `fold_module` *label* is resolved to its native CRDT via

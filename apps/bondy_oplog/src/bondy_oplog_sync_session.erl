@@ -13,8 +13,8 @@
 ?MODULEDOC("""
 A single anti-entropy sync session.
 
-Implements the **pull-direction** of the MST reconciliation protocol
-(`_design/10_new_design.md` §7): the *initiator* (this side) repeatedly
+Implements the **pull-direction** of the MST reconciliation protocol:
+the *initiator* (this side) repeatedly
 asks the *peer* for pages it is missing until its local copy of the
 peer's tree is complete. Two such sessions — A pulling from B *and* B
 pulling from A — converge both replicas to the same root.
@@ -114,9 +114,8 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
 
 ?DOC("""
 Spawns the session in a separate process and returns immediately.
-Completion is reported via `peer_state` (and via telemetry, in a
-later stage). The spawned process exits normally on success and with
-an error reason on failure.
+Completion is reported via `peer_state` and via telemetry. The spawned
+process exits normally on success and with an error reason on failure.
 """).
 -spec start(instance_id(), peer_id(), opts()) -> {ok, pid()}.
 
@@ -182,8 +181,7 @@ bootstrap(Instance, Peer, Opts) when is_binary(Instance) ->
                 )
             of
                 {ok, _} ->
-                    %% Bootstrap completion ordering
-                    %% (`_design/catalogue_expansion_plan.md` §2.4):
+                    %% Bootstrap completion ordering:
                     %%   1. load_snapshot (done above) installs the
                     %%      snapshot and advances the watermark to
                     %%      H_boot.
@@ -282,9 +280,9 @@ do_bootstrap_catalogue(Instance, Peer, Opts) ->
 %% @private
 %% Catalogue-snapshot bootstrap: bulk-seed the local projection from the
 %% peer snapshot in `replace` mode (skip-if-older by HLC), mark live (a
-%% `pre_bootstrap` caller), then anti-entropy + op-replay — the plan's
-%% "checkpoint-replace + op-replay" (PR-G removed the CvRDT `merge_states`
-%% merge-mode).
+%% `pre_bootstrap` caller), then anti-entropy + op-replay using the
+%% checkpoint-replace + op-replay approach (CvRDT `merge_states` merge-mode
+%% is not used).
 do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) ->
     case
         Transport:request(
@@ -365,8 +363,8 @@ rederive_projection(Instance) ->
 pull_install_loop(
     Instance, Peer, Transport, TransportOpts, Cursor, Installed, Skipped
 ) ->
-    %% The install is always `replace` (skip-if-older by HLC) — PR-G
-    %% removed merge-mode (the CvRDT `merge_states` join). On a fresh
+    %% The install is always `replace` (skip-if-older by HLC); CvRDT
+    %% `merge_states` merge-mode is not used. On a fresh
     %% replica the local projection is empty so every cell installs; on a
     %% live re-bootstrap a higher-HLC peer cell can clobber a per-Origin-
     %% accumulating CRDT, which the post-bootstrap op-replay then restores.
@@ -553,8 +551,8 @@ maybe_record(_, _, _, _) ->
     ok.
 
 %% @private
-%% Substrate read-side freshness wiring (MST_DB_DESIGN §18 item 8).
-%% After a successful AE round, bump every shard the consumer
+%% Substrate read-side freshness wiring. After a successful AE round,
+%% bump every shard the consumer
 %% registered for this instance so long-quiet shards (no writer
 %% activity) do not trip `{stale, _}` purely on inactivity.
 %%

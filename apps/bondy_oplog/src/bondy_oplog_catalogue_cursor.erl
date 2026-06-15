@@ -15,8 +15,8 @@
 ?MODULEDOC("""
 Node-shared cursor table for catalogue-snapshot bootstrap sessions.
 
-The bootstrap protocol pulls a peer's catalogue projection in batches
-(`_design/catalogue_expansion_plan.md` §4.12). Each session is paged on
+The bootstrap protocol pulls a peer's catalogue projection in batches.
+Each session is paged on
 the peer side by an opaque cursor; this module owns the cursor table.
 
 ## Lifecycle

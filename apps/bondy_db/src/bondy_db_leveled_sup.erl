@@ -11,7 +11,7 @@
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
 `simple_one_for_one` supervisor for leveled Bookies under a `bondy_db`
-topology (`MST_DB_DESIGN.md` §18 — PR9).
+topology.
 
 The supervisor itself is a regular OTP supervisor; topology modules
 (`bondy_db_topology_single_bookie`, `bondy_db_topology_per_entity`)

@@ -32,8 +32,8 @@ a `max`-CAS loop; readers a single `get`.
   `atomics:atomics_ref()` is shared with read-only consumers
   (catalogue freshness reporting, bootstrap finalise). The CAS loop
   is therefore not optional even in the single-writer case, because
-  PR-D2's `finalize_catalogue_bootstrap/3` will also advance from a
-  separate process.
+  `finalize_catalogue_bootstrap/3` also advances from a separate
+  process.
 
 ## Persistence
 
@@ -42,9 +42,8 @@ start the counter is `0` and re-accumulates as new `cell_apply` events
 flow. The watermark powers catalogue-freshness reporting and
 bootstrap finalisation, both of which tolerate the lag (the worst
 case is a stale `{ok, no_watermark}` reply until enough events have
-been applied). Durable persistence is deliberately out of scope for
-PR-D1 — a future PR may add it if a use case justifies the per-write
-cost.
+been applied). Durable persistence is deliberately deferred — a future
+extension may add it if a use case justifies the per-write cost.
 """).
 
 -export([new/0]).

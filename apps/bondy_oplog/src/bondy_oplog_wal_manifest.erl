@@ -13,9 +13,9 @@
 ?MODULEDOC("""
 Per-instance WAL manifest read/write with atomic rename semantics.
 
-See `_design/WAL_DESIGN.md` §5. The manifest records the metadata
-required to open a WAL: the current head segment id, the list of live
-sealed segments with their `FirstHlc`, retention configuration, etc.
+The manifest records the metadata required to open a WAL: the current
+head segment id, the list of live sealed segments with their
+`FirstHlc`, retention configuration, etc.
 
 Format is a sequence of `file:consult/1`-readable Erlang terms, one
 per line, for human debuggability:
@@ -292,7 +292,7 @@ without_scrubber_alert(#?MODULE{scrubber_alerts = A} = M, SegmentId) when
 
 %% @private
 parse_terms(Terms) ->
-    %% Required fields per WAL_DESIGN.md §5. Missing required field is
+    %% Required fields per the manifest format. Missing required field is
     %% an error; unknown fields are tolerated for forward compatibility.
     Map = lists:foldl(
         fun

@@ -13,7 +13,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Default sync scheduler (`_design/_implementation_plan.md` §5).
+Default sync scheduler.
 
 Periodic `gen_server` that, on each tick, asks
 `bondy_oplog:list_instances/0` for the running instances and
@@ -51,7 +51,7 @@ accordingly:
   `bondy_oplog_sync_session:start_bootstrap/3` (single-CRDT mode).
   Single-peer to avoid duplicate snapshot transfers — bootstrap is
   expensive (full projection ship) and multi-peer would not improve
-  correctness (per M3c, `_design/catalogue_expansion_plan.md` §4.12).
+  correctness.
 - **`live`** — fan out one async pull-direction sync session per peer
   via `bondy_oplog_sync_session:start/3` (the historical behaviour).
 

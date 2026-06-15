@@ -12,16 +12,15 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Asynchronous writer for one secondary-index shard
-(`MST_DB_DESIGN.md` §13). One lightweight gen_server per
-`(NS, IndexName, SecShard)` triple, supervised by
-`bondy_oplog_secondary_sup`.
+Asynchronous writer for one secondary-index shard.
+One lightweight gen_server per `(NS, IndexName, SecShard)` triple,
+supervised by `bondy_oplog_secondary_sup`.
 
 ## Why a separate process (not a `bondy_oplog_instance`)
 
 The index keyspace has no WAL, no MST, and no signing — it is a pure
-deterministic function of the primary, rebuilt from it on cold start
-(IDX-4 backfill). A full `bondy_oplog_instance` subtree (`one_for_all`,
+deterministic function of the primary, rebuilt from it on cold start.
+A full `bondy_oplog_instance` subtree (`one_for_all`,
 co-supervising WAL + MST it would never use) is the wrong shape. The
 writer is a mini-applier over the index's ETS projection: it batches the
 index ops the primary applier dispatches, read-modify-writes each touched
@@ -62,7 +61,7 @@ registry row for the projection adapter/handle, cache pair, freshness
 atomics, and high-water ref. This keeps it correct across a registry
 re-registration (epoch change) for free — and it never owns the ETS
 tables it writes (the topology's DB-scoped owner does), so a writer
-crash/restart loses only buffered, not-yet-flushed ops, which IDX-4's
+crash/restart loses only buffered, not-yet-flushed ops, which the
 rebuild recovers.
 
 ## Registry stamp
@@ -107,7 +106,7 @@ projection-handle owner keeps it.
 }).
 
 -define(DEFAULT_COALESCE_MS, 5).
-%% The native op-based CRDT backing every secondary-index cell (PR-Z; the
+%% The native op-based CRDT backing every secondary-index cell (the
 %% op-based twin of the retired `bondy_oplog_fold_index_entry`).
 -define(INDEX_CRDT, bondy_oplog_crdt_index_entry).
 
@@ -145,9 +144,9 @@ flush_sync(Pid) when is_pid(Pid) ->
 
 -doc """
 `flush_sync/1` with a bounded wait. The compaction flush barrier
-(`bondy_oplog_instance:drive_secondary_indexes/1`, §6.6.2) uses this so a
+(`bondy_oplog_instance:drive_secondary_indexes/1`) uses this so a
 wedged or dead writer cannot stall a truncate indefinitely: on timeout the
-caller catches the exit and falls back to the rebuild backstop (§6.6.3)
+caller catches the exit and falls back to the rebuild backstop
 rather than blocking the instance. `Timeout` is in milliseconds (or the
 atom `infinity`).
 """.
@@ -160,12 +159,12 @@ flush_sync(Pid, Timeout) when
 
 -doc """
 Discard the buffered ops without writing them and cancel the flush timer.
-Used by the rebuild orchestrator (IDX-4) before a re-fold: the buffer may
-hold stale ops (e.g. a `put` for a term the primary value no longer
-yields, whose retracting `remove` was dropped on saturation), so applying
-them would resurrect orphaned index entries. The rebuild discards the
-buffer and resets the in-flight counter together, then re-derives the
-correct ops from the primary.
+Used by the rebuild orchestrator before a re-fold: the buffer may hold
+stale ops (e.g. a `put` for a term the primary value no longer yields,
+whose retracting `remove` was dropped on saturation), so applying them
+would resurrect orphaned index entries. The rebuild discards the buffer
+and resets the in-flight counter together, then re-derives the correct
+ops from the primary.
 """.
 -spec reset(pid()) -> ok.
 
@@ -189,8 +188,8 @@ init(#{ns := NS, index_name := IName, shard := Shard} = Args) ->
     _ = bondy_oplog_core_registry:set_writer_pid(NS, IName, Shard, self()),
     %% Re-stamp if the registry restarts (epoch change drops every row).
     ok = bondy_oplog_core_events:subscribe(bondy_oplog_core_registry_started),
-    %% IDX-4 crash recovery: if this shard was previously populated (AE
-    %% bumped past the stale sentinel), already flagged, or left in-flight
+    %% Crash recovery: if this shard was previously populated (AE bumped
+    %% past the stale sentinel), already flagged, or left in-flight
     %% reservations behind (a buffer lost to the crash), a restart lost the
     %% buffer — request a rebuild to recover it. A first-ever start (still
     %% sentinel-stale, no flag, zero counter) is left to the startup backfill.
@@ -369,7 +368,7 @@ do_write(NS, IName, Shard, Entry, Ops) ->
                         description =>
                             "bondy_oplog_secondary_writer projection write "
                             "failed; the affected index cells will be "
-                            "rebuilt from the primary (IDX-4) or re-applied "
+                            "rebuilt from the primary or re-applied "
                             "on the next dispatch.",
                         namespace => NS,
                         index_name => IName,

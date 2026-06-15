@@ -6,8 +6,7 @@
 -module(bondy_connect_load).
 
 -moduledoc """
-Per-connection load regulation for callee **invocation** admission (§11,
-Decision 5).
+Per-connection load regulation for callee **invocation** admission.
 
 It combines two independent limits:
 
@@ -26,7 +25,7 @@ A pure value (`t()`) — the rate limiter's mutable counters live in the
 `bondy_regulator` runtime (atomics), so copying the value is safe. The bucket
 itself is a row in the `bondy_regulator` ETS table, so it must be **reused
 across reconnects** (`reset/1`, not a fresh `new/1` each time) and **deleted on
-teardown** (`delete/1`); otherwise a row leaks per reconnect (review B4).
+teardown** (`delete/1`); otherwise a row leaks per reconnect.
 """.
 
 -include_lib("kernel/include/logger.hrl").

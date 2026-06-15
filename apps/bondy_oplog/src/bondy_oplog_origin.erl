@@ -15,8 +15,7 @@ Origin identity for the MST event-store replication layer.
 
 An *Origin* identifies a replica — the node-instance that creates events.
 The replication layer treats `t/0` as an opaque binary; the only invariant
-is that two distinct replicas must never share the same Origin (see
-`_design/4_event_key_uniqueness.md`).
+is that two distinct replicas must never share the same Origin.
 
 ## Default behaviour
 
@@ -44,8 +43,7 @@ restart without WAL recovery rejecting its own segments as
 ## Validation
 
 `validate/1` enforces the only structural invariant: Origin is a
-non-empty binary. Uniqueness is the operator's responsibility (see
-`_design/4_event_key_uniqueness.md` §3).
+non-empty binary. Uniqueness is the operator's responsibility.
 """).
 
 -type t() :: binary().

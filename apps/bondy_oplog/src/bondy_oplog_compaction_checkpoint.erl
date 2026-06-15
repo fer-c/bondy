@@ -10,8 +10,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Behaviour for the per-instance compaction checkpoint store
-(`_design/STORAGE_ARCHITECTURE.md` §4.3, §13.4).
+Behaviour for the per-instance compaction checkpoint store.
 
 A compaction checkpoint is the output of one compaction cycle: the
 consolidated CRDT state at a particular compaction watermark.
@@ -37,8 +36,7 @@ durability and serialisation:
   tests and ephemeral instances where rebuild cost on restart is
   acceptable.
 - `bondy_oplog_compaction_checkpoint_file` — file-backed (atomic
-  rename); durable single-checkpoint persistence. Target default
-  per PR-DEFAULT.
+  rename); durable single-checkpoint persistence. Default implementation.
 
 Consumers that need different durability characteristics (RocksDB,
 S3, etc.) implement this behaviour themselves.

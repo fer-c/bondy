@@ -61,7 +61,7 @@ setup:
    no body — the entire value is in the LSM HEAD entry. `book_get`
    becomes equivalent to `book_headonly` (no journal hop), so the
    apply path's read of OldState drops from ~1.7 ms (journal seek)
-   to <100 µs (ledger lookup). See PR-PS-15a measurement.
+   to <100 µs (ledger lookup).
 
 ## Bucket is call-time
 
@@ -257,7 +257,7 @@ keylist fold below filters out the matching key.
 
 `High` may be the atom `infinity` for an open-ended scan (every value
 subkey `>= Low` in the bucket) — the form the secondary-index
-primary-scan fallback (IDX-4) uses. It folds the whole bucket
+primary-scan fallback uses. It folds the whole bucket
 (`book_keylist/4`) rather than a bounded `KeyRange`.
 """.
 -spec range(
@@ -378,8 +378,7 @@ clear(#{bookie := Pid}, {entity, ET, IndexName}) when
 
 -doc """
 Enumerate the `{Bucket, Key}` of every PRIMARY cell of entity type `ET` in this
-handle — the durable cell directory for a secondary-index rebuild
-(`PLUM_DB_TO_BONDY_DB_DESIGN.md` D-9).
+handle — the durable cell directory for a secondary-index rebuild.
 
 The rebuild MUST read its cell directory from the projection, not the MST: the
 MST is a truncatable recent-events structure (compaction drops events `<=` the

@@ -10,8 +10,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Behaviour for the wire transport used by the sync protocol
-(`_design/10_new_design.md` §7.5).
+Behaviour for the wire transport used by the sync protocol.
 
 The library defines the protocol; the transport plugs in the actual
 network. The library ships:
@@ -53,8 +52,7 @@ adapter (`bondy_oplog_projection_adapter`).
 
 The catalogue-snapshot pair is used by
 `bondy_oplog_sync_session:bootstrap_catalogue/3` for fresh and
-recovering catalogue-mode replicas
-(`_design/catalogue_expansion_plan.md` §4.12).
+recovering catalogue-mode replicas.
 
 The transport itself is stateless. Per-call options are passed through
 the `Opts` argument.

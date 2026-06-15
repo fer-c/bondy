@@ -85,9 +85,9 @@ inverts it.
 -export_type([spec/0, path/0, normalizer/0]).
 
 -define(MISSING, '$missing').
-%% Default per-secondary-shard in-flight back-pressure cap (IDX-4). Kept
-%% in sync with `bondy_oplog_applier`'s fallback. Large by design: the cap
-%% is a safety valve for a pathologically hot shard, not a steady-state
+%% Default per-secondary-shard in-flight back-pressure cap. Kept in sync
+%% with `bondy_oplog_applier`'s fallback. Large by design: the cap is a
+%% safety valve for a pathologically hot shard, not a steady-state
 %% throttle, and MUST exceed a shard's live-entry working set.
 -define(DEFAULT_MAX_INFLIGHT, 100000).
 
@@ -127,9 +127,9 @@ name(#{name := Name}) -> Name.
 max_lag(Spec) -> maps:get(max_lag, Spec, infinity).
 
 -doc """
-The per-secondary-shard in-flight back-pressure cap (IDX-4): the maximum
-number of dispatched-but-not-yet-flushed index ops the writer's backlog
-may hold before a batch is dropped and the shard scheduled for rebuild.
+The per-secondary-shard in-flight back-pressure cap: the maximum number
+of dispatched-but-not-yet-flushed index ops the writer's backlog may hold
+before a batch is dropped and the shard scheduled for rebuild.
 Defaults to a large value (`100000`).
 """.
 -spec max_inflight(spec()) -> pos_integer().
@@ -137,9 +137,9 @@ Defaults to a large value (`100000`).
 max_inflight(Spec) -> maps:get(max_inflight, Spec, ?DEFAULT_MAX_INFLIGHT).
 
 -doc """
-The secondary writer's flush-coalescing window in ms (IDX-3). `undefined`
-defers to the writer's own default. Exposed on the spec mainly so tests
-can disable auto-flush (a large value) to drive the back-pressure path
+The secondary writer's flush-coalescing window in ms. `undefined` defers
+to the writer's own default. Exposed on the spec mainly so tests can
+disable auto-flush (a large value) to drive the back-pressure path
 deterministically.
 """.
 -spec coalesce_ms(spec()) -> non_neg_integer() | undefined.

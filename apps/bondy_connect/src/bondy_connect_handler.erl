@@ -7,7 +7,7 @@
 
 -moduledoc """
 A short-lived, **isolated** worker that runs exactly one user handler — a callee
-`INVOCATION` or a subscriber `EVENT` — and then exits (§11).
+`INVOCATION` or a subscriber `EVENT` — and then exits.
 
 It is a `temporary` child of the per-connection `bondy_connect_handler_sup`
 (`simple_one_for_one`), so it is *linked to the supervisor* but only

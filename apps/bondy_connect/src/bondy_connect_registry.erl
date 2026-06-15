@@ -9,7 +9,7 @@
 Per-connection registry of the client's **registrations** (callee) and
 **subscriptions** (subscriber).
 
-It separates two views (Decision 12, §12):
+It separates two views:
 
 - **declared** — the user's *desired* state (procedure/topic URI + handler +
   options). This is what `register/2`/`subscribe/2` record; it survives a

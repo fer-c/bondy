@@ -14,7 +14,7 @@ handshake and `bondy_connect_framing` frames — but over a TLS-secured socket.
 Only `connect/2` (the secure socket-open) and `messages/0` are specific to this
 transport; everything else is shared via `bondy_connect_raw` (review D2).
 
-## Secure by default (Decision 11)
+## Secure by default
 
 The TLS options are built by `bondy_connect_tls` (shared with the `wss`
 transport), **secure by default** (`verify_peer`): server-certificate

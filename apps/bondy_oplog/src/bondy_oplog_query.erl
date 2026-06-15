@@ -10,7 +10,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Query path (`_design/10_new_design.md` §9.4).
+Query path.
 
 Two flavours:
 

@@ -23,8 +23,8 @@ The Concurrent Operation Group (COG) abstraction, the operation-log
 framing, and the equivocation-tolerance approach via hash-chaining
 are taken from Preston McCrary's *Canteen* (UC Berkeley, 2022 —
 EECS-2022-160). The MST substrate underneath comes from Auvolat &
-Taïani (Inria/IRISA, SRDS 2019 — HAL-02303490). See `README.md`
-"Credits" for full references.
+Taïani (Inria/IRISA, SRDS 2019 — HAL-02303490). See the "Credits"
+section of this library's README for full references.
 
 ## API surface
 
@@ -398,8 +398,7 @@ info(InstanceId) ->
     bondy_oplog_instance:info(InstanceId).
 
 ?DOC("""
-Returns the current per-instance fold projection
-(`FOLD_STRATEGY_DESIGN.md` §3).
+Returns the current per-instance fold projection.
 
 Drains the applier first so the returned projection reflects every
 event the caller has already `append/2`-ed (read-your-writes).
@@ -411,8 +410,8 @@ Returns:
 - `{error, instance_unavailable}` — applier pid not yet published
   (subtree restart in progress) or already gone.
 
-**Scope (F8):** single-cell-per-instance. Per-cell projections and
-remote-event folding land later (see `MST_DB_DESIGN.md`).
+**Scope:** single-cell-per-instance. Per-cell projections and
+remote-event folding are not yet implemented.
 """).
 -spec projection(instance_id()) ->
     {ok, term()}

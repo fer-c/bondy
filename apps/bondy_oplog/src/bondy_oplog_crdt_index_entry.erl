@@ -14,7 +14,7 @@
 ?MODULEDOC("""
 Native operation-based CRDT backing one cell of the secondary-index
 keyspace — the op-based twin of the deprecated
-`bondy_oplog_fold_index_entry` (removed in PR-Z, the last fold to migrate).
+`bondy_oplog_fold_index_entry`.
 
 Each `(Term, PrimaryKey)` composite key (see `bondy_oplog_index_key`) is a
 cell whose value is the index entry's denormalised columns (or `<<>>` for
@@ -59,10 +59,9 @@ the merge a deterministic total order. By construction a single cell never
 receives a genuine `put` and `remove` at the same primary HLC (each
 primary value-version has a distinct, monotone HLC and emits at most one
 operation per term), so the tie-break is for robustness, not a modelled
-case. (`MST_DB_DESIGN.md §13` specifies "apply only when `H >= StoredHlc`";
-a bare `>=` is not commutative for a conflicting `put`/`remove` at equal
-HLC, so the merge-against-a-total-order construction is used instead —
-same intent, provably order-independent.)
+case. A bare `>=` is not commutative for a conflicting `put`/`remove` at
+equal HLC, so the merge-against-a-total-order construction is used instead —
+same intent, provably order-independent.
 
 ## value_equals_state/0 -> true
 

@@ -11,7 +11,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Per-instance compaction (`_design/10_new_design.md` §8).
+Per-instance compaction.
 
 This module is a thin orchestrator: it asks
 `bondy_oplog_peer_state` for the current per-peer root

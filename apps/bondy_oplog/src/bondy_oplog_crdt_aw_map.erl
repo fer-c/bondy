@@ -97,7 +97,7 @@ causal (per-origin FIFO) delivery this compact test is exact: observing
 skip), so `Ctx[O] >= S` iff the writer saw the specific dot `{O, S}`. See
 *Convergence preconditions*.
 
-## Convergence (the §4.3 ship gate)
+## Convergence
 
 The surviving dot-set is a **pure function of the event set**:
 
@@ -119,7 +119,7 @@ sorts internally, so it is invariant under any input permutation.
 
 This is **op-based** convergence: replicas converge by interpreting the
 same event set, not by a state join. There is deliberately **no**
-`merge_states/2` — the re-grounding removes it as a convergence primitive.
+`merge_states/2`.
 
 ## Value projection
 
@@ -146,11 +146,11 @@ bytes ⇒ equal MST page hash ⇒ convergent `root_hash`.
    tier_2, concurrency-detecting projection (the same shape as
    `mv_register`). There is consequently no `{apply, K, SubOp}` op and no
    sub-fold tag. Reconciling the cutover with the fold's single-value /
-   sub-CRDT projection is a PR-F concern.
-2. **One per-cell context VV**, not a DVVSet per key (plan §5) — the
-   per-key dot-store carries presence; the shared context carries
-   causality. `bondy_dvvset` is the conceptual basis, but its API operates
-   on `clock()`, not the bare `vector()` this map needs, so the trivial
+   sub-CRDT projection is a follow-up concern.
+2. **One per-cell context VV**, not a DVVSet per key — the per-key
+   dot-store carries presence; the shared context carries causality.
+   `bondy_dvvset` is the conceptual basis, but its API operates on
+   `clock()`, not the bare `vector()` this map needs, so the trivial
    VV arithmetic (`vv_merge`, `dot_observed`) is inlined and
    property-pinned rather than routed through `bondy_dvvset`.
 3. **`term_to_binary/1` of a canonical form** for `encode_state/1`, not a
@@ -321,9 +321,9 @@ context_of({_Entries, CC, _Hlc}) ->
 
 -doc """
 Reap the causal-context entries of permanently-retired origins (the
-membership-driven GC, `architecture_regrounding_plan.md` §4.4). The
-cell-wide context `CC` carries one `{Origin, MaxSeq}` entry per origin
-that ever wrote the cell — the cost that grows with cluster *churn*. For a
+membership-driven GC). The cell-wide context `CC` carries one
+`{Origin, MaxSeq}` entry per origin that ever wrote the cell — the cost
+that grows with cluster *churn*. For a
 retired origin we drop its `CC` entry **only when it has no live dot** in
 any key's dot-store (no surviving add). The dot-stores carry the map's
 value, so dropping a dot-free origin from `CC` leaves `to_value/1`

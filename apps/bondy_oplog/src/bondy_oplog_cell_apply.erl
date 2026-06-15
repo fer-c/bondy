@@ -37,13 +37,12 @@ behaviour is byte-identical.
     %% Per-shard high-water HLC mark. Advanced via
     %% `bondy_oplog_high_water:advance/2` after every successful
     %% projection write in `apply_one_cell/11`. `undefined` when the
-    %% shard's registry entry has no ref (legacy entries created
-    %% before PR-D1 §3 — defensive only; new registrations always
-    %% allocate).
+    %% shard's registry entry has no ref (defensive only; new registrations
+    %% always allocate).
     high_water_ref => bondy_oplog_high_water:ref() | undefined,
-    %% Secondary indexes declared on this primary table
-    %% (`MST_DB_DESIGN.md` §13). Static descriptors resolved once at
-    %% init from the applier opts; `[]` (the default) makes the index
+    %% Secondary indexes declared on this primary table. Static descriptors
+    %% resolved once at init from the applier opts; `[]` (the default) makes
+    %% the index
     %% dispatch a strict no-op for non-indexed tables. For each cell the
     %% applier materialises, it term-diffs the cell's old vs new value
     %% per descriptor and dispatches `index_entry` ops to the
@@ -106,8 +105,7 @@ apply_cell_batch(Ctx, Id, Events) ->
     OldStateCache = maps:get(oldstate_cache, Ctx, undefined),
     SecIdx = sec_idx(Ctx),
 
-    %% PR-PS-15b: collect all per-event writes into a single
-    %% `Adapter:put_batch/2` call.
+    %% Collect all per-event writes into a single `Adapter:put_batch/2` call.
     %%
     %% Correctness: when two events in the batch target the same
     %% `{Bucket, Key}`, the second must observe the first's write.
@@ -118,10 +116,10 @@ apply_cell_batch(Ctx, Id, Events) ->
     %% list (last write wins per key — consistent with the previous
     %% sequential-per-key semantics).
     %%
-    %% IDX-3: a third accumulator `IdxAcc :: #{{IndexName, SecShard} =>
-    %% [IndexOp]}` collects the secondary-index ops every cell yields
-    %% (empty for non-indexed tables); they are dispatched to the
-    %% secondary writers *after* the primary `put_batch` returns ok.
+    %% A third accumulator `IdxAcc :: #{{IndexName, SecShard} => [IndexOp]}`
+    %% collects the secondary-index ops every cell yields (empty for
+    %% non-indexed tables); they are dispatched to the secondary writers
+    %% *after* the primary `put_batch` returns ok.
     {LocalWrites, MaxHlc, IdxAcc} = lists:foldl(
         fun(Event, {WAcc, HlcAcc, IAcc}) ->
             case bondy_oplog_event:op(Event) of
@@ -226,10 +224,9 @@ apply_cell_batch(Ctx, Id, Events) ->
 %% yet at this point). Then falls back to `Adapter:get/3`.
 %%
 %% Per-event telemetry boundaries `cell_read` + `cell_apply_event`
-%% remain (each cell still pays the read + compute cost). The
-%% PR-PS-15a `cell_put` and `cell_side_effects` events are GONE in
-%% PR-PS-15b — the put + side-effects now happen once per batch and
-%% are measured by `batch_cell_put` in `apply_cell_batch/3`.
+%% remain (each cell still pays the read + compute cost). The put
+%% and side-effects now happen once per batch and are measured by
+%% `batch_cell_put` in `apply_cell_batch/3`.
 compute_one_cell(
     Id,
     Adapter,
@@ -285,10 +282,10 @@ compute_one_cell(
             #{duration_us => erlang:monotonic_time(microsecond) - ApplyT0},
             #{instance_id => Id}
         ),
-        %% IDX-3: term-diff the cell's old vs new value into secondary
-        %% index ops. Wrapped in its own try (`index_ops_for_cell/8`) so a
-        %% malformed spec degrades only the index (rebuildable) and never
-        %% drops the primary write.
+        %% Term-diff the cell's old vs new value into secondary index ops.
+        %% Wrapped in its own try (`index_ops_for_cell/8`) so a malformed
+        %% spec degrades only the index (rebuildable) and never drops the
+        %% primary write.
         IdxOps = index_ops_for_cell(
             SecIdx, Id, Kernel, Bucket, Key, OldState, NewState, Hlc
         ),
@@ -512,7 +509,7 @@ merge_idx_ops(Acc, [{IName, SecShard, Op} | Rest]) ->
 %% have existed when the applier started). A missing writer pid or row is
 %% dropped silently — the index is rebuildable from the primary.
 %%
-%% IDX-4 back-pressure: each `(IName, SecShard)` carries an in-flight op
+%% Back-pressure: each `(IName, SecShard)` carries an in-flight op
 %% counter. On the live drain path (`Bypass = false`) a batch that would
 %% push the counter past the index's `max_inflight` cap is dropped, the
 %% shard is marked `needs_rebuild`, its freshness reset to stale (so reads
@@ -597,9 +594,9 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
 %% Non-cell ops are skipped here — the per-instance fold owns them and
 %% has already seen them via the WAL drain.
 %%
-%% PR-PS-15b: same collect-then-batch shape as `apply_cell_batch/3`.
-%% Per-key shadow map preserves in-batch read-your-own-writes when
-%% two pairs target the same `{Bucket, Key}`.
+%% Same collect-then-batch shape as `apply_cell_batch/3`. Per-key shadow
+%% map preserves in-batch read-your-own-writes when two pairs target the
+%% same `{Bucket, Key}`.
 %%
 %% Index dispatch respects the back-pressure cap (`Bypass = false`): a
 %% peer-event replay that overflows a writer is dropped and self-heals via
@@ -732,10 +729,9 @@ invalidate_cache(Adapter, Handle, Bucket, Key) ->
 %% @private
 %% Advance the per-shard high-water HLC mark
 %% (`bondy_oplog_high_water:advance/2`) after a successful projection
-%% write. The ref may be `undefined` defensively (older
-%% `bondy_oplog_core_registry` entries created before PR-D1 §3); new
-%% registrations always allocate, so this branch is dead in practice
-%% but keeps the applier resilient to a partial rollback.
+%% write. The ref may be `undefined` defensively (older registry entries
+%% without an allocated ref); new registrations always allocate, so this
+%% branch is dead in practice but keeps the applier resilient.
 advance_high_water(undefined, _Hlc) ->
     ok;
 advance_high_water(Ref, Hlc) ->

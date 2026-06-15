@@ -17,7 +17,7 @@
 ?MODULEDOC("""
 Per-instance Write-Ahead Log writer.
 
-See `_design/WAL_DESIGN.md` §8. Current behaviour:
+Current behaviour:
 
 - `open/2` creates a fresh per-instance WAL directory or recovers an
   existing one via `bondy_oplog_wal_recovery`.
@@ -116,7 +116,7 @@ stateful-PropEr fault-injection harness are still to land.
     %% the new offset paired with the old segment id; see
     %% `publish_head_pos/3` and `publish_head_offset/2`.
     head_pos_ref :: atomics:atomics_ref() | undefined,
-    %% Sparse-index accumulator (§7) for the current head segment.
+    %% Sparse-index accumulator for the current head segment.
     %% Entries are flushed to `.qidx` on rotation (sealed segment) and
     %% on `terminate/2` (live head segment). Per-frame I/O cost is zero —
     %% entries live in memory until a flush boundary.
@@ -177,7 +177,7 @@ stateful-PropEr fault-injection harness are still to land.
     %% Walked head-first on durable advance; replaced wholesale on each
     %% advance via `satisfy_waiters_up_to/2`.
     waiters :: [#waiter{}],
-    %% --- Retention state (§10) ------------------------------------------------
+    %% --- Retention state -------------------------------------------------------
     %% Largest HLC covered by a compaction snapshot. `undefined` until
     %% the first `advance_snapshot_watermark/2` lands. Persisted to
     %% `snapshot.watermark` via tmp+rename on every advance.
@@ -199,7 +199,7 @@ stateful-PropEr fault-injection harness are still to land.
     %% doesn't pile up overlapping tick messages.
     retention_sweep_interval :: pos_integer(),
     retention_timer :: reference() | undefined,
-    %% --- Backpressure (§14, §15) ----------------------------------------------
+    %% --- Backpressure ---------------------------------------------------------
     %% Running sum of `.qdata` bytes across all live segments (head and
     %% sealed). Updated on every successful frame write, every rotation,
     %% and every retention sweep. Authoritative source for the
@@ -214,8 +214,7 @@ stateful-PropEr fault-injection harness are still to land.
     %% Hard caps on aggregate WAL size and on the number of live
     %% segments. Either being breached causes `append`/`append_batch` to
     %% return `{error, wal_full}` and emit a debounced `[bondy_oplog,
-    %% wal, wal_full]` telemetry event. Defaults from WAL_DESIGN §14
-    %% (8 GiB / 256 segments).
+    %% wal, wal_full]` telemetry event. Defaults: 8 GiB / 256 segments.
     max_total_wal_size :: pos_integer(),
     max_live_segments :: pos_integer(),
     %% Most recent `monotonic_time(millisecond)` at which a `wal_full`
@@ -639,8 +638,8 @@ Current shape:
 }
 ```
 
-The keys `committed_offset` / `committed_hlc` from `_design/WAL_DESIGN.md`
-§13.5 are stubbed until the consumer-commit machinery lands.
+The keys `committed_offset` / `committed_hlc` are stubbed until the
+consumer-commit machinery lands.
 """).
 -spec info(wal()) -> map().
 
@@ -706,8 +705,7 @@ reader_view(Pid) when is_pid(Pid) ->
 Records `Hlc` as the new compaction snapshot watermark.
 
 The watermark bounds retention: a segment becomes eligible for
-deletion only when every event in it has an HLC `<= watermark`. See
-`_design/WAL_DESIGN.md` §10.
+deletion only when every event in it has an HLC `<= watermark`.
 
 The new watermark is persisted to `snapshot.watermark` (tmp+rename
 atomic) before the call returns. The advance is followed by an
@@ -731,7 +729,7 @@ advance_snapshot_watermark(Pid, Hlc) when
 Runs a retention sweep and returns the segments that were deleted and
 the bytes freed.
 
-The sweep is the on-disk realisation of §10: a segment `S` is deleted
+The sweep is the on-disk realisation of the retention policy: a segment `S` is deleted
 iff `S < committed_segment` AND `S < snapshot_watermark_segment` AND
 the post-sweep live-segment count would remain `>= min_live_segments`.
 The manifest is rewritten atomically (tmp+rename); only after the
@@ -904,7 +902,7 @@ handle_info(flush_tick, State0) ->
 %% the timer message, the lookup is empty and we drop the timer event.
 handle_info({timeout, _TRef, {await_timeout, WaiterId}}, State) ->
     {noreply, expire_waiter(WaiterId, State)};
-%% Periodic retention safety-net (§10.4). Best-effort: errors are
+%% Periodic retention safety-net. Best-effort: errors are
 %% logged inside `sweep_swallowing_errors/2` and the timer rearms
 %% either way so a transient I/O failure doesn't stop the cadence.
 handle_info(retention_tick, State0) ->
@@ -1042,7 +1040,7 @@ validate_retention_sweep_interval(Opts) ->
 
 %% @private
 %% Validate `max_total_wal_size` and `max_live_segments` (both pos ints).
-%% These are the hard backpressure limits (§14); crossing either causes
+%% These are the hard backpressure limits; crossing either causes
 %% `append`/`append_batch` to return `{error, wal_full}`.
 validate_backpressure_opts(Opts) ->
     case maps:find(max_total_wal_size, Opts) of
@@ -1795,7 +1793,7 @@ codec_opts(#state{
     }.
 
 %% @private
-%% Hard backpressure check (§14, §15). Refuses the append iff EITHER
+%% Hard backpressure check. Refuses the append iff EITHER
 %% the projected post-append size would exceed `max_total_wal_size` OR
 %% the current live-segment count already meets `max_live_segments`.
 %% The first is forward-looking (the next byte you'd write); the second
@@ -1890,7 +1888,7 @@ rotate(
             %% not datasync a closed fd.
             State2 = State1#state{head_fd = undefined},
             %% `.qidx` is a best-effort accelerator (recovery rebuilds
-            %% from the segment scan, per WAL_DESIGN.md §7.3). A flush
+            %% from the segment scan if missing or stale). A flush
             %% failure here must not abort rotation — aborting after
             %% the old fd has already been closed would leave the
             %% writer's state holding a stale closed fd. Log and
@@ -2025,7 +2023,7 @@ commit_rotation(
 %% in per_write mode tail readers only ever see frames whose bytes are
 %% durable. In batched mode tail readers may observe non-durable frames
 %% — the applier must `await_durable/3` before committing past them
-%% (per WAL_DESIGN.md §8.2).
+%% (the applier must `await_durable/3` before committing past non-durable frames).
 write_batch_frame(
     #state{
         head_fd = Fd,
@@ -2110,7 +2108,7 @@ pick_first_hlc(undefined, Hlc) -> Hlc;
 pick_first_hlc(Existing, _) -> Existing.
 
 %% =============================================================================
-%% Retention + snapshot watermark (§10)
+%% Retention + snapshot watermark
 %% =============================================================================
 
 %% @private
@@ -2131,7 +2129,7 @@ do_advance_snapshot_watermark(#state{dir = Dir} = State, NewHlc) ->
 
 %% @private
 %% Stub setter for `committed_segment` used until the consumer-commit
-%% machinery (§13.3) lands. Monotonic; refuses to move backwards.
+%% machinery lands. Monotonic; refuses to move backwards.
 do_set_committed_segment(
     #state{committed_segment = Cur}, NewSeg
 ) when NewSeg < Cur ->
@@ -2185,7 +2183,7 @@ sweep_swallowing_errors(State0, Trigger) ->
     end.
 
 %% @private
-%% Core sweep protocol (§10.2):
+%% Core sweep protocol:
 %%
 %% 1. Compute the set of deletable segments using the manifest's
 %%    `live_segments`, the snapshot-watermark→segment mapping, the
@@ -2217,7 +2215,7 @@ do_retention_sweep(#state{} = State0) ->
     end.
 
 %% @private
-%% Compute the deletable segment ids per §10.
+%% Compute the deletable segment ids.
 compute_deletable(#state{
     manifest = M,
     first_hlc = HeadFirstHlc,
@@ -2264,9 +2262,8 @@ patch_head_first_hlc(Live, HeadSegId, HeadFirstHlc) ->
     ].
 
 %% @private
-%% Snapshot-watermark→segment mapping (per §10.1, with the design's
-%% inequality corrected — see commentary below): the highest sealed
-%% segment whose entire content is HLC-covered by `Watermark`.
+%% Snapshot-watermark→segment mapping: the highest sealed segment
+%% whose entire content is HLC-covered by `Watermark`.
 %%
 %% A sealed segment S is "fully covered" iff every event in S has
 %% HLC ≤ Watermark. Since HLCs are strictly monotonic and every
@@ -2279,8 +2276,7 @@ patch_head_first_hlc(Live, HeadSegId, HeadFirstHlc) ->
 %% Returns `0` when no segment qualifies, so the `S < watermark_seg`
 %% test in `compute_deletable/1` rejects everything.
 %%
-%% Note: WAL_DESIGN.md §10.1 writes the condition as
-%% `first_hlc(S+1) > Watermark`, which would invert the
+%% Note: the condition `first_hlc(S+1) > Watermark` would invert the
 %% high-watermark / more-deletable correspondence and make a `W=max`
 %% watermark prevent all deletions. We use `=<` here so the
 %% retention behaviour matches the prose ("largest segment whose
@@ -2318,7 +2314,7 @@ walk_watermark([_This | Rest], Watermark, Best) ->
     walk_watermark(Rest, Watermark, Best).
 
 %% @private
-%% Stage 2 of the sweep: rewrite the manifest, then unlink the files.
+%% Second phase of the sweep: rewrite the manifest, then unlink the files.
 apply_deletable(#state{manifest = M, dir = Dir} = State0, Deletable) ->
     Live0 = bondy_oplog_wal_manifest:live_segments(M),
     Survivors = [
@@ -2668,7 +2664,7 @@ current_backpressure(_) ->
 %% @private
 %% Wall-time lag (ms) between `now()` and the last append. `undefined`
 %% before the first append. Feeds the operator's freshness gauges per
-%% WAL_DESIGN §15. The delta is always ≥0 because both timestamps come
+%% The delta is always ≥0 because both timestamps come
 %% from `erlang:monotonic_time/1`, which never goes backwards.
 head_lag_ms(#state{last_append_at_ms = undefined}) ->
     undefined;
@@ -2836,14 +2832,14 @@ publish_durable_pos(Ref, SegId, Offset) ->
     ok = atomics:put(Ref, 2, Offset).
 
 %% =============================================================================
-%% Telemetry (§15)
+%% Telemetry
 %% =============================================================================
 
 %% @private
 %% Single safe entry point for all WAL telemetry. Wraps
 %% `telemetry:execute/3` in a try/catch so a buggy handler can never
-%% propagate into the writer's gen_server. WAL_DESIGN §15 mandates this:
-%% the WAL must not crash on telemetry handler failure.
+%% propagate into the writer's gen_server. The WAL must not crash on
+%% telemetry handler failure.
 emit(Event, Measurements, Metadata) ->
     try
         telemetry:execute(Event, Measurements, Metadata)
@@ -2862,7 +2858,7 @@ emit(Event, Measurements, Metadata) ->
     end.
 
 %% @private
-%% `[bondy_oplog, wal, append]` (§15). Emitted after every successful
+%% `[bondy_oplog, wal, append]`. Emitted after every successful
 %% atomic batch frame write. `batch_size` is the number of events in the
 %% frame; `body_len` excludes the 16-byte frame header. `hlc` is the
 %% batch's last HLC — the highest HLC newly visible to readers after
@@ -2884,7 +2880,7 @@ emit_append_telemetry(#state{} = State, [{_, {Seg, Off}} | _] = Entries) ->
     State.
 
 %% @private
-%% `[bondy_oplog, wal, fsync]` (§15). Emitted from `do_fsync_head/1`
+%% `[bondy_oplog, wal, fsync]`. Emitted from `do_fsync_head/1`
 %% with the bytes synced (since the previous fsync) and the elapsed
 %% wall-time of the syscall. `mode` lets handlers segment counters by
 %% per_write vs batched.
@@ -2900,7 +2896,7 @@ emit_fsync_telemetry(#state{} = State, BytesSynced, DurationUs) ->
     emit([bondy_oplog, wal, fsync], Measurements, Metadata).
 
 %% @private
-%% `[bondy_oplog, wal, durable]` (§15). Emitted from `advance_durable/3`
+%% `[bondy_oplog, wal, durable]`. Emitted from `advance_durable/3`
 %% on every durable advance — paired one-to-one with `fsync` events in
 %% per_write mode, and one-to-many in batched mode (one durable per
 %% fsync, but one fsync covers many appends).
@@ -2913,7 +2909,7 @@ emit_durable_telemetry(#state{} = State, Seg, Off) ->
     ).
 
 %% @private
-%% `[bondy_oplog, wal, rotate]` (§15). Emitted from `open_next_segment/1`
+%% `[bondy_oplog, wal, rotate]`. Emitted from `open_next_segment/1`
 %% after the manifest commit lands. `old_size_bytes` is the on-disk size
 %% of the just-sealed segment (header + frames); `duration_us` is
 %% measured from the entry of `rotate/1`. `reason` is currently always
@@ -2939,7 +2935,7 @@ emit_rotate_telemetry(
     emit([bondy_oplog, wal, rotate], Measurements, Metadata).
 
 %% @private
-%% `[bondy_oplog, wal, retention_sweep]` (§15). Emitted from
+%% `[bondy_oplog, wal, retention_sweep]`. Emitted from
 %% `do_retention_sweep/1` on every sweep that completes (no-op or
 %% otherwise). `deleted_segments` counts the segments unlinked;
 %% `freed_bytes` sums their `.qdata` sizes.
@@ -2957,7 +2953,7 @@ emit_retention_sweep_telemetry(
     ).
 
 %% @private
-%% `[bondy_oplog, wal, recovery]` (§15). Emitted at the end of
+%% `[bondy_oplog, wal, recovery]`. Emitted at the end of
 %% `install_recovery/2`, before the writer is ready to accept appends.
 %% `outcome` is `ok` here; failed recoveries short-circuit before this
 %% call.
@@ -2989,10 +2985,10 @@ emit_recovery_telemetry(#state{} = State, DurationUs, Result) ->
     ).
 
 %% @private
-%% `[bondy_oplog, wal, recovery, rescan]` (`WAL_DESIGN_V2.md §3 PR2`).
-%% Emitted only when rescan-mode recovery actually skipped one or
-%% more frames. Operators alert on `frames_skipped > 0` and use the
-%% structured log records (one per skipped range) for forensics.
+%% `[bondy_oplog, wal, recovery, rescan]`. Emitted only when rescan-mode
+%% recovery actually skipped one or more frames. Operators alert on
+%% `frames_skipped > 0` and use the structured log records (one per
+%% skipped range) for forensics.
 maybe_emit_rescan_telemetry(_State, _DurationUs, 0, _BytesSkipped) ->
     ok;
 maybe_emit_rescan_telemetry(State, DurationUs, FramesSkipped, BytesSkipped) ->
@@ -3007,7 +3003,7 @@ maybe_emit_rescan_telemetry(State, DurationUs, FramesSkipped, BytesSkipped) ->
     ).
 
 %% @private
-%% `[bondy_oplog, wal, wal_full]` (§15). Emitted on every hard-limit
+%% `[bondy_oplog, wal, wal_full]`. Emitted on every hard-limit
 %% refusal of `append`/`append_batch`. Debounced — clients typically
 %% retry on a tight loop, so without the debounce the WAL would flood
 %% telemetry at thousands of events/s.

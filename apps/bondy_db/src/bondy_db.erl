@@ -68,7 +68,7 @@ the composition rule:
 
 `apply/4` builds `{cell_apply, Bucket, Key, FoldEvent}` and calls
 `bondy_oplog:append/2`. The fold-state update happens inside the
-applier (`MST_DB_DESIGN.md` §6.3): the applier reads the current cell
+applier: the applier reads the current cell
 frame, decodes via the fold module, folds the event in via
 `apply_event/3`, encodes the new state, and writes it back through the
 projection adapter with Bucket and Key as separate operands. After
@@ -160,7 +160,7 @@ it).
 -define(PROBE_TOKEN, <<"$probe">>).
 %% Substrate default range cap, mirrored from `bondy_oplog_core`.
 -define(DEFAULT_RANGE_LIMIT, 1000).
-%% Upper bound on the primary-scan fallback (IDX-4): how many primary
+%% Upper bound on the primary-scan fallback: how many primary
 %% cells a single stale-index fallback read will enumerate. Bounded so the
 %% "slow but correct" path cannot run unbounded; a scan that hits the cap
 %% logs a warning (the fallback result may be incomplete).
@@ -218,7 +218,7 @@ it).
     topology := module(),
     table_state := bondy_db_topology:table_state(),
     cache_handles := #{non_neg_integer() := term()},
-    %% Per-secondary-shard `bondy_oplog_secondary_writer` pid (IDX-3).
+    %% Per-secondary-shard `bondy_oplog_secondary_writer` pid.
     writer_pids := #{non_neg_integer() := pid()}
 }.
 
@@ -431,7 +431,7 @@ open_table_provision(
     %% Native operation-based CRDT for the cell projection. An explicit
     %% `crdt_module` wins; otherwise the `fold_module` is mapped to its
     %% native op-based twin via
-    %% `bondy_oplog_cell_kernel:default_crdt_for_fold/1` (PR-Z: every former
+    %% `bondy_oplog_cell_kernel:default_crdt_for_fold/1` (every former
     %% fold has a byte-identical CRDT twin, so durable cells decode either
     %% way). An unknown label maps to `undefined`; the kernel's
     %% `from_modules/2` then errors at open. Threaded only into the registry
@@ -473,14 +473,14 @@ open_table_provision(
                 {ok, InstanceIds, CacheHandles} ->
                     case provision_indexes(Db, NS, Merged, ShardCount, Backend) of
                         {ok, IndexMap} ->
-                            %% Cold-start index recovery (§6.6.1–6.6.3). For each
-                            %% index, load every shard's durable trust marker
+                            %% Cold-start index recovery. For each index, load
+                            %% every shard's durable trust marker
                             %% (`index_load_rebuild_marker/1`): a shard that is
                             %% built + clean (marker present, kept complete
-                            %% `<= snapshot_wm` by the §6.6.2 compaction flush
-                            %% barrier) is TRUSTED and only freshened; a shard
-                            %% with no marker (a newly-declared index, or one
-                            %% left incomplete by a pre-restart drop, or any
+                            %% `<= snapshot_wm` by the compaction flush barrier)
+                            %% is TRUSTED and only freshened; a shard with no
+                            %% marker (a newly-declared index, or one left
+                            %% incomplete by a pre-restart drop, or any
                             %% ephemeral/ETS shard whose cells were wiped on
                             %% restart) is REBUILT from the primary. This
                             %% replaces the old unconditional O(table) backfill —
@@ -577,8 +577,7 @@ effective_topology(ets, #{ets_provider := S}) ->
 
 %% @private
 %% The projection backend for an index, given the originating TABLE's backend.
-%% This is the single decision seam (PLUM_DB_TO_BONDY_DB_DESIGN.md §6.6.5):
-%% index durability FOLLOWS the table by default — an `ets` table gets `ets`
+%% Index durability FOLLOWS the table by default — an `ets` table gets `ets`
 %% indices, a `leveled` table gets `leveled` indices — so index cells live next
 %% to the data they index and inherit its lifecycle (cold-start trust marker,
 %% compaction flush barrier).
@@ -589,7 +588,7 @@ effective_topology(ets, #{ets_provider := S}) ->
 %% the niche where ETS indices on a durable table win (hot + small +
 %% frequently-compacted). It NEVER makes an ephemeral table's indices durable:
 %% durable indices over RAM-only data that is itself rebuilt from peers is
-%% nonsensical (§6.6.5), so `ets` always maps to `ets`.
+%% nonsensical, so `ets` always maps to `ets`.
 %%
 %% A per-table / per-index override is a trivial later add HERE — the `Spec` is
 %% in scope, so a future `index_backend` key on the spec would slot in without
@@ -1144,12 +1143,12 @@ over that term's contiguous key window.
   unless the touched shard was freshened within `max_lag` ms (defaults to
   the spec's `max_lag`, itself `infinity` = never refuse). `Lag` is the
   shard's wall-clock ms lag, or `infinity` when it was never freshened or
-  is flagged for rebuild. Since IDX-4 the startup backfill freshens every
-  shard at open, so a finite `max_lag` over an up-to-date index passes;
-  refusal signals a genuinely lagging or rebuilding shard.
+  is flagged for rebuild. The startup backfill freshens every shard at
+  open, so a finite `max_lag` over an up-to-date index passes; refusal
+  signals a genuinely lagging or rebuilding shard.
 - `fallback => primary` — instead of refusing a stale read, scan the
-  primary directly and recompute the matching keys (slow but correct,
-  `MST_DB_DESIGN.md` §13.1). Bounded by an internal cell cap.
+  primary directly and recompute the matching keys (slow but correct).
+  Bounded by an internal cell cap.
 - `limit`, `direction` — forwarded to the underlying range scan (and the
   fallback).
 
@@ -1258,7 +1257,7 @@ index_range(Table, Realm, IndexName, LoTerm, HiTerm, Opts) when
     end).
 
 -doc """
-Rebuild secondary index `IndexName` of `Table` from the primary (IDX-4):
+Rebuild secondary index `IndexName` of `Table` from the primary:
 wipe its ETS shards, re-fold every primary shard's MST, and re-dispatch a
 `put` for every live term. Synchronous — returns once the index has been
 re-materialised and its shards freshened, so a `max_lag` read issued after
@@ -1290,7 +1289,7 @@ rebuild_indexes(Table) ->
     ).
 
 -doc """
-Per-secondary-shard lag diagnostics for `IndexName` (IDX-4). Returns
+Per-secondary-shard lag diagnostics for `IndexName`. Returns
 `#{SecShard => #{lag => infinity | non_neg_integer(), inflight =>
 non_neg_integer(), needs_rebuild => boolean()}}`, where `lag` is the
 wall-clock ms since the shard was last freshened (`infinity` when never
@@ -1921,7 +1920,7 @@ provision_index_shard(
                         fold_module => undefined,
                         crdt_module => bondy_oplog_crdt_index_entry,
                         overlay => disabled,
-                        %% IDX-4 back-pressure atomics (in-flight count +
+                        %% Back-pressure atomics (in-flight count +
                         %% needs_rebuild flag). Index shards only.
                         inflight_atomics => atomics:new(2, [{signed, true}]),
                         %% The rebuild's wipe scope. The topology owns it (it
@@ -2003,10 +2002,10 @@ teardown_indexes(NS, IndexMap) ->
 teardown_index_shard(
     NS, Name, Shard, CacheHandles, Writers, Topology, TableState
 ) ->
-    %% F1-minimal clean-shutdown (§6.6): durably flush this shard's writer and
-    %% stamp its clean flag BEFORE the writer/registry row are torn down, so a
-    %% graceful close leaves the index complete-to-head and the next open trusts
-    %% it (`cold_start_indexes/2`). Must precede `teardown_shard_common`, which
+    %% Clean-shutdown sequence: durably flush this shard's writer and stamp its
+    %% clean flag BEFORE the writer/registry row are torn down, so a graceful
+    %% close leaves the index complete-to-head and the next open trusts it
+    %% (`cold_start_indexes/2`). Must precede `teardown_shard_common`, which
     %% unregisters the entry whose projection handle the flag is written through.
     ok = flush_and_mark_clean(NS, Name, Shard, Writers),
     teardown_shard_common(
@@ -2052,23 +2051,23 @@ index_descriptors(Specs, DefaultShardCount) ->
             sec_shard_count => maps:get(
                 sec_shard_count, Spec, DefaultShardCount
             ),
-            %% IDX-4 back-pressure cap, read by the primary applier at
-            %% dispatch to decide whether to drop a saturating batch.
+            %% Back-pressure cap, read by the primary applier at dispatch
+            %% to decide whether to drop a saturating batch.
             max_inflight => bondy_oplog_index_spec:max_inflight(Spec)
         }
      || Spec <- Specs
     ].
 
 %% @private
-%% Cold-start index recovery (§6.6.1–6.6.3). For each declared index, decide
-%% per shard whether to TRUST (the durable trust marker is present — built and
-%% kept complete `<= snapshot_wm` by the §6.6.2 flush barrier) or REBUILD (no
-%% marker: a new index, a pre-restart drop, or a wiped ephemeral shard). If
-%% ANY shard of an index is unmarked, rebuild the whole index from the primary
-%% (`rebuild_sync` is per-index and re-derives + freshens every shard);
-%% otherwise just freshen the trusted shards so a finite `max_lag` read passes.
-%% Best-effort — a failure leaves the index marked for rebuild (reads refuse),
-%% recoverable by a later trigger — so it never fails `open_table`.
+%% Cold-start index recovery. For each declared index, decide per shard whether
+%% to TRUST (the durable trust marker is present — built and kept complete
+%% `<= snapshot_wm` by the compaction flush barrier) or REBUILD (no marker: a
+%% new index, a pre-restart drop, or a wiped ephemeral shard). If ANY shard of
+%% an index is unmarked, rebuild the whole index from the primary (`rebuild_sync`
+%% is per-index and re-derives + freshens every shard); otherwise just freshen
+%% the trusted shards so a finite `max_lag` read passes. Best-effort — a failure
+%% leaves the index marked for rebuild (reads refuse), recoverable by a later
+%% trigger — so it never fails `open_table`.
 cold_start_indexes(_NS, _InstanceIds, IndexMap) when map_size(IndexMap) =:= 0 ->
     %% No secondary indexes ⇒ no trust/rebuild decision and no barrier. Skipping
     %% keeps the WAL drain ASYNC for index-less tables (forcing it here would
@@ -2081,8 +2080,8 @@ cold_start_indexes(NS, InstanceIds, IndexMap) ->
     %% observe a fully-replayed primary. Without this a `rebuild_sync` re-derives
     %% from `distinct_cell_keys(MST)` while the tail is still being applied (the
     %% MST lags the projection via the async overlay install), yielding an empty
-    %% or partial index (`PLUM_DB_TO_BONDY_DB_DESIGN.md` D-9). Best-effort: a
-    %% missing applier just leaves the prior (racy) behaviour, never blocks open.
+    %% or partial index. Best-effort: a missing applier just leaves the prior
+    %% (racy) behaviour, never blocks open.
     ok = await_primary_shards(InstanceIds),
     maps:foreach(
         fun(Name, #{sec_shard_count := SecShardCount}) ->
@@ -2102,7 +2101,7 @@ cold_start_indexes(NS, InstanceIds, IndexMap) ->
 
 %% @private
 %% Drain + install every primary shard to end-of-log before the cold-start index
-%% decision (D-9 barrier). `await_drain` flushes the WAL tail into the overlay;
+%% decision. `await_drain` flushes the WAL tail into the overlay;
 %% `await_apply` installs the overlay into the MST. Both best-effort.
 await_primary_shards(InstanceIds) ->
     maps:foreach(
@@ -2115,12 +2114,12 @@ await_primary_shards(InstanceIds) ->
 
 %% @private
 %% Decide trust-vs-rebuild for the whole index and prime per-shard state. Per
-%% shard it applies BOTH cold-start gates (F1-minimal, §6.6): the durable trust
-%% marker (built?) AND the durable clean-shutdown flag (cleanly closed to head
-%% last lifetime?). The index is trusted only if every shard passes both. As a
-%% side effect it loads the trust marker into the in-memory `needs_rebuild` flag
-%% (so a later read sees the right state) and CLEARS the clean-shutdown flag
-%% (so a crash this lifetime leaves the shard dirty → rebuilt on the next open).
+%% shard it applies BOTH cold-start gates: the durable trust marker (built?) AND
+%% the durable clean-shutdown flag (cleanly closed to head last lifetime?). The
+%% index is trusted only if every shard passes both. As a side effect it loads
+%% the trust marker into the in-memory `needs_rebuild` flag (so a later read
+%% sees the right state) and CLEARS the clean-shutdown flag (so a crash this
+%% lifetime leaves the shard dirty → rebuilt on the next open).
 load_index_trust_markers(NS, Name, SecShardCount) ->
     Flags = [
         shard_needs_rebuild(NS, Name, Shard)
@@ -2202,20 +2201,18 @@ index_bucket(
 %%   - equality (`index_get`) touches one shard, so it checks one shard;
 %%   - range (`index_range`) scatters, so it checks every shard.
 %%
-%% Deviation from `MST_DB_DESIGN.md` §13 / the IDX-2 sketch, which reused
-%% the namespace-wide `bondy_oplog_core:ensure_fresh([NS], Ms)`. That conflates
-%% the index's freshness with the *primary* shards' (and every sibling
-%% index's): the primary applier never bumps its own freshness here, so a
-%% namespace-wide finite `max_lag` would refuse forever even after the index
-%% caught up — and a per-shard term-sharded write could never satisfy an
-%% all-shards check. The freshness signal a reader actually wants is "are
-%% the shard(s) I am about to read current".
+%% A namespace-wide freshness check would conflate the index's freshness with
+%% the *primary* shards' (and every sibling index's): the primary applier never
+%% bumps its own freshness here, so a namespace-wide finite `max_lag` would
+%% refuse forever even after the index caught up — and a per-shard term-sharded
+%% write could never satisfy an all-shards check. The freshness signal a reader
+%% actually wants is "are the shard(s) I am about to read current".
 %%
-%% IDX-4 additions: the gate also returns the worst observed lag (so the
-%% caller — and the `{stale_secondary, IndexName, Lag}` error — carries a
-%% diagnostic), and a shard whose `needs_rebuild` flag is set (saturation
-%% drop / writer crash) is unconditionally stale (`Lag = infinity`) until a
-%% rebuild clears it, regardless of its AE timestamp.
+%% The gate also returns the worst observed lag (so the caller — and the
+%% `{stale_secondary, IndexName, Lag}` error — carries a diagnostic), and a
+%% shard whose `needs_rebuild` flag is set (saturation drop / writer crash) is
+%% unconditionally stale (`Lag = infinity`) until a rebuild clears it,
+%% regardless of its AE timestamp.
 ensure_shard_fresh(_NS, _IndexName, _Shard, infinity) ->
     ok;
 ensure_shard_fresh(NS, IndexName, Shard, MaxLag) ->
@@ -2297,7 +2294,7 @@ index_range_opts(Opts) ->
 %% @private
 %% A stale index read either refuses with the lag diagnostic, or — when
 %% the caller passes `fallback => primary` — runs the supplied
-%% primary-scan thunk ("slow but correct", `MST_DB_DESIGN.md` §13.1).
+%% primary-scan thunk (slow but correct).
 stale_or_fallback(Opts, IndexName, Lag, FallbackFun) ->
     case maps:get(fallback, Opts, refuse) of
         primary -> FallbackFun();

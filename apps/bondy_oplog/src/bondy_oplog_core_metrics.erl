@@ -11,15 +11,14 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Per-namespace gauge emitter for the `bondy_oplog_core` substrate
-(`MST_DB_DESIGN.md` §16).
+Per-namespace gauge emitter for the `bondy_oplog_core` substrate.
 
 Subscribes to the substrate's one-shot events (`[bondy_oplog_core, read]`,
 `[bondy_oplog_core, range]`) and accumulates per-namespace counters through
 `bondy_metrics` (atomics-backed, wait-free). On a periodic tick the
 gen_server reads the running totals, computes deltas against the
 previous tick, and emits a single `[bondy_oplog_core, metrics, refresh]`
-event per known namespace with the gauges spelled out in §16:
+event per known namespace with the following gauges:
 
 ```
 measurements: #{

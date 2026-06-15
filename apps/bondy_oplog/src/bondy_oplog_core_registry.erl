@@ -13,7 +13,7 @@
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
 Node-shared registry of per-`(namespace, index, shard)` triples for
-`bondy_oplog_core` (`MST_DB_DESIGN.md` §3, §5, §6).
+`bondy_oplog_core`.
 
 Each shard publishes one entry containing the handles `bondy_oplog_core`
 needs to satisfy a read:
@@ -62,12 +62,12 @@ substrate guarantees registry-row cleanup only.
 
 `bondy_oplog_registry` is per-instance (effectively per-namespace —
 the existing substrate uses `instance_id` as the namespace). The
-MST_DB read API needs a richer key: `(namespace, index, shard)` —
-indexes (primary and secondaries) are a new dimension introduced in
-`MST_DB_DESIGN.md` and not present in `bondy_oplog_instance`. Keeping
-the registries separate avoids retrofitting `bondy_oplog_registry`'s
-record with index/shard fields that would be `undefined` for the
-99% of consumers that have not opted into the read-side projection.
+read API needs a richer key: `(namespace, index, shard)` —
+indexes (primary and secondaries) are a new dimension not present in
+`bondy_oplog_instance`. Keeping the registries separate avoids
+retrofitting `bondy_oplog_registry`'s record with index/shard fields
+that would be `undefined` for the 99% of consumers that have not opted
+into the read-side projection.
 
 ## Why ETS, not persistent_term
 
@@ -80,19 +80,19 @@ keeps reads parallel.
 
 -define(TABLE, bondy_oplog_core_registry_tab).
 
-%% "Infinitely stale" freshness sentinel (`MST_DB_DESIGN.md` §11). Chosen
-%% so that on a node whose `monotonic_time(millisecond)` offset is large
-%% and negative, `Now - sentinel` is always a huge positive number — an
-%% un-bumped (or deliberately invalidated) shard fails any finite
-%% `max_lag` check. `-(1 bsl 62)` leaves headroom above the signed-int64
-%% floor so the subtraction never wraps.
+%% "Infinitely stale" freshness sentinel. Chosen so that on a node whose
+%% `monotonic_time(millisecond)` offset is large and negative,
+%% `Now - sentinel` is always a huge positive number — an un-bumped (or
+%% deliberately invalidated) shard fails any finite `max_lag` check.
+%% `-(1 bsl 62)` leaves headroom above the signed-int64 floor so the
+%% subtraction never wraps.
 -define(STALE_SENTINEL, -(1 bsl 62)).
 
-%% Atomics slot layout for an index shard's `inflight_ref` (IDX-4
-%% back-pressure). Slot 1 counts ops dispatched to the secondary writer
-%% but not yet flushed (the unbounded-mailbox bound); slot 2 is a
-%% `needs_rebuild` flag (0 | 1) raised on a saturation drop or a writer
-%% crash and cleared only by a completed rebuild.
+%% Atomics slot layout for an index shard's `inflight_ref` (back-pressure).
+%% Slot 1 counts ops dispatched to the secondary writer but not yet flushed
+%% (the unbounded-mailbox bound); slot 2 is a `needs_rebuild` flag (0 | 1)
+%% raised on a saturation drop or a writer crash and cleared only by a
+%% completed rebuild.
 -define(INFLIGHT_SLOT, 1).
 -define(NEEDS_REBUILD_SLOT, 2).
 
@@ -108,7 +108,7 @@ keeps reads parallel.
     %% Per-shard freshness counter, written by the applier on each
     %% projection commit (or by anti-entropy on each successful round).
     %% Stored as `monotonic_time(millisecond)`; read wait-free by
-    %% `ensure_fresh/2` (`MST_DB_DESIGN.md` §11).
+    %% `ensure_fresh/2`.
     ae_atomics :: atomics:atomics_ref(),
     %% Per-shard high-water HLC mark
     %% (`bondy_oplog_high_water`). Tracks the highest HLC of any
@@ -118,30 +118,29 @@ keeps reads parallel.
     %% (catalogue-freshness reporting, bootstrap finalisation) without
     %% threading through the applier's process state.
     high_water_ref :: bondy_oplog_high_water:ref(),
-    %% Per-namespace policy (§15). `ap` (default) places no constraint
-    %% on reads; `cp` rejects `eventual`-consistency batch reads to
-    %% prevent unfenced staleness. Owners pass this on `register/4`;
-    %% the substrate trusts the value to be consistent across shards
-    %% of the same namespace (consumer responsibility).
+    %% Per-namespace policy. `ap` (default) places no constraint on reads;
+    %% `cp` rejects `eventual`-consistency batch reads to prevent unfenced
+    %% staleness. Owners pass this on `register/4`; the substrate trusts the
+    %% value to be consistent across shards of the same namespace (consumer
+    %% responsibility).
     consistency_class :: ap | cp,
     %% Secondary-index writer pid for this `(NS, IndexName, SecShard)`
-    %% triple (`MST_DB_DESIGN.md` §13). `undefined` for primary shards
-    %% and for index shards whose `bondy_oplog_secondary_writer` has not
-    %% yet stamped itself (a brief startup window). The primary applier
-    %% reads it via `entry_writer_pid/1` to dispatch index updates after
-    %% a successful projection write. Set out-of-band via
-    %% `set_writer_pid/4` (a single-field `ets:update_element`, no
-    %% monitor change) — the projection-handle owner, not the writer,
-    %% owns the registry monitor.
+    %% triple. `undefined` for primary shards and for index shards whose
+    %% `bondy_oplog_secondary_writer` has not yet stamped itself (a brief
+    %% startup window). The primary applier reads it via
+    %% `entry_writer_pid/1` to dispatch index updates after a successful
+    %% projection write. Set out-of-band via `set_writer_pid/4` (a
+    %% single-field `ets:update_element`, no monitor change) — the
+    %% projection-handle owner, not the writer, owns the registry monitor.
     writer_pid = undefined :: pid() | undefined,
-    %% Per-index-shard back-pressure atomics (`MST_DB_DESIGN.md` §13,
-    %% IDX-4). `undefined` for primary shards. Two slots: in-flight op
-    %% count (slot `?INFLIGHT_SLOT`) and a `needs_rebuild` flag (slot
-    %% `?NEEDS_REBUILD_SLOT`). The primary applier reads slot 1 at dispatch
-    %% to decide whether to drop a saturating batch; the secondary writer
-    %% decrements it on flush. Slot 2 gates `index_get`/`index_range`
-    %% freshness so reads refuse from a saturation drop until a rebuild
-    %% clears it. Allocated by the facade on index-shard registration.
+    %% Per-index-shard back-pressure atomics. `undefined` for primary shards.
+    %% Two slots: in-flight op count (slot `?INFLIGHT_SLOT`) and a
+    %% `needs_rebuild` flag (slot `?NEEDS_REBUILD_SLOT`). The primary applier
+    %% reads slot 1 at dispatch to decide whether to drop a saturating batch;
+    %% the secondary writer decrements it on flush. Slot 2 gates
+    %% `index_get`/`index_range` freshness so reads refuse from a saturation
+    %% drop until a rebuild clears it. Allocated by the facade on index-shard
+    %% registration.
     inflight_ref = undefined :: atomics:atomics_ref() | undefined,
     %% Primary shard's oplog `instance_id` (`bondy_oplog`), recorded so a
     %% secondary-index rebuild can discover the primary appliers for a
@@ -152,18 +151,16 @@ keeps reads parallel.
     %% Optional native operation-based CRDT module
     %% (`bondy_oplog_crdt`) for this table's cell projection. When set,
     %% the applier's cell kernel routes through `interpret_cog`/`apply_op`
-    %% instead of the `fold_module` (`architecture_regrounding_plan.md`
-    %% §7 step 3). `undefined` (default) keeps the legacy fold path, so
-    %% the selector is reversible per table. Appended last so existing
-    %% `#entry`-index `ets:update_element` writes stay valid.
+    %% instead of the `fold_module`. `undefined` (default) keeps the legacy
+    %% fold path, so the selector is reversible per table. Appended last so
+    %% existing `#entry`-index `ets:update_element` writes stay valid.
     crdt_module = undefined :: module() | undefined,
     %% The CRDT module's declared causal tier (`bondy_oplog_crdt:tier()`),
     %% read from `crdt_module:causal_tier()` at table open. `tier_0`
     %% (default) = scalar HLC only; `tier_2` = the applier stamps a
     %% per-cell causal context (DVV) into the event `meta` for this
-    %% table's writes (`architecture_regrounding_plan.md` tier_2 path).
-    %% Appended last so existing `#entry`-index `ets:update_element`
-    %% writes stay valid.
+    %% table's writes. Appended last so existing `#entry`-index
+    %% `ets:update_element` writes stay valid.
     causal_tier = tier_0 :: bondy_oplog_crdt:tier(),
     %% Index shards only. The `bondy_oplog_projection_adapter:clear_scope()`
     %% the rebuild passes to `Adapter:clear/2` when wiping this shard before a
@@ -220,13 +217,12 @@ keeps reads parallel.
     %% the registration is torn down automatically. Defaults to the
     %% calling process.
     owner => pid(),
-    %% Optional. Per-namespace consistency policy (`MST_DB_DESIGN.md`
-    %% §15). Defaults to `ap`. See `read_batch/2` for the enforcement
-    %% rule.
+    %% Optional. Per-namespace consistency policy. Defaults to `ap`. See
+    %% `read_batch/2` for the enforcement rule.
     consistency_class => ap | cp,
-    %% Optional. Per-index-shard back-pressure atomics (IDX-4). Allocated
-    %% by the facade for index shards (`atomics:new(2, [{signed, true}])`);
-    %% absent for primary shards.
+    %% Optional. Per-index-shard back-pressure atomics. Allocated by the
+    %% facade for index shards (`atomics:new(2, [{signed, true}])`); absent
+    %% for primary shards.
     inflight_atomics => atomics:atomics_ref(),
     %% Optional. The owning oplog `instance_id` for a primary shard, so a
     %% rebuild can find the primary applier. Absent for index shards.
@@ -250,13 +246,13 @@ keeps reads parallel.
 -export([shard_count/2]).
 -export([list/0]).
 
-%% Restart-recovery protocol (`MST_DB_DESIGN.md` §11.1, §18 item 11).
+%% Restart-recovery protocol.
 -export([current_epoch/0]).
 
 %% Diagnostic / invariant-checking helper.
 -export([snapshot_for_invariants/0]).
 
-%% Freshness (`MST_DB_DESIGN.md` §11).
+%% Freshness.
 -export([bump_ae/3]).
 -export([bump_ae/4]).
 -export([high_water_hlc/3]).
@@ -288,9 +284,9 @@ keeps reads parallel.
 -export([entry_last_ae/1]).
 -export([entry_ever_freshened/1]).
 
-%% Index-shard back-pressure helpers (IDX-4). Operate on the entry's
-%% `inflight_ref`; all are wait-free and a strict no-op (or `false`) when
-%% the ref is `undefined` (a primary shard).
+%% Index-shard back-pressure helpers. Operate on the entry's `inflight_ref`;
+%% all are wait-free and a strict no-op (or `false`) when the ref is
+%% `undefined` (a primary shard).
 -export([index_inflight_add/2]).
 -export([index_inflight_sub/2]).
 -export([index_inflight/1]).
@@ -304,7 +300,7 @@ keeps reads parallel.
 -export([index_clear_clean/1]).
 -export([reset_stale_ae/1]).
 
-%% Namespace-level consistency_class lookup (`MST_DB_DESIGN.md` §15).
+%% Namespace-level consistency_class lookup.
 -export([consistency_class/1]).
 
 -export([
@@ -669,7 +665,7 @@ entry_ever_freshened(#entry{ae_atomics = Ref}) ->
     atomics:get(Ref, 1) =/= ?STALE_SENTINEL.
 
 %% =============================================================================
-%% Index-shard back-pressure (IDX-4)
+%% Index-shard back-pressure
 %% =============================================================================
 
 -doc """
@@ -732,7 +728,7 @@ back to the primary) until a rebuild clears the flag. No-op for a primary.
 index_mark_rebuild(#entry{inflight_ref = undefined}) ->
     ok;
 index_mark_rebuild(#entry{inflight_ref = Ref} = E) ->
-    %% Durable twin (§6.6.2): on the 0→1 transition, REMOVE the trust marker so
+    %% Durable trust marker: on the 0→1 transition, REMOVE the trust marker so
     %% the "not trusted" state survives restart — a dropped/wedged durable shard
     %% is then rebuilt on the next open instead of trusted incomplete. The
     %% removal MUST be synchronous (an async removal could be lost in a crash,
@@ -775,9 +771,8 @@ in-memory `needs_rebuild` flag from it — `needs_rebuild = NOT trusted`.
 Returns whether the shard needs a rebuild. Called by `bondy_db` at index-shard
 provisioning so that:
 
-- a shard with the trust marker (built + clean, kept complete `≤ snapshot_wm`
-  by the §6.6.2 flush barrier) is trusted and only freshened — no O(table)
-  re-derive;
+- a shard with the trust marker (built + clean, kept complete by the flush
+  barrier) is trusted and only freshened — no O(table) re-derive;
 - a shard WITHOUT it (a newly-declared index, or one left incomplete by a
   pre-restart drop) refuses reads and is rebuilt.
 
@@ -802,8 +797,8 @@ index_load_rebuild_marker(#entry{inflight_ref = Ref} = E) ->
 -doc """
 Reset the shard's AE freshness counter to the "infinitely stale"
 sentinel, so any finite `max_lag` read refuses until the shard is
-freshened again. Used by a saturation drop (`MST_DB_DESIGN.md` §13). No-op
-when the entry has no AE atomics.
+freshened again. Used by a saturation drop. No-op when the entry has
+no AE atomics.
 """.
 -spec reset_stale_ae(shard_entry()) -> ok.
 
@@ -840,9 +835,9 @@ consistency_class(NS) when is_atom(NS) ->
 %% =============================================================================
 %% PRIVATE: durable index trust marker
 %% =============================================================================
-%% The durable twin of the in-memory `needs_rebuild` atomic (§6.6.2), with
-%% INVERTED ("trusted") semantics — presence = built + clean, absence =
-%% rebuild. Stored as a reserved cell in the index shard's own projection at
+%% The durable twin of the in-memory `needs_rebuild` atomic, with INVERTED
+%% ("trusted") semantics — presence = built + clean, absence = rebuild.
+%% Stored as a reserved cell in the index shard's own projection at
 %% `bondy_oplog_index_key:trust_marker_loc/3` (bucket `<<"$idx_trusted">>`,
 %% outside the index keyspace, so `clear/2` and range scans never see it).
 %% All three are best-effort (`catch`) — a persistence failure degrades to the
@@ -896,16 +891,16 @@ trust_marker_frame() ->
 %% =============================================================================
 %% API: durable index clean-shutdown flag
 %% =============================================================================
-%% The cold-start trust decision's second gate (F1-minimal, §6.6). The trust
-%% marker says a shard was *built*; this flag says it was *cleanly closed* — its
-%% in-flight coalesce buffer reached disk before shutdown. A shard is trusted on
-%% open only if both are present; otherwise it is rebuilt. `bondy_db:close_table/1`
-%% sets it after `flush_sync`; cold-start reads then clears it (so a crash this
-%% run leaves the shard dirty → rebuilt next open). Presence-only, reusing the
-%% trust marker's payload-free frame. Stored at
-%% `bondy_oplog_index_key:clean_flag_loc/3` (reserved bucket `<<"$idx_clean">>`,
-%% outside the index keyspace). All best-effort (`catch`): a persistence failure
-%% degrades to a rebuild on the next open, never raising into the caller.
+%% The cold-start trust decision's second gate. The trust marker says a shard
+%% was *built*; this flag says it was *cleanly closed* — its in-flight coalesce
+%% buffer reached disk before shutdown. A shard is trusted on open only if both
+%% are present; otherwise it is rebuilt. `bondy_db:close_table/1` sets it after
+%% `flush_sync`; cold-start reads then clears it (so a crash this run leaves the
+%% shard dirty → rebuilt next open). Presence-only, reusing the trust marker's
+%% payload-free frame. Stored at `bondy_oplog_index_key:clean_flag_loc/3`
+%% (reserved bucket `<<"$idx_clean">>`, outside the index keyspace). All
+%% best-effort (`catch`): a persistence failure degrades to a rebuild on the next
+%% open, never raising into the caller.
 
 -doc """
 Write the durable clean-shutdown flag for an index shard, certifying it was

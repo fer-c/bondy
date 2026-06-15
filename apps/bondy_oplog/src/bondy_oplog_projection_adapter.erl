@@ -10,7 +10,7 @@
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
 Behaviour for **projection backings** — the persistent KV layer that
-materialises folded cell values (`MST_DB_DESIGN.md` §6).
+materialises folded cell values.
 
 A projection adapter owns the persistent state of one
 `(namespace, index, shard)` triple's keyspace. Each cell is stored as a

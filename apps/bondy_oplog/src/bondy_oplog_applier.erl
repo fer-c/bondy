@@ -82,9 +82,9 @@ resume frame is an idempotent no-op.
 
 ## Substrate read-side wiring
 
-The applier optionally drives the read-side substrate
-(`MST_DB_DESIGN.md` §11/§12). Both hooks are opt-in and consumer-
-configured; defaults are no-ops so existing instances are unaffected.
+The applier optionally drives the read-side substrate. Both hooks are
+opt-in and consumer-configured; defaults are no-ops so existing
+instances are unaffected.
 
 - **Freshness (`bump_ae`)** — after every successful commit
   (`commit_now/1` flushed `consumer.offset` and advanced the WAL
@@ -93,8 +93,8 @@ configured; defaults are no-ops so existing instances are unaffected.
   `monotonic_time(millisecond)` so a batch of shards observes the same
   "now". Missing registry entries are tolerated and surfaced via a
   `not_found` counter in telemetry; they typically indicate a
-  registration race during startup. The AE-side bump path (long-quiet
-  shards) is a separate follow-on (`MST_DB_DESIGN.md §18` item 8).
+  registration race during startup. The AE-side bump path for long-quiet
+  shards is a separate concern handled outside this module.
 - **Subscriptions (`publish`)** — after `apply_batch/2` produces a
   non-empty verified set the applier walks the set in order and calls
   `publish_fun` per event. The applier passes `(Namespace, Key, Hlc,
@@ -105,10 +105,9 @@ configured; defaults are no-ops so existing instances are unaffected.
   blocked on delivery.
 
   **Timing — at-apply, not at-commit.** Publishing fires inside
-  `apply_batch/2` (per verified event, in HLC-monotonic order). This
-  deviates from `MST_DB_DESIGN.md §18` item 7's "Same as (6)" hint —
-  which would batch publish into `commit_now/1` to mirror bump_ae —
-  and was chosen deliberately on the live system:
+  `apply_batch/2` (per verified event, in HLC-monotonic order). Batching
+  publish into `commit_now/1` to mirror bump_ae was considered and
+  rejected for the following reasons:
 
   - Latency: at-commit would batch up to `commit_every` events (default
     64) into one burst delivered at the commit barrier. At-apply
@@ -167,59 +166,56 @@ configured; defaults are no-ops so existing instances are unaffected.
     %% lifetime of the applier.
     validator_module :: module(),
     validator_state :: term(),
-    %% Per-instance fold projection (FOLD_STRATEGY_DESIGN §3 +
-    %% §6/§7). Read once from the registry at `init/1`; `undefined`
-    %% when no fold is configured for the instance, in which case the
-    %% fold path is a strict no-op.
+    %% Per-instance fold projection. Read once from the registry at
+    %% `init/1`; `undefined` when no fold is configured for the
+    %% instance, in which case the fold path is a strict no-op.
     %%
     %% Scope: single-cell-per-instance. The fold's event vocabulary is
     %% the `op` field of each WAL event (see `bondy_oplog_event:op/1`)
-    %% by convention. Per-cell projections are deferred to MST_DB_DESIGN.
-    %% Remote events bypass the WAL drain path and are NOT folded yet —
-    %% F8 documents this as a known gap; F9's cross-PR QA will track
-    %% resolution.
+    %% by convention. Remote events bypass the WAL drain path and are
+    %% NOT folded via this path — the `replay_cell_events` cast handles
+    %% peer-authored events instead.
     fold_module :: module() | undefined,
     fold_state :: term(),
-    %% Substrate read-side wiring (MST_DB_DESIGN §11). Shards bumped
-    %% via `bondy_oplog_core_registry:bump_ae/4` after each successful
+    %% Substrate read-side wiring. Shards bumped via
+    %% `bondy_oplog_core_registry:bump_ae/4` after each successful
     %% commit. Empty list disables the wiring.
     ae_targets = [] :: [shard_key()],
-    %% Substrate subscription wiring (MST_DB_DESIGN §12). When both
-    %% `publish_ns` and `publish_fun` are set, every verified event in
-    %% an applied batch is forwarded to `bondy_oplog_core:publish/4` at
-    %% apply time. See moduledoc "Substrate read-side wiring" for the
-    %% rationale behind the at-apply timing.
+    %% Substrate subscription wiring. When both `publish_ns` and
+    %% `publish_fun` are set, every verified event in an applied batch
+    %% is forwarded to `bondy_oplog_core:publish/4` at apply time.
+    %% See moduledoc "Substrate read-side wiring" for the rationale
+    %% behind the at-apply timing.
     publish_ns :: atom() | undefined,
     publish_fun :: publish_fun() | undefined,
-    %% Per-cell projection write wiring (`MST_DB_DESIGN.md` §6.3).
-    %% When set, events whose op matches `{cell_apply, Bucket, Key, FoldEvent}`
-    %% bypass the per-instance fold and instead do a read-modify-write
-    %% against the projection adapter registered for the configured
+    %% Per-cell projection write wiring. When set, events whose op
+    %% matches `{cell_apply, Bucket, Key, FoldEvent}` bypass the
+    %% per-instance fold and instead do a read-modify-write against the
+    %% projection adapter registered for the configured
     %% `(NS, Index, Shard)` triple in `bondy_oplog_core_registry`. The
     %% cell's fold module (taken from the registry entry, which can
     %% differ from the per-instance `fold_module`) drives the
     %% decode/apply/encode cycle. `undefined` disables the path —
     %% existing instances are unaffected.
     cell_apply_ctx :: cell_apply_ctx() | undefined,
-    %% tier_2 stamp-site context-regression guard (#27). Per locally
-    %% stamped cell `{Bucket, Key}`, the highest causal context this
-    %% applier has handed out on the tier_2 write path
-    %% (`{cell_context, _, _}`). A correct substrate only ever advances a
-    %% cell's context (the projection DVV grows monotonically), so a
-    %% context that regressed between two successive local stamps of the
-    %% same cell means durable state for that cell was lost or corrupted
-    %% in process — the precondition that keeps a same-origin write from
-    %% re-minting a used dot has been violated. The stamp refuses such a
-    %% write (`{error, {context_regression, _, _}}`) and telemeters,
-    %% turning a SILENT permanent fork into a loud, recoverable failure.
-    %% Only the tier_2 stamp populates this (tier_0/tier_1 carry no
-    %% context), so it is empty for every non-tier_2 instance. It is an
-    %% in-process guard: it resets on restart (by design — the durable
-    %% projection is the cross-restart reference, see
-    %% `bondy_db_tier2_durability_test`) and is cleared on a catalogue
-    %% install (the projection it tracks is replaced wholesale). Bounded
-    %% by `?CTX_GUARD_MAX` distinct cells via a coarse clear, exactly as
-    %% the A3 OldValue cache is.
+    %% tier_2 stamp-site context-regression guard. Per locally stamped
+    %% cell `{Bucket, Key}`, the highest causal context this applier has
+    %% handed out on the tier_2 write path (`{cell_context, _, _}`). A
+    %% correct substrate only ever advances a cell's context (the
+    %% projection DVV grows monotonically), so a context that regressed
+    %% between two successive local stamps of the same cell means durable
+    %% state for that cell was lost or corrupted in process — the
+    %% precondition that keeps a same-origin write from re-minting a used
+    %% dot has been violated. The stamp refuses such a write
+    %% (`{error, {context_regression, _, _}}`) and telemeters, turning a
+    %% SILENT permanent fork into a loud, recoverable failure. Only the
+    %% tier_2 stamp populates this (tier_0/tier_1 carry no context), so
+    %% it is empty for every non-tier_2 instance. It is an in-process
+    %% guard: it resets on restart (by design — the durable projection is
+    %% the cross-restart reference, see `bondy_db_tier2_durability_test`)
+    %% and is cleared on a catalogue install (the projection it tracks is
+    %% replaced wholesale). Bounded by `?CTX_GUARD_MAX` distinct cells
+    %% via a coarse clear, exactly as the A3 OldValue cache is.
     ctx_guard = #{} :: #{{term(), term()} => bondy_dvvset:vector()},
     %% Demand-based flow control toward the instance gen_server. The
     %% applier increments slot 1 of `install_in_flight` before each
@@ -269,8 +265,7 @@ configured; defaults are no-ops so existing instances are unaffected.
     %% means the entry hasn't published one yet (race with the
     %% instance's `init/1`) and is treated as `live` for backward
     %% compatibility — the instance's publish is idempotent and will
-    %% catch up by the next backstop tick. See
-    %% `_design/catalogue_expansion_plan.md` §2.
+    %% catch up by the next backstop tick.
     lifecycle :: bondy_oplog_bootstrap_lifecycle:handle() | undefined,
     %% Monitor reference of the parked idle-wait helper process (see
     %% `arm_idle_waiter/1`). `undefined` when the applier is actively
@@ -315,24 +310,24 @@ configured; defaults are no-ops so existing instances are unaffected.
     oldstate_cache => boolean(),
     oldstate_cache_max => pos_integer(),
     poll_interval_ms => pos_integer(),
-    %% Substrate read-side wiring (MST_DB_DESIGN §18 item 6).
+    %% Substrate read-side wiring: shards bumped after each commit.
     ae_targets => [shard_key()],
-    %% Substrate subscription wiring (MST_DB_DESIGN §18 item 7).
+    %% Substrate subscription wiring: namespace for post-apply publish.
     publish_ns => atom(),
     publish_fun => publish_fun(),
-    %% Per-cell projection write wiring (MST_DB_DESIGN §6.3).
-    %% Setting this requires the shard to be already registered in
-    %% `bondy_oplog_core_registry`. Resolved eagerly at init/1.
+    %% Per-cell projection write wiring. Setting this requires the shard
+    %% to be already registered in `bondy_oplog_core_registry`. Resolved
+    %% eagerly at init/1.
     cell_apply_target => shard_key(),
-    %% Secondary-index descriptors for this primary table
-    %% (MST_DB_DESIGN §13). Passed through into the `cell_apply_ctx`;
-    %% only meaningful alongside `cell_apply_target`.
+    %% Secondary-index descriptors for this primary table. Passed
+    %% through into the `cell_apply_ctx`; only meaningful alongside
+    %% `cell_apply_target`.
     secondary_indexes => [index_descriptor()]
 }.
 
 -export_type([opts/0]).
 
-%% Report returned by `reap_origins_sync/2` (PR-H dead-origin GC).
+%% Report returned by `reap_origins_sync/2`.
 -type reap_report() :: #{
     %% `false` when the shard's kernel is not a context-carrying tier_2
     %% CRDT (legacy fold / tier_0) — the whole pass was a no-op.
@@ -418,12 +413,12 @@ configured; defaults are no-ops so existing instances are unaffected.
 %% supervisor shutdown messages and any future control-plane signals
 %% are processed in a timely fashion.
 -define(AWAIT_DURABLE_TIMEOUT_MS, 200).
-%% Default per-secondary-shard in-flight cap (IDX-4 back-pressure). A
-%% batch that would push the writer's unflushed-op backlog past this is
-%% dropped and the shard scheduled for rebuild. Must exceed a shard's
-%% live-entry working set; overridable per index via the spec's
-%% `max_inflight`. Large by design — back-pressure is a safety valve for
-%% a pathologically hot shard, not a steady-state throttle.
+%% Default per-secondary-shard in-flight cap. A batch that would push the
+%% writer's unflushed-op backlog past this is dropped and the shard
+%% scheduled for rebuild. Must exceed a shard's live-entry working set;
+%% overridable per index via the spec's `max_inflight`. Large by design —
+%% back-pressure is a safety valve for a pathologically hot shard, not a
+%% steady-state throttle.
 -define(DEFAULT_MAX_INFLIGHT, 100000).
 
 %% =============================================================================
@@ -626,9 +621,8 @@ the last replayed root), this re-applies the COMPLETE local+peer event
 set, so a cell whose materialised state was overwritten out-of-band — a
 `replace`-mode catalogue install that clobbered a per-Origin-accumulating
 CRDT (counter, grow-set) on a live re-bootstrap — is restored to the
-converged value. The op-based replacement for the removed CvRDT
-`merge_states` (PR-G's "checkpoint-replace + op-replay"). Idempotent and
-a no-op when `cell_apply_target` is not configured.
+converged value. The op-based replacement for the removed CvRDT `merge_states`. Idempotent
+and a no-op when `cell_apply_target` is not configured.
 """.
 rederive_projection_sync(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, rederive_projection, infinity).
@@ -636,16 +630,16 @@ rederive_projection_sync(ApplierPid) when is_pid(ApplierPid) ->
 -spec rebuild_indexes(pid()) -> ok.
 
 -doc """
-Force a full secondary-index rebuild from this primary shard
-(`MST_DB_DESIGN.md` §13, IDX-4): re-derives the index from each live
-cell's CURRENT projection value, re-dispatching a `put` for every live
-term of every cell to the secondary writers. The dispatch **bypasses the
-writer back-pressure cap** so the rebuild can load the full working set in
-one pass even when the cap was exceeded. Combined with the rebuild
-orchestrator first clearing the stale index shard, this restores the index
-exactly. Unlike replaying the MST's events, reading the converged value is
-correct for context-carrying (tier_2) CRDTs (see `do_rebuild_indexes/1`).
-A no-op when the instance has no `cell_apply_target`.
+Force a full secondary-index rebuild from this primary shard: re-derives
+the index from each live cell's CURRENT projection value, re-dispatching a
+`put` for every live term of every cell to the secondary writers. The
+dispatch **bypasses the writer back-pressure cap** so the rebuild can load
+the full working set in one pass even when the cap was exceeded. Combined
+with the rebuild orchestrator first clearing the stale index shard, this
+restores the index exactly. Unlike replaying the MST's events, reading the
+converged value is correct for context-carrying (tier_2) CRDTs (see
+`do_rebuild_indexes/1`). A no-op when the instance has no
+`cell_apply_target`.
 """.
 rebuild_indexes(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:cast(ApplierPid, rebuild_indexes).
@@ -663,7 +657,7 @@ Block until the applier has drained its WAL to end-of-log — the cold-start
 rebuild barrier. Queues the caller and triggers a drain; replies `ok` the moment
 the drain next reaches end-of-log, so a `rebuild_indexes_sync/1` (or a freshen on
 the trust path) issued afterwards observes a fully-replayed MST/projection rather
-than racing the not-yet-applied tail (`PLUM_DB_TO_BONDY_DB_DESIGN.md` D-9).
+than racing the not-yet-applied tail.
 """.
 await_drain(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, await_drain, infinity).
@@ -673,12 +667,12 @@ await_drain(ApplierPid) when is_pid(ApplierPid) ->
 
 -doc """
 Reap the per-cell causal-context entries of permanently-retired origins
-across this shard's projection (the dead-origin GC; PR-H, #24). Walks
-every cell named in the MST, asks the cell kernel to drop the
-value-preserving (causal-history-only) entries of `RetiredOrigins`, and
-re-persists only the cells that changed. Co-evicts the reaped origins from
-the tier_2 stamp-site context-regression guard (`#state.ctx_guard`) so the
-legitimate context shrink is not mistaken for a regression.
+across this shard's projection. Walks every cell named in the MST, asks
+the cell kernel to drop the value-preserving (causal-history-only) entries
+of `RetiredOrigins`, and re-persists only the cells that changed.
+Co-evicts the reaped origins from the tier_2 stamp-site context-regression
+guard (`#state.ctx_guard`) so the legitimate context shrink is not
+mistaken for a regression.
 
 Runs synchronously in the applier's single-cell scope, so it is atomic
 w.r.t. concurrent cell writes. Idempotent — a second pass with the same
@@ -706,8 +700,8 @@ frontier. So:
 - A **fully-compacted cell** (its events already truncated from the MST,
   value only in the checkpoint) is not visited by the
   `distinct_cell_keys/1` MST walk, so its retired-origin entry is not
-  reaped — the same enumeration limitation as the secondary-index rebuild
-  (#26). The entry is harmless (value-preserving) and bounded by the
+  reaped — the same enumeration limitation as the secondary-index rebuild.
+  The entry is harmless (value-preserving) and bounded by the
   retired-origin count.
 """.
 reap_origins_sync(ApplierPid, RetiredOrigins) when
@@ -781,14 +775,14 @@ Installs a batch of catalogue-snapshot cells into the applier's
 projection shard. Each cell is `{Bucket, Key, Frame}` where `Frame` is
 a V2 cell frame as produced by the peer's projection adapter.
 
-Only **`replace`** mode exists (PR-G removed the CvRDT `merge_states`
-merge-mode): for each cell, if the existing local HLC is `>=` the
-incoming HLC the cell is skipped (Q11 per-cell HLC guard against
-bootstrap-vs-live interleave); otherwise the frame is written through
-unchanged. A snapshot bootstrap is only run by a fresh
-(`pre_bootstrap`) replica with an empty local projection, so skip-if-
-older is a no-op; a live replica converges via op-based anti-entropy
-instead (`bondy_oplog_sync_session`), which is lossless.
+Only **`replace`** mode exists (CvRDT `merge_states` is not supported):
+for each cell, if the existing local HLC is `>=` the incoming HLC the cell
+is skipped (per-cell HLC guard against bootstrap-vs-live interleave);
+otherwise the frame is written through unchanged. A snapshot bootstrap is
+only run by a fresh (`pre_bootstrap`) replica with an empty local
+projection, so skip-if-older is a no-op; a live replica converges via
+op-based anti-entropy instead (`bondy_oplog_sync_session`), which is
+lossless.
 
 Invalidates the read cache and advances the per-shard high-water HLC
 atomic after each successful write.
@@ -966,9 +960,9 @@ resolve_cell_apply_ctx(Opts) ->
                             ),
                         fold_module => FoldMod,
                         crdt_module => CrdtMod,
-                        %% The CRDT's declared causal tier (default tier_0).
-                        %% Recorded here; the tier_2 context-stamp (PR-C)
-                        %% gates on `causal_tier := tier_2`.
+                                            %% The CRDT's declared causal tier (default tier_0).
+                        %% Recorded here; the tier_2 context-stamp gates on
+                        %% `causal_tier := tier_2`.
                         causal_tier => CausalTier,
                         %% The cell projection kernel: `{crdt, Mod}` when a
                         %% `crdt_module` is configured, else `{fold, Mod}`
@@ -1120,16 +1114,16 @@ handle_call({apply_replayed_pairs, Pairs, NewRoot}, _From, State) ->
 handle_call(rederive_projection, _From, State) ->
     %% Full projection re-derive: reset the replay watermark so the diff
     %% fold re-applies EVERY event (not just those past the last replayed
-    %% root), re-folding each cell's complete group. Restores a cell a
-    %% `replace`-mode catalogue install clobbered on a live re-bootstrap
-    %% (PR-G's op-replay). The single-applier scope makes the reset + fold
-    %% atomic w.r.t. other reads.
+    %% root), re-folding each cell's complete group. Restores a cell that a
+    %% `replace`-mode catalogue install clobbered on a live re-bootstrap.
+    %% The single-applier scope makes the reset + fold atomic w.r.t. other
+    %% reads.
     {reply, ok,
         do_replay_cell_events(State#state{last_replayed_root = undefined})};
 handle_call(rebuild_indexes, _From, State) ->
-    %% Full secondary-index rebuild (IDX-4): re-derive every live term from
-    %% each cell's current projection value with the back-pressure cap
-    %% bypassed, re-dispatching to the secondary writers.
+    %% Full secondary-index rebuild: re-derive every live term from each
+    %% cell's current projection value with the back-pressure cap bypassed,
+    %% re-dispatching to the secondary writers.
     {reply, ok, do_rebuild_indexes(State)};
 handle_call(await_drain, From, State) ->
     %% Cold-start rebuild barrier: queue the caller and ensure a drain runs.
@@ -1145,11 +1139,10 @@ handle_call(
 ) ->
     {reply, {error, no_cell_apply_target}, State};
 handle_call({reap_origins, Retired}, _From, State) ->
-    %% Dead-origin VV reaping (PR-H, #24): drop the value-preserving
-    %% causal-context entries of retired origins from every cell, and
-    %% co-evict them from the stamp-site context-regression guard.
-    %% `do_reap_origins/2` already returns the `{ok, Report} | {error, _}`
-    %% reply.
+    %% Dead-origin VV reaping: drop the value-preserving causal-context
+    %% entries of retired origins from every cell, and co-evict them from
+    %% the stamp-site context-regression guard. `do_reap_origins/2` already
+    %% returns the `{ok, Report} | {error, _}` reply.
     {Reply, State1} = do_reap_origins(State, Retired),
     {reply, Reply, State1};
 handle_call(
@@ -1174,10 +1167,10 @@ handle_call(
     %% context as `meta`. The read and the append are SEPARATE calls — not
     %% one locked critical section — so two concurrent same-origin writes
     %% to the same cell can read the same pre-write context and stamp it
-    %% twice (a pre-existing property of the PR-C stamp design; the
-    %% sequential `await/1` barrier gives read-your-writes for the common
-    %% serial case). Single-applier scope still guarantees a consistent
-    %% snapshot for THIS read.
+    %% twice (a pre-existing property of the tier_2 context-stamp design;
+    %% the sequential `await/1` barrier gives read-your-writes for the
+    %% common serial case). Single-applier scope still guarantees a
+    %% consistent snapshot for THIS read.
     State0 =
         case Adapter:get(Handle, Bucket, Key) of
             not_found ->
@@ -1339,11 +1332,10 @@ missing_sibling(_, _, _) -> none.
 %% @private
 %% Resolves the per-instance projection module from the registry and seeds
 %% the initial projection state. The instance `fold_module` label resolves
-%% to its native CRDT twin (PR-Z: every former fold has a byte-identical
-%% twin), so `#state.fold_module` holds a `bondy_oplog_crdt` module and the
-%% projection path runs the op-based step. Returns `{undefined, undefined}`
-%% when no module is configured — callers check `fold_module` and skip the
-%% path.
+%% to its native CRDT twin, so `#state.fold_module` holds a
+%% `bondy_oplog_crdt` module and the projection path runs the op-based
+%% step. Returns `{undefined, undefined}` when no module is configured —
+%% callers check `fold_module` and skip the path.
 init_fold(InstanceId) ->
     case bondy_oplog_registry:fold_module(InstanceId) of
         undefined ->
@@ -1585,8 +1577,7 @@ apply_batch(
     %% Per-stage timing. Five stages emit `duration_us` + `count`
     %% under `[bondy_oplog, applier, batch_<stage>]` so the bench
     %% harness can compute µs/event-spent-in-this-stage and isolate
-    %% which sub-path dominates the per-shard throughput floor. See
-    %% `_design/latest/APPLIER_PIPELINE_RESIDUAL_PLAN.md` §3.1. The
+    %% which sub-path dominates the per-shard throughput floor. The
     %% per-call overhead is ~500ns × 5 stages = ~2.5µs per batch,
     %% well under the <2% threshold for batches with ≥1 event of
     %% real work (pack-store puts are 100-1000µs each).
@@ -1866,10 +1857,10 @@ emit_context_regression(#state{instance_id = Id}, Bucket, Key, Prev, Context) ->
 %%
 %% This is sound only while a context never legitimately shrinks, which
 %% holds today (every path joins/grows it). When membership-driven
-%% dead-origin VV reaping lands (PR-H, #24) a retired origin's entry is
-%% removed on purpose — a legitimate shrink this predicate would flag as a
-%% regression. PR-H must therefore co-evict the reaped id from `ctx_guard`
-%% (or run the reap as a wholesale replace that clears it, as
+%% dead-origin VV reaping runs, a retired origin's entry is removed on
+%% purpose — a legitimate shrink this predicate would flag as a
+%% regression. The reap must therefore co-evict the reaped id from
+%% `ctx_guard` (or run the reap as a wholesale replace that clears it, as
 %% `install_catalogue_batch` does).
 vv_regressed(New, Prev) ->
     lists:any(fun({Id, C}) -> vv_get(Id, New) < C end, Prev).
@@ -1906,7 +1897,7 @@ vv_merge(A, B) ->
 %% subsequent replays use the diff.
 
 %% @private
-%% Full secondary-index rebuild (IDX-4).
+%% Full secondary-index rebuild.
 %%
 %% Re-materialises every secondary index from the CURRENT projection value
 %% of each live cell. It does NOT replay the cell's historical events.
@@ -1927,17 +1918,18 @@ vv_merge(A, B) ->
 %% one read + one term-diff per distinct cell, vs one kernel re-apply per
 %% event.
 %%
-%% Cell directory: read from the PROJECTION, not the MST (D-9). The MST is a
+%% Cell directory: read from the PROJECTION, not the MST. The MST is a
 %% truncatable recent-events structure — compaction drops events `<=` the
 %% watermark (`bondy_oplog_instance:truncate_below_or_equal/2`), and a
-%% no-checkpoint crash loses its in-memory tail — so its cell set is generally
-%% INCOMPLETE relative to the durable projection. Deriving the directory from
-%% `distinct_cell_keys(MST)` would silently miss every already-compacted (or
-%% crash-lost) cell, leaving a half-built index that is nonetheless marked
-%% trusted. The projection is the durable, complete materialised state, so the
-%% rebuild enumerates the primary's own cells there (`Adapter:cell_keys/2`,
-%% scoped to this entity type) and reads each value from it. The MST walk
-%% remains the fallback for an adapter that cannot enumerate.
+%% no-checkpoint crash loses its in-memory tail — so its cell set is
+%% generally INCOMPLETE relative to the durable projection. Deriving the
+%% directory from `distinct_cell_keys(MST)` would silently miss every
+%% already-compacted (or crash-lost) cell, leaving a half-built index that
+%% is nonetheless marked trusted. The projection is the durable, complete
+%% materialised state, so the rebuild enumerates the primary's own cells
+%% there (`Adapter:cell_keys/2`, scoped to this entity type) and reads
+%% each value from it. The MST walk remains the fallback for an adapter
+%% that cannot enumerate.
 do_rebuild_indexes(#state{cell_apply_ctx = undefined} = State) ->
     State;
 do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
@@ -1980,7 +1972,7 @@ reindex_from_projection(#{adapter := Adapter, handle := Handle, kernel := Kernel
 %% The cell directory for a rebuild: the UNION of
 %%   1. the durable PROJECTION cells of this entity type (`Adapter:cell_keys/2`),
 %%      the authoritative directory for `shared_shards`/`single_bookie` — present
-%%      even after a crash that emptied the MST (D-9, the reason this exists);
+%%      even after a crash that emptied the MST;
 %%   2. the MST `cell_apply` cells (`distinct_cell_keys/1`), which cover
 %%      `per_entity` (bucket = `<<Realm>>`, carries no `ET`, so the `ET`-scoped
 %%      `cell_keys/2` cannot see it) while the MST is intact.
@@ -2058,9 +2050,9 @@ reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) ->
     end.
 
 %% @private
-%% Dead-origin VV reaping (PR-H, #24). Walk every cell named in the MST,
-%% ask the kernel to drop the value-preserving causal-context entries of
-%% the retired origins, re-persist only the changed cells, and co-evict the
+%% Dead-origin VV reaping. Walk every cell named in the MST, ask the
+%% kernel to drop the value-preserving causal-context entries of the
+%% retired origins, re-persist only the changed cells, and co-evict the
 %% reaped origins from the stamp-site context guard. Short-circuits to a
 %% no-op when the kernel is not a context-carrying tier_2 CRDT (legacy
 %% fold / tier_0), so those shards are byte-identical.
@@ -2413,13 +2405,12 @@ diff_pairs(MST, LastRoot, Id) ->
 %% Installs a catalogue-snapshot batch of `[{Bucket, Key, Frame}]`
 %% triples into the projection.
 %%
-%% The install is `replace`-only (PR-G removed the CvRDT `merge_states`
-%% merge-mode). Skip-if-older guards a stale bootstrap write from
-%% clobbering a newer locally-applied event (see Q11,
-%% `_design/catalogue_expansion_plan.md` §4.12). A fresh (`pre_bootstrap`)
-%% replica's projection is empty so skip-if-older never skips; a live
-%% re-bootstrap may install a higher-HLC peer cell over a local one, which
-%% the post-bootstrap op-replay restores (`bondy_oplog_sync_session`).
+%% The install is `replace`-only (CvRDT `merge_states` is not supported).
+%% Skip-if-older guards a stale bootstrap write from clobbering a newer
+%% locally-applied event. A fresh (`pre_bootstrap`) replica's projection is
+%% empty so skip-if-older never skips; a live re-bootstrap may install a
+%% higher-HLC peer cell over a local one, which the post-bootstrap op-replay
+%% restores (`bondy_oplog_sync_session`).
 do_install_catalogue_batch(Id, Ctx, Cells) ->
     #{
         adapter := Adapter,

@@ -9,8 +9,7 @@
 The `bondy_connect` application callback module.
 
 Starts the application's top supervisor, `bondy_connect_sup`. The public client
-API lives in `bondy_connect`; the architecture is described in `DESIGN.md` and
-the build-out is tracked in `IMPLEMENTATION.md`.
+API lives in `bondy_connect`.
 """.
 
 -behaviour(application).

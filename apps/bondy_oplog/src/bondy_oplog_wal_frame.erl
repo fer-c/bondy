@@ -12,7 +12,6 @@
 ?MODULEDOC("""
 Pure encode/decode of WAL frame headers and bodies.
 
-See `_design/WAL_DESIGN.md` §3 and `_design/WAL_DESIGN_V2.md` §2.
 Every batch is written as one frame; a single-event append is a
 one-element batch. The frame layout is:
 
@@ -38,15 +37,14 @@ mismatch.
 
 CRC algorithm choice is encoded on-disk via `Flags` bit 2. v1 frames
 and v2 frames with the bit clear use zlib CRC32 (`erlang:crc32/1`).
-CRC32C activation was evaluated and deferred (see `WAL_DESIGN.md` §17
-and `WAL_DESIGN_V2.md` §PR6): on representative workloads the win
-falls below the 5 % gate. The on-disk seam — `Flags` bit 2 reserved,
-`crc_algo/2` and `compute_crc/2` dispatch on algorithm — is retained
-so a future PR can land a CRC32C provider as a one-line widening of
-`compute_crc/2` without a format change. The dispatch lives in the
-private `compute_crc/2` / `default_crc/1` helpers at the bottom of
-this module — kept module-local because the frame format is the
-only consumer.
+CRC32C activation was evaluated and deferred: on representative
+workloads the win falls below the 5 % threshold. The on-disk seam —
+`Flags` bit 2 reserved, `crc_algo/2` and `compute_crc/2` dispatch on
+algorithm — is retained so a future change can land a CRC32C provider
+as a one-line widening of `compute_crc/2` without a format change. The
+dispatch lives in the private `compute_crc/2` / `default_crc/1` helpers
+at the bottom of this module — kept module-local because the frame
+format is the only consumer.
 
 ### Versions
 
@@ -55,9 +53,9 @@ only consumer.
 - **v2** — current writer version. Same layout as v1 on the wire
   except the version byte. Flag bits 0 (compression) and 1
   (encryption) are active; bit 2 (CRC32C) is reserved on-disk but
-  unused — the CRC32C upgrade was evaluated and deferred (see
-  `WAL_DESIGN_V2.md` §PR6). v2 readers accept both v1 and v2; v1
-  readers meeting a v2 frame return `unsupported_version`.
+  unused — the CRC32C upgrade was evaluated and deferred. v2 readers
+  accept both v1 and v2; v1 readers meeting a v2 frame return
+  `unsupported_version`.
 
 `encode/1,2` returns the frame as iodata so callers (the writer,
 tests) that hand the result to `prim_file:write/2` avoid an extra
@@ -301,11 +299,10 @@ verify_crc_and_decode(Crc, Version, Flags, FrameLen, Body) ->
 %% @private
 %% The CRC algorithm a frame was written with is encoded in `Flags`.
 %% Only `crc32` is ever produced today; CRC32C was evaluated and
-%% deferred (`scripts/wal_crc_bench.escript` measured the win below the
-%% 5 % gate in every realistic config). The switch is structural rather
-%% than behavioural so a future widening to `crc32c` on `Flags` bit 2
-%% is a one-line change to this function plus a new clause in
-%% `compute_crc/2`.
+%% deferred (the win falls below the 5 % threshold in every realistic
+%% configuration). The switch is structural rather than behavioural so
+%% a future widening to `crc32c` on `Flags` bit 2 is a one-line change
+%% to this function plus a new clause in `compute_crc/2`.
 crc_algo(?VERSION_V1, _Flags) ->
     crc32;
 crc_algo(?VERSION_V2, _Flags) ->
@@ -336,8 +333,8 @@ known_flags(?VERSION_V2) -> ?KNOWN_FLAGS_V2.
 %% implicitly. v1 frames and v2 frames with `Flags` bit 2 clear use
 %% zlib CRC32 (`erlang:crc32/1`). CRC32C activation (Flags bit 2 set)
 %% is reserved on-disk but unimplemented — the upgrade was evaluated
-%% and deferred (`WAL_DESIGN_V2.md` §PR6). When/if it lands, it is a
-%% second clause of `compute_crc/2` plus a `crc_algo/2` switch on bit 2.
+%% and deferred. When/if it lands, it is a second clause of
+%% `compute_crc/2` plus a `crc_algo/2` switch on bit 2.
 %% `default_crc/1` is the writer hot-path entry point — it collapses
 %% the two-call shape (`compute_crc(default_crc_algo(), _)`) into one
 %% local call without leaving the frame module.

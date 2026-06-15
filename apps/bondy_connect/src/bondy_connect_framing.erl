@@ -8,8 +8,7 @@
 -moduledoc """
 Pure helpers for the **WAMP raw socket** wire format (RFC raw transport), shared
 by the raw-socket transports (`tcp`/`tls`/`uds`). `bondy_wamp_encoding` encodes
-the *payload* only — framing is the transport's job (Decision 3), so it lives
-here.
+the *payload* only — framing is the transport's job, so it lives here.
 
 ## Handshake (4 octets)
 

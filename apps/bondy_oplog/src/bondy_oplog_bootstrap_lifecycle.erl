@@ -11,8 +11,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Per-instance bootstrap lifecycle (`_design/catalogue_expansion_plan.md`
-§2).
+Per-instance bootstrap lifecycle.
 
 The applier MUST NOT apply WAL events onto the per-cell projection
 until the instance has been bootstrapped — either by joining an
@@ -243,7 +242,7 @@ compute_flag_path(InstanceId, Opts) ->
 
 %% @private
 %% Decides the initial state by combining the persistent flag and the
-%% startup options. See moduledoc § "Defaults".
+%% startup options. See the "Defaults" table in the moduledoc.
 resolve_initial_state(undefined, Opts) ->
     %% Ephemeral instance — nothing to enforce. Default live, with
     %% `seed: false` honoured for symmetry with tests that want to

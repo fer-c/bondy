@@ -15,8 +15,8 @@
 ?MODULEDOC("""
 Recovery sequencing for a per-instance WAL directory.
 
-See `_design/WAL_DESIGN.md` §12. Recovery is the procedure the writer
-runs on open when a manifest exists. It produces a usable, consistent
+Recovery is the procedure the writer runs on open when a manifest
+exists. It produces a usable, consistent
 in-memory state from on-disk artifacts, applying break-and-truncate to
 the head segment if needed and rebuilding lost / stale `.qidx` files.
 
@@ -108,8 +108,7 @@ Runs recovery for the WAL directory `Dir` belonging to `InstanceId` /
 - `recovery_mode` — `strict` (default writer behaviour) breaks and
   truncates at the first corrupt frame in the head segment; `rescan`
   skips corrupt frames, rewriting the head segment in place to
-  contain only the surviving frames. See §12 / `WAL_DESIGN_V2.md §3
-  PR2`.
+  contain only the surviving frames.
 
 Returns `{ok, recovery_result()}` on success or `{error, Reason}` for:
 
@@ -535,10 +534,10 @@ rebuild_sealed_idx(IdxPath, Fd, SegId, Interval, BodyEnc) ->
 %% Scans the segment from offset 48 to EOF. For each frame the
 %% accumulator decides via `would_index/2` whether the body must be
 %% decoded; non-indexed frames are skipped header-only (a single pread
-%% of the 16-byte frame header per frame). Per design §12 sealed
-%% segments are trusted (only their segment header is validated on
-%% recovery), so skipping CRC verification for non-indexed frames is
-%% consistent with the documented contract.
+%% of the 16-byte frame header per frame). Sealed segments are trusted
+%% (only their segment header is validated on recovery), so skipping
+%% CRC verification for non-indexed frames is consistent with the
+%% recovery contract.
 scan_segment_for_index(Fd, Interval, BodyEnc) ->
     Acc0 = bondy_oplog_wal_idx:new(Interval),
     scan_loop_for_index(Fd, ?SEG_HEADER_BYTES, Acc0, BodyEnc).

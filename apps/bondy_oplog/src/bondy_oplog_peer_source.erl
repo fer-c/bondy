@@ -17,8 +17,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Behaviour for peer discovery used by the sync scheduler
-(`_design/_implementation_plan.md` §5).
+Behaviour for peer discovery used by the sync scheduler.
 
 The default sync scheduler invokes `peers_for/2` once per tick per
 running instance to obtain the peers it should consider for that

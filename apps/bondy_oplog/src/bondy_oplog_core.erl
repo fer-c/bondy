@@ -9,7 +9,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Read-side substrate primitive (`MST_DB_DESIGN.md`).
+Read-side substrate primitive.
 
 Composes a projection adapter (any persistent KV implementing
 `bondy_oplog_projection_adapter`), a cache adapter (any read cache
@@ -179,7 +179,7 @@ read(NS, Index, Bucket, Key, _Opts) ->
 Bootstrap-snapshot read. Returns the **raw fold state** (not the
 user-facing value) for the cell, post-overlay-merge. Used by the
 bootstrap-snapshot send path which forwards encoded state to a peer for
-state-sync (`MST_DB_DESIGN.md` §17). Not part of the public `bondy_db`
+state-sync. Not part of the public `bondy_db`
 API — consumers of substrate values must call `read/3..5`.
 
 `undefined` when the cell does not exist and the overlay is empty.
@@ -215,8 +215,7 @@ read_state(NS, Index, Bucket, Key) ->
     end.
 
 -doc """
-Coalesced multi-cell read with optional fence and skew constraints
-(`MST_DB_DESIGN.md` §8).
+Coalesced multi-cell read with optional fence and skew constraints.
 
 `Reads` is a list of `{Namespace, Index, Bucket, Key}` four-tuples. The
 result is a map keyed by the same four-tuple, mapping to the per-cell
@@ -321,8 +320,7 @@ range(NS, Index, Spec, Opts) ->
     range(NS, Index, <<>>, Spec, Opts).
 
 -doc """
-Single-shard range scan over `[Low, High)` inside `Bucket`
-(`MST_DB_DESIGN.md` §9).
+Single-shard range scan over `[Low, High)` inside `Bucket`.
 
 The shard is selected by `phash2({Bucket, Low}, ShardCount)` unless the
 caller passes `Opts#{shard => N}`. Callers whose `[Low, High)` spans
@@ -364,8 +362,7 @@ range_all(NS, Index, Spec, Opts) ->
     range_all(NS, Index, <<>>, Spec, Opts).
 
 -doc """
-Cross-shard range scan over `[Low, High)` inside `Bucket`
-(`MST_DB_DESIGN.md` §18 item 2).
+Cross-shard range scan over `[Low, High)` inside `Bucket`.
 
 Scatters the range to every shard registered under `(NS, Index)`, runs
 the single-shard `range/5` per shard with `Opts#{shard => Shard}`, then
@@ -445,7 +442,7 @@ read_at_hlc(NS, Key, T) ->
     read_at_hlc(NS, <<>>, Key, T).
 
 -doc """
-Point-in-time read against the primary index (`MST_DB_DESIGN.md` §10).
+Point-in-time read against the primary index.
 
 Returns the cell value as of HLC `T`. See module doc for the historical-
 read semantics; the substrate refuses with
@@ -475,9 +472,8 @@ read_at_hlc(NS, Bucket, Key, T) when is_integer(T), T >= 0 ->
     Result.
 
 -doc """
-Freshness predicate (`MST_DB_DESIGN.md` §11). Returns `ok` iff every
-shard of every supplied namespace has had a `bump_ae/3` within
-`MaxLag` milliseconds of "now".
+Freshness predicate. Returns `ok` iff every shard of every supplied
+namespace has had a `bump_ae/3` within `MaxLag` milliseconds of "now".
 """.
 -spec ensure_fresh([atom()], non_neg_integer() | infinity) ->
     ok | {stale, [atom()]}.
@@ -1097,7 +1093,7 @@ do_write_through(Entry, Bucket, Key, _Event) ->
     end.
 
 %% =============================================================================
-%% Telemetry (`MST_DB_DESIGN.md` §16)
+%% Telemetry
 %% =============================================================================
 
 emit_read_event(NS, Index, Shard, Bucket, Entry, Source, DurUs, Result) ->

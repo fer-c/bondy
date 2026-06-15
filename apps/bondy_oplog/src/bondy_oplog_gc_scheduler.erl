@@ -13,7 +13,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Default GC scheduler (`_design/_implementation_plan.md` §5).
+Default GC scheduler.
 
 Periodic timer that, on each tick, spawns a short-lived worker
 process per running instance to run the configured trigger. The

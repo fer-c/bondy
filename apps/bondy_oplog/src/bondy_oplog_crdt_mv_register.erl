@@ -19,9 +19,9 @@ a write that observed (causally follows) an earlier write replaces it; two
 writes that did not observe each other both survive as **siblings**, and a
 read returns the whole sibling set for the application to reconcile. This
 is the canonical concurrency-detecting register — and the one a scalar HLC
-*cannot* express, because `HLC(A) < HLC(B)` does not imply `A → B`
-(see `architecture_regrounding_plan.md` §2). It therefore needs a true
-causal context: a per-cell **Dotted Version Vector** (`bondy_dvvset`).
+*cannot* express, because `HLC(A) < HLC(B)` does not imply `A → B`.
+It therefore needs a true causal context: a per-cell **Dotted Version
+Vector** (`bondy_dvvset`).
 
 ## Why tier_2 (and why it is still commutative)
 
@@ -35,8 +35,8 @@ DVV contribution and merged with `bondy_dvvset:sync/1`, which is a lattice
 join (commutative, associative, idempotent). So the eager O(1) step
 (`apply_op/4`) and the sorted-group fold (`interpret_cog/2`) are both
 `sync`-folds and yield the same state regardless of arrival order or
-duplication — the §4.3 ship gate. It therefore rides the existing eager
-kernel; no live-log is needed.
+duplication. It therefore rides the existing eager kernel; no live-log
+is needed.
 
 ## State
 
@@ -236,8 +236,8 @@ context_of({Clock, _Hlc}) ->
 
 -doc """
 Reap the DVVSet entries of permanently-retired origins (the membership-
-driven GC, `architecture_regrounding_plan.md` §4.4). The clock holds one
-`{Origin, Counter, Values}` entry per origin that ever wrote the cell.
+driven GC). The clock holds one `{Origin, Counter, Values}` entry per
+origin that ever wrote the cell.
 For a retired origin we drop its entry **only when `Values` is empty** —
 i.e. every value that origin wrote has already been dominated by a later
 write, so the entry is pure causal history. Dropping it does not change

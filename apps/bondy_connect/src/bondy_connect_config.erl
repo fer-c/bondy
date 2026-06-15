@@ -203,7 +203,7 @@ validate_ping(Spec) ->
     end).
 
 
-%% @private Validate the optional `handler' load-regulation config (Decision 5),
+%% @private Validate the optional `handler' load-regulation config,
 %% consumed by `bondy_connect_load:new/1'. Recognised keys:
 %%
 %% - `max_concurrency' — the per-connection in-flight cap (non-neg int; `0' =

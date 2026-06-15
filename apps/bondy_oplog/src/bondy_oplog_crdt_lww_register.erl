@@ -15,8 +15,7 @@
 Last-writer-wins (LWW) register — native operation-based CRDT.
 
 The first production fold reimplemented as a native `bondy_oplog_crdt`
-on the commutative helper (`architecture_regrounding_plan.md` §7 step 3).
-It is the operation-based twin of the deprecated
+on the commutative helper. It is the operation-based twin of the deprecated
 `bondy_oplog_fold_lww_register`, with identical state, operations, and
 conflict resolution — but expressed as a single-operation step
 (`apply_op/3`) interpreted in key order, with **no** `merge_states`

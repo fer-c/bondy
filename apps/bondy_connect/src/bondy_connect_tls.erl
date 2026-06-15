@@ -16,7 +16,7 @@ floor and ciphers — so they cannot drift between the two transports. (Before t
 extraction the `wss` path silently lacked client-cert/mTLS and `ciphers` support
 because it carried its own, drifted copy — review D1.)
 
-## Secure by default (Decision 11)
+## Secure by default
 
 `verify_peer` is the default:
 

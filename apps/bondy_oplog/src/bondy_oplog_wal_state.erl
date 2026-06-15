@@ -14,10 +14,10 @@
 Per-instance persistent-state files for the WAL: the applier's
 `consumer.offset` and the WAL's `snapshot.watermark`.
 
-Both files share the tmp-then-rename atomic-write pattern documented
-in `_design/WAL_DESIGN.md` §6.1 and use the same `bondy_mst_io`
-primitives (`datasync/1`, `rename/2`, `fsync_dir/1`). Keeping them in
-one module avoids duplicating that boilerplate.
+Both files share the tmp-then-rename atomic-write pattern and use the
+same `bondy_mst_io` primitives (`datasync/1`, `rename/2`,
+`fsync_dir/1`). Keeping them in one module avoids duplicating that
+boilerplate.
 
 ## Consumer offset
 
@@ -50,7 +50,7 @@ treats a fresh WAL identically to a never-committed-against WAL.
 The watermark is the highest HLC that has been covered by a
 compaction snapshot. It bounds retention: a segment is only eligible
 for deletion once **all** of its events are HLC-covered by the
-watermark (see `_design/WAL_DESIGN.md` §10).
+watermark.
 
 File format is a single-term, `file:consult/1`-readable Erlang file:
 

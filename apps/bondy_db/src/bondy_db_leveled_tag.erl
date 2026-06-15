@@ -10,8 +10,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Leveled custom-tag hooks for the projection cell tag `?BONDY_FOLD_TAG`
-(`_design/catalogue_expansion_plan.md` §3.4).
+Leveled custom-tag hooks for the projection cell tag `?BONDY_FOLD_TAG`.
 
 Leveled exposes two application-env hooks per tag:
 

@@ -13,7 +13,6 @@
 ?MODULEDOC("""
 Sparse HLC index (`.qidx`).
 
-See `_design/WAL_DESIGN.md` §7 and `_design/WAL_DESIGN_V2.md` §PR7.
 One `.qidx` per `.qdata` segment maps each indexed batch frame's
 **HLC range** to its byte offset, at sparse intervals (default 64 KB).
 The index lets `open_reader(_, {hlc, T}, _)` jump directly to the
@@ -49,7 +48,7 @@ This module has three concerns:
    segment, whose `.qidx` is not yet on disk while the writer is
    alive).
 
-### File format (§7.1, v2)
+### File format (v2)
 
 Header (16 bytes) — unchanged from v1; the `Version` byte selects
 the entry layout below:
@@ -340,7 +339,7 @@ interval_bytes(#acc{interval_bytes = I}) -> I.
 ?DOC("""
 Atomically writes `Entries` to a `.qidx` file at `Path`.
 
-Steps (mirror the manifest pattern, §5.1):
+Steps:
 
 1. Write `Path.tmp` with the header + entry stream.
 2. `datasync` the tmp fd.
@@ -448,7 +447,7 @@ Returns the byte offset of the indexed batch frame the reader should
 start at to find `TargetHlc`. `none` if every entry's range is strictly
 > `TargetHlc` (or the handle is empty).
 
-Search rules (mirrors `WAL_DESIGN_V2.md` §PR7):
+Search rules:
 
 1. If some entry's range contains `TargetHlc`
    (`FirstHlc =< TargetHlc =< LastHlc`), return that entry's offset —

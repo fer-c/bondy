@@ -10,9 +10,8 @@ The client-side WAMP **session** state machine — the client mirror of the
 router's `bondy_wamp_protocol`.
 
 This is a **pure functional** module (no process, no I/O). It operates on
-decoded WAMP **records** (the codec/framing live in the transports, Decision 3)
-and is owned and driven by the connection process (`bondy_connect_connection`,
-Phase 3). The connection feeds it inbound records and ships the records it
+decoded WAMP **records** (the codec/framing live in the transports) and is
+owned and driven by the connection process (`bondy_connect_connection`). The connection feeds it inbound records and ships the records it
 returns.
 
 ## Session FSM
@@ -209,7 +208,7 @@ terminate(#state{}) ->
 -doc """
 Scrub auth secrets (private keys, passwords, tickets held in the auth callback
 state) before the state is logged or dumped. Paired with the connection's
-scoped `process_flag(sensitive, true)` during the auth window (Decision 12).
+scoped `process_flag(sensitive, true)` during the auth window.
 """.
 -spec format_status(state()) -> state().
 

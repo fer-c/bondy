@@ -12,9 +12,8 @@
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
 `simple_one_for_one` supervisor for `bondy_oplog_secondary_writer`
-workers — one per `(NS, IndexName, SecShard)` triple
-(`MST_DB_DESIGN.md` §13). Sibling of `bondy_oplog_instance_dyn_sup`
-under `bondy_oplog_sup`.
+workers — one per `(NS, IndexName, SecShard)` triple. Sibling of
+`bondy_oplog_instance_dyn_sup` under `bondy_oplog_sup`.
 
 `bondy_db` provisioning starts one writer per declared index shard via
 `start_writer/1` and stops it on teardown via `stop_writer/1`. Workers
@@ -22,8 +21,7 @@ are `transient`: an abnormal crash is restarted (the restarted writer
 re-stamps its registry pid and re-resolves its handles on the next
 flush, so it self-heals), while an orderly `stop_writer/1` does not
 restart. The index is a deterministic function of the primary, so the
-bounded ops lost across a crash window are recoverable by the IDX-4
-rebuild.
+bounded ops lost across a crash window are recoverable by the rebuild.
 """).
 
 -export([start_link/0]).

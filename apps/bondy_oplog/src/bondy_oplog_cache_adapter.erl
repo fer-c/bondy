@@ -10,7 +10,7 @@
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
 Behaviour for **read caches** — the hot-cell layer in front of the
-projection (`MST_DB_DESIGN.md` §5).
+projection.
 
 A cache adapter holds decoded `{Value, Hlc}` tuples keyed by the cell's
 substrate key. The substrate is cache-agnostic — implementations can use
@@ -82,10 +82,9 @@ See `bondy_oplog_projection_adapter` for the persistent-state surface.
 %% =============================================================================
 
 %% Bucket is a first-class call-time parameter on every data callback —
-%% the same dimension the projection adapter exposes (`MST_DB_DESIGN.md`
-%% §6, §18 item 14). Implementations typically use a composite ETS key
-%% (`{Bucket, Key}`) so a single per-shard cache table serves every
-%% bucket inside the shard.
+%% the same dimension the projection adapter exposes. Implementations
+%% typically use a composite ETS key (`{Bucket, Key}`) so a single
+%% per-shard cache table serves every bucket inside the shard.
 
 -callback init(
     Namespace :: atom(),

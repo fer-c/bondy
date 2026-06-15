@@ -11,8 +11,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-Lightweight intra-node pub/sub for substrate lifecycle events
-(`MST_DB_DESIGN.md` §11.1, §12.3, §18 item 11).
+Lightweight intra-node pub/sub for substrate lifecycle events.
 
 The substrate's `bondy_oplog_core_registry` and `bondy_oplog_core_dispatcher`
 gen_servers each own an in-memory ETS table whose lifetime is tied to

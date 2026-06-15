@@ -32,8 +32,8 @@ the last time we heard from the peer at all.
 Reads accept an optional `since` parameter (a wall-clock millisecond
 timestamp). Entries older than `since` are excluded. The default is
 `now - peer_timeout_ms` where `peer_timeout_ms` is read from app env
-(default 30 000ms per design §15). This ensures silent peers do not
-indefinitely block GC.
+(default 30 000ms). This ensures silent peers do not indefinitely block
+GC.
 
 ## Concurrency
 

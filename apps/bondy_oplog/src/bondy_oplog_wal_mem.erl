@@ -49,7 +49,7 @@ This gen_server speaks the **same `gen_server` message protocol** as
 - `{append_batch, Events}` — assign a `Seq` range, insert, bump head.
 - `{await_durable, {Seg, Off}, Timeout}` — block until `head_seq >= Off`.
 - `durable_position` — `{?MEM_SEG, head_seq}` (head is always durable here).
-- `{set_committed_segment, Seg}` — retention marker (no-op for now; GC is PR-3).
+- `{set_committed_segment, Seg}` — retention marker (no-op for now; GC is deferred).
 
 So callers reach this module through the existing `bondy_oplog_wal:append_batch/2`,
 `await_durable/3`, `durable_position/1` and `set_committed_segment/2` wrappers
@@ -64,10 +64,10 @@ reader reads the ETS table. That is dispatched in the fused drain
 
 Dropping the fsync widens the acked-but-not-yet-replicated loss window to also
 include a BEAM crash with surviving disk (the disk WAL would replay it). This is
-accepted by design for ephemeral and covered by anti-entropy in normal
-operation — see `_design/latest/EPHEMERAL_ETS_WAL_PLAN.md` §2 (Decision A).
+accepted by design for ephemeral instances and covered by anti-entropy in normal
+operation.
 
-### Deferred (PR-3)
+### Deferred
 
 - Crash recovery: an `heir`-owned table survives a writer process crash. Today
   the table dies with this gen_server (node/process death → re-sync from peers).
@@ -194,7 +194,7 @@ handle_call(durable_position, _From, #state{head_seq = H} = State) ->
 handle_call({set_committed_segment, _Seg}, _From, State) ->
     %% Retention marker. The committed *Seq* is tracked via the consumer
     %% offset on the drain side; segment-level retention is a no-op for the
-    %% single-segment mem log. GC by committed Seq is PR-3.
+    %% single-segment mem log. GC by committed Seq is deferred.
     {reply, ok, State};
 handle_call(reader_view, _From, #state{tab = Tab} = State) ->
     {reply, #{tab => Tab, mem_seg => ?MEM_SEG}, State};
@@ -215,7 +215,7 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, _State) ->
     %% The `protected` table is owned by this process and is deleted
-    %% automatically on exit. An `heir` for process-crash recovery is PR-3.
+    %% automatically on exit. An `heir` for process-crash recovery is deferred.
     ok.
 
 %% =============================================================================
