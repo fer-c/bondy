@@ -190,6 +190,29 @@ the `{entity, _, _}` scope MUST equal `bucket_for/3`'s `EntityType` component
 ) -> bondy_oplog_projection_adapter:clear_scope().
 
 -doc """
+The `bondy_oplog_projection_adapter:cell_keys_scope()` a secondary-index rebuild
+passes to the projection adapter's `cell_keys/2` to enumerate this table's
+PRIMARY cell directory from the durable projection.
+
+The topology owns it because it knows its own keyspace layout:
+
+- A backend whose primary bucket encodes the entity type — `shared_shards`
+  (bucket = `ET`) and `single_bookie` (bucket = `<<Realm,"/",ET>>`) — returns
+  `{entity, atom_to_binary(EntityType, utf8)}`, so a co-located sibling table is
+  excluded.
+- A DEDICATED single-table Bookie whose primary bucket is realm-keyed
+  (`per_entity`, bucket = `<<Realm>>`) returns `all_primary` — every non-index
+  bucket is one of this table's primary buckets, and the entity type is not in
+  the bucket to filter on.
+
+The binary in an `{entity, _}` scope MUST equal `bucket_for/3`'s `EntityType`
+component (`atom_to_binary(EntityType, utf8)`).
+""".
+-callback primary_cell_scope(
+    TableState :: table_state()
+) -> bondy_oplog_projection_adapter:cell_keys_scope().
+
+-doc """
 Release the resources owned by `TableState`. Returns the updated
 process-wide `State`.
 

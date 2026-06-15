@@ -173,7 +173,19 @@ keeps reads parallel.
     %% bare-suffix scope. Appended last so existing `#entry`-index
     %% `ets:update_element` writes stay valid.
     index_clear_scope = undefined ::
-        bondy_oplog_projection_adapter:clear_scope() | undefined
+        bondy_oplog_projection_adapter:clear_scope() | undefined,
+    %% Primary shards only. The `bondy_oplog_projection_adapter:cell_keys_scope()`
+    %% the secondary-index rebuild passes to `Adapter:cell_keys/2` to enumerate
+    %% this primary's complete cell directory from the durable projection. The
+    %% owner (`bondy_db`) computes it from the topology's keyspace layout:
+    %% `{entity, ET}` on a backend whose primary bucket carries the entity type
+    %% (`shared_shards`, `single_bookie`); `all_primary` on a dedicated-Bookie
+    %% backend whose bucket is realm-keyed (`per_entity`). `undefined` for index
+    %% shards and as a backward-compatible default — the rebuild then falls back
+    %% to the MST walk. Appended last so existing `#entry`-index
+    %% `ets:update_element` writes stay valid.
+    primary_cell_scope = undefined ::
+        bondy_oplog_projection_adapter:cell_keys_scope() | undefined
 }).
 
 -record(state, {
@@ -231,7 +243,12 @@ keeps reads parallel.
     %% `bondy_oplog_projection_adapter:clear_scope()` the rebuild passes to
     %% `Adapter:clear/2`. Absent ⇒ `reset_target_shard/1` falls back to the
     %% bare-suffix scope.
-    index_clear_scope => bondy_oplog_projection_adapter:clear_scope()
+    index_clear_scope => bondy_oplog_projection_adapter:clear_scope(),
+    %% Optional. Primary shards only. The
+    %% `bondy_oplog_projection_adapter:cell_keys_scope()` the rebuild passes to
+    %% `Adapter:cell_keys/2` to enumerate this primary's cells. Absent ⇒ the
+    %% rebuild falls back to the MST walk.
+    primary_cell_scope => bondy_oplog_projection_adapter:cell_keys_scope()
 }.
 
 -export_type([shard_entry/0, config/0]).
@@ -281,6 +298,7 @@ keeps reads parallel.
 -export([entry_crdt_module/1]).
 -export([entry_causal_tier/1]).
 -export([entry_index_clear_scope/1]).
+-export([entry_primary_cell_scope/1]).
 -export([entry_last_ae/1]).
 -export([entry_ever_freshened/1]).
 
@@ -653,6 +671,17 @@ registration that predates the field.
 
 entry_index_clear_scope(#entry{index_clear_scope = V}) -> V.
 
+-doc """
+The primary shard's `bondy_oplog_projection_adapter:cell_keys_scope()` (the
+scope the secondary-index rebuild passes to `Adapter:cell_keys/2` to enumerate
+its complete cell directory), or `undefined` for an index shard or a
+registration that predates the field (the rebuild then falls back to the MST).
+""".
+-spec entry_primary_cell_scope(shard_entry()) ->
+    bondy_oplog_projection_adapter:cell_keys_scope() | undefined.
+
+entry_primary_cell_scope(#entry{primary_cell_scope = V}) -> V.
+
 %% Last AE-freshness timestamp (monotonic ms), read straight off the
 %% entry's atomics — the sentinel `?STALE_SENTINEL` for a never-freshened
 %% shard. Lets a caller that already holds the entry compute the lag
@@ -1013,7 +1042,8 @@ handle_call({register, NS, Index, Shard, Owner, Config}, _From, State0) ->
         instance_id = maps:get(instance_id, Config, undefined),
         crdt_module = maps:get(crdt_module, Config, undefined),
         causal_tier = maps:get(causal_tier, Config, tier_0),
-        index_clear_scope = maps:get(index_clear_scope, Config, undefined)
+        index_clear_scope = maps:get(index_clear_scope, Config, undefined),
+        primary_cell_scope = maps:get(primary_cell_scope, Config, undefined)
     },
     true = ets:insert(?TABLE, Entry),
     State2 = State1#state{

@@ -91,6 +91,7 @@ per_entity, since the Bookie already partitions by shard.
 -export([route/2]).
 -export([bucket_for/3]).
 -export([index_clear_scope/2]).
+-export([primary_cell_scope/1]).
 -export([close_table/2]).
 -export([shutdown/1]).
 
@@ -162,6 +163,15 @@ declaring the same `IndexName` would be over-wiped.
 index_clear_scope(IndexName, #{entity_type := ET}) when is_atom(IndexName) ->
     {entity, atom_to_binary(ET, utf8), IndexName}.
 
+-doc """
+Shared-shards co-locates every entity type in the shared Bookies, so the primary
+cell directory must be scoped to this table's entity type (bucket = `ET`) —
+otherwise the rebuild would fold a sibling table's cells. The realm is folded
+into the cell key by the facade.
+""".
+primary_cell_scope(#{entity_type := ET}) ->
+    {entity, atom_to_binary(ET, utf8)}.
+
 close_table(_TableState, State) ->
     %% Bookies are shared — closing one table must not stop them; they
     %% stay up until `shutdown/1`. Returning `State` keeps the
@@ -176,11 +186,37 @@ shutdown(#{sup := Sup}) ->
 %% =============================================================================
 
 %% @private
-%% Lazily provision the N shared Bookies on the first `open_table/4`.
-%% Subsequent tables must agree on `ShardCount` — different shard
-%% counts across tables would break the hash-to-shard routing.
-ensure_shards(ShardCount, #{shard_count := undefined} = State) ->
-    case start_shards(ShardCount, State) of
+%% Re-derive the N shared Bookies from the supervisor on EVERY
+%% `open_table/4`. The pool must live in the (shared) supervisor, NOT in
+%% this topology state: `bondy_db` discards the state we return
+%% (`{ok, TableState, _NewState}`), so a pool kept here would not survive
+%% to the next table — every table would start its own private Bookies
+%% and the "shared" pool would never actually be shared. Keying each
+%% Bookie by `{shard, K}` and using `get_or_start_bookie/3` makes the
+%% supervisor the registry: the first table starts the pool, every later
+%% table gets the same pids back.
+%%
+%% `ShardCount` agreement across tables is enforced against the
+%% supervisor's current Bookie count: the first table fixes it; a later
+%% table requesting a different count is rejected (a divergent
+%% hash-to-shard map would corrupt routing).
+ensure_shards(ShardCount, #{sup := Sup} = State) ->
+    case bondy_db_leveled_sup:bookie_count(Sup) of
+        0 ->
+            get_or_start_shards(ShardCount, State);
+        ShardCount ->
+            get_or_start_shards(ShardCount, State);
+        Existing ->
+            {error,
+                {shard_count_mismatch, [
+                    {requested, ShardCount},
+                    {existing, Existing}
+                ]}}
+    end.
+
+%% @private
+get_or_start_shards(ShardCount, State) ->
+    case get_or_start_shards(0, ShardCount, State, #{}) of
         {ok, Shards} ->
             {ok, Shards, State#{
                 shard_count := ShardCount,
@@ -188,27 +224,11 @@ ensure_shards(ShardCount, #{shard_count := undefined} = State) ->
             }};
         {error, _} = Err ->
             Err
-    end;
-ensure_shards(
-    ShardCount, #{shard_count := Existing, shards := Shards} = State
-) when
-    ShardCount =:= Existing
-->
-    {ok, Shards, State};
-ensure_shards(ShardCount, #{shard_count := Existing}) ->
-    {error,
-        {shard_count_mismatch, [
-            {requested, ShardCount},
-            {existing, Existing}
-        ]}}.
+    end.
 
-%% @private
-start_shards(ShardCount, State) ->
-    start_shards(0, ShardCount, State, #{}).
-
-start_shards(N, N, _State, Acc) ->
+get_or_start_shards(N, N, _State, Acc) ->
     {ok, Acc};
-start_shards(
+get_or_start_shards(
     I,
     N,
     #{
@@ -222,11 +242,19 @@ start_shards(
     case ?COMMON:ensure_dir(ShardDir) of
         ok ->
             BookOpts = BookOptsFun(ShardDir),
-            case bondy_db_leveled_sup:start_bookie(Sup, BookOpts) of
+            case
+                bondy_db_leveled_sup:get_or_start_bookie(
+                    Sup, {shard, I}, BookOpts
+                )
+            of
                 {ok, Bookie} ->
-                    start_shards(I + 1, N, State, Acc#{I => Bookie});
+                    get_or_start_shards(I + 1, N, State, Acc#{I => Bookie});
                 {error, _} = Err ->
-                    %% Best-effort rollback of already-started Bookies.
+                    %% Best-effort rollback of Bookies THIS call started.
+                    %% On the reuse path `get_or_start_bookie/3` returns
+                    %% existing pids without error, so a rollback only fires
+                    %% on the first (creating) table — never closing a pool a
+                    %% sibling table is already using.
                     [?COMMON:stop_bookie_safe(B) || B <- maps:values(Acc)],
                     Err
             end;

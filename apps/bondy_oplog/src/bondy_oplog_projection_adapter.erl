@@ -62,6 +62,16 @@ passes a new Bucket value to `get/3`, `put_batch/2`, `range/5`, or
   (`shared_shards`, `single_bookie`), to the right **entity type** as well.
   Adapters that cannot wipe degrade gracefully (the rebuild re-puts every
   live term regardless; only orphaned terms would survive).
+- `cell_keys/2` — enumerate every `{Bucket, Key}` primary cell in a
+  `cell_keys_scope()` (`{entity, ET}` on a co-located backend, `all_primary`
+  on a dedicated-Bookie backend). This is the **authoritative, complete cell
+  directory** the secondary-index rebuild folds over for a DURABLE table: the
+  projection is the durable materialised state, whereas the MST is a
+  truncatable recent-events structure that would miss already-compacted cells.
+  A durable adapter (leveled) MUST export it; an ephemeral one (ETS) omits it
+  and the rebuild falls back to the MST walk — correct only for the
+  ephemeral/peer-synced path (e.g. the registry), whose cells are never
+  compacted away. Probe it via `cell_keys_exported/1`.
 
 Adapters MUST be safe under concurrent readers; `put_batch/2` may be
 single-writer (the substrate guarantees one applier per shard).
@@ -83,8 +93,11 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
     handle/0,
     bucket/0,
     range_opts/0,
-    clear_scope/0
+    clear_scope/0,
+    cell_keys_scope/0
 ]).
+
+-export([cell_keys_exported/1]).
 
 -type handle() :: any().
 -type bucket() :: term().
@@ -112,6 +125,24 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -type clear_scope() ::
     {suffix, IndexName :: atom()}
     | {entity, EntityType :: binary(), IndexName :: atom()}.
+
+%% The scope of a `cell_keys/2` primary-cell enumeration, used by the
+%% secondary-index rebuild to derive its complete cell directory from the
+%% durable projection. The owner (`bondy_db`, via its topology) chooses it from
+%% the backend's keyspace layout:
+%%
+%% - `{entity, EntityType}` — enumerate only the primary buckets of
+%%   `EntityType` (`EntityType` in `shared_shards`, `<<Realm,"/",EntityType>>`
+%%   in `single_bookie`). Required on a backend whose handle (Bookie)
+%%   co-locates several entity types, so a sibling table's cells are excluded.
+%%
+%% - `all_primary` — enumerate every non-index bucket in the handle. Correct on
+%%   a backend whose handle is a dedicated single-table Bookie with realm-keyed
+%%   primary buckets (`per_entity`), where the entity type is not encoded in the
+%%   bucket and the only buckets present are this table's.
+-type cell_keys_scope() ::
+    {entity, EntityType :: binary()}
+    | all_primary.
 
 %% =============================================================================
 %% BEHAVIOUR CALLBACKS
@@ -167,4 +198,40 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 %% when absent.
 -callback clear(handle(), Scope :: clear_scope()) -> ok.
 
--optional_callbacks([head/3, clear/2]).
+%% Enumerate every `{Bucket, Key}` primary cell in `Scope` — the authoritative,
+%% COMPLETE cell directory the secondary-index rebuild folds over for a DURABLE
+%% table. `Scope` is a `cell_keys_scope()`: `{entity, ET}` on a co-located
+%% backend (enumerate only `ET`'s buckets), `all_primary` on a dedicated-Bookie
+%% backend (every non-index bucket). The projection is the durable materialised
+%% state; deriving the directory from the MST instead would miss every
+%% already-compacted (or crash-lost) cell (the MST is truncated below the
+%% compaction watermark), leaving a half-built index marked trusted. A durable
+%% adapter (leveled) MUST export it; an ephemeral one (ETS) omits it and
+%% `bondy_oplog_applier:primary_cell_directory/4` falls back to the MST walk,
+%% correct only for the ephemeral/peer-synced path (e.g. the registry). Probe
+%% with `cell_keys_exported/1`.
+-callback cell_keys(handle(), Scope :: cell_keys_scope()) ->
+    [{bucket(), Key :: term()}].
+
+-optional_callbacks([head/3, clear/2, cell_keys/2]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-doc """
+Whether `Adapter` implements the optional `cell_keys/2` callback.
+
+This is the single decision point for the durable-index rebuild's cell
+directory source (`bondy_oplog_applier:primary_cell_directory/3`): an adapter
+that exports `cell_keys/2` enumerates the authoritative, complete projection
+directory; one that does not falls back to the truncatable MST walk — correct
+only for the ephemeral/peer-synced path. `bondy_db` asserts the same predicate
+at durable-table open so a durable adapter missing the callback fails loudly
+instead of silently building empty indexes on the next rebuild.
+""".
+-spec cell_keys_exported(Adapter :: module()) -> boolean().
+
+cell_keys_exported(Adapter) when is_atom(Adapter) ->
+    _ = code:ensure_loaded(Adapter),
+    erlang:function_exported(Adapter, cell_keys, 2).

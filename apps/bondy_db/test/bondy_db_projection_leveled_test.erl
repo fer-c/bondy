@@ -416,7 +416,7 @@ cell_keys_is_entity_scoped({Pid, _Dir}) ->
             {<<"power_users">>, <<"pu1">>, F},
             {<<"r1/power_users">>, <<"pu2">>, F}
         ]),
-        Got = lists:sort(?MOD:cell_keys(H, <<"users">>)),
+        Got = lists:sort(?MOD:cell_keys(H, {entity, <<"users">>})),
         Expected = lists:sort([
             {<<"users">>, <<"u_ss">>},
             {<<"r1/users">>, <<"u_r1">>},
@@ -427,7 +427,25 @@ cell_keys_is_entity_scoped({Pid, _Dir}) ->
         %% holds symmetrically).
         ?assertEqual(
             lists:sort([{<<"items">>, <<"i1">>}, {<<"r1/items">>, <<"i2">>}]),
-            lists:sort(?MOD:cell_keys(H, <<"items">>))
+            lists:sort(?MOD:cell_keys(H, {entity, <<"items">>}))
+        ),
+        %% The `all_primary` scope (the `per_entity` path) enumerates EVERY
+        %% non-index, non-reserved bucket's cells — every primary above, across
+        %% all entity types — while still excluding the `/$idx/` index buckets
+        %% and the reserved `$idx_*` marker/flag buckets. (A dedicated per_entity
+        %% Bookie holds only one table's realm-keyed primaries; this co-located
+        %% fixture proves the bucket filter, not co-location.)
+        ?assertEqual(
+            lists:sort([
+                {<<"users">>, <<"u_ss">>},
+                {<<"r1/users">>, <<"u_r1">>},
+                {<<"r2/users">>, <<"u_r2">>},
+                {<<"items">>, <<"i1">>},
+                {<<"r1/items">>, <<"i2">>},
+                {<<"power_users">>, <<"pu1">>},
+                {<<"r1/power_users">>, <<"pu2">>}
+            ]),
+            lists:sort(?MOD:cell_keys(H, all_primary))
         )
     end.
 

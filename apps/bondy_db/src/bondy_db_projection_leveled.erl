@@ -377,8 +377,8 @@ clear(#{bookie := Pid}, {entity, ET, IndexName}) when
     lists:foreach(fun(Bucket) -> clear_bucket(Pid, Bucket) end, Buckets).
 
 -doc """
-Enumerate the `{Bucket, Key}` of every PRIMARY cell of entity type `ET` in this
-handle — the durable cell directory for a secondary-index rebuild.
+Enumerate the `{Bucket, Key}` of every PRIMARY cell in `Scope` — the durable
+cell directory for a secondary-index rebuild.
 
 The rebuild MUST read its cell directory from the projection, not the MST: the
 MST is a truncatable recent-events structure (compaction drops events `<=` the
@@ -386,24 +386,38 @@ watermark, and a no-checkpoint crash loses its in-memory tail), whereas the
 projection is the durable, complete materialised state. Reading the directory
 from the MST would silently miss every already-compacted cell.
 
-A primary bucket of `ET` is one that **equals `ET`** (`shared_shards`, where the
-realm is folded into the key) or **ends with `/ET`** (`single_bookie`, where the
-bucket is `<<Realm,"/",ET>>`), and that contains no `/$idx/` infix (excluding
-this and other tables' index buckets). Other tables' primaries (`ET2`,
-`<<Realm,"/",ET2>>`) and the reserved `$idx_*` buckets match neither test, so a
-shared Bookie is correctly scoped to just `ET`'s cells. Each cell is counted
-once off its always-present `?SK_STATE` subkey.
+`Scope` is a `bondy_oplog_projection_adapter:cell_keys_scope()` chosen by the
+owning topology from its keyspace layout:
 
-Note: `per_entity` (bucket = `<<Realm>>`, no `ET`) is not covered by this
-`ET`-based scope and is not used in v1; it would need the dedicated-Bookie
-"every non-index bucket" variant.
+- `{entity, ET}` — a CO-LOCATED Bookie holding several entity types. A primary
+  bucket of `ET` **equals `ET`** (`shared_shards`, realm folded into the key)
+  or **ends with `/ET`** (`single_bookie`, bucket `<<Realm,"/",ET>>`), and has
+  no `/$idx/` infix. Other tables' primaries (`ET2`, `<<Realm,"/",ET2>>`) and
+  the reserved `$idx_*` buckets match neither test, so a shared Bookie is
+  correctly scoped to just `ET`'s cells.
+
+- `all_primary` — a DEDICATED single-table Bookie (`per_entity`) whose primary
+  bucket is the realm verbatim (`<<Realm>>`, no `ET`), and whose index cells
+  live in separate Bookies. Every non-`/$idx/` bucket is therefore one of this
+  table's primary buckets, so the scope enumerates them all. This is the
+  variant that lets `per_entity` rebuild from the projection rather than the
+  MST.
+
+Each cell is counted once off its always-present `?SK_STATE` subkey.
 """.
--spec cell_keys(handle(), EntityType :: binary()) -> [{binary(), term()}].
+-spec cell_keys(
+    handle(), bondy_oplog_projection_adapter:cell_keys_scope()
+) -> [{binary(), term()}].
 
-cell_keys(#{bookie := Pid}, ET) when is_binary(ET) ->
+cell_keys(#{bookie := Pid}, {entity, ET}) when is_binary(ET) ->
     lists:flatmap(
         fun(Bucket) -> bucket_cell_keys(Pid, Bucket) end,
         primary_buckets(Pid, ET)
+    );
+cell_keys(#{bookie := Pid}, all_primary) ->
+    lists:flatmap(
+        fun(Bucket) -> bucket_cell_keys(Pid, Bucket) end,
+        all_primary_buckets(Pid)
     ).
 
 -spec info(handle()) -> #{atom() => term()}.
@@ -478,6 +492,38 @@ is_primary_bucket(ET, Suffix, Bucket) when is_binary(Bucket) ->
         (Bucket =:= ET orelse is_bucket_suffix(Suffix, Bucket));
 is_primary_bucket(_ET, _Suffix, _Bucket) ->
     false.
+
+%% List every PRIMARY bucket in a DEDICATED single-table Bookie (`per_entity`):
+%% every bucket with no `/$idx/` infix. The dedicated Bookie holds only this
+%% table's realm-keyed primary cells (its index cells live in separate Bookies),
+%% so there is no entity type to filter on — every non-index bucket is a primary
+%% bucket. Ledger-only fold over buckets (cheap).
+all_primary_buckets(Pid) ->
+    FoldFun =
+        fun(Bucket, Acc) ->
+            case is_non_index_bucket(Bucket) of
+                true -> [Bucket | Acc];
+                false -> Acc
+            end
+        end,
+    {async, Folder} =
+        leveled_bookie:book_bucketlist(Pid, ?HEAD_TAG, {FoldFun, []}, all),
+    Folder().
+
+is_non_index_bucket(Bucket) when is_binary(Bucket) ->
+    binary:match(Bucket, <<"/$idx/">>) =:= nomatch andalso
+        not is_reserved_idx_bucket(Bucket);
+is_non_index_bucket(_Bucket) ->
+    false.
+
+%% The reserved index marker/flag buckets (`<<"$idx_trusted">>`,
+%% `<<"$idx_clean">>`; see `bondy_oplog_index_key`) live outside the index
+%% keyspace (no `/$idx/` infix) but are not primary cells. A realm-keyed primary
+%% bucket never starts with `$`, so a `$idx`-prefix test excludes them safely.
+%% (In `per_entity` these never share the primary Bookie anyway; the guard keeps
+%% `all_primary` correct on any co-located handle.)
+is_reserved_idx_bucket(<<"$idx", _/binary>>) -> true;
+is_reserved_idx_bucket(_) -> false.
 
 %% Every `{Bucket, Key}` of one bucket, keyed off the always-present
 %% `?SK_STATE` subkey so each cell is counted once.

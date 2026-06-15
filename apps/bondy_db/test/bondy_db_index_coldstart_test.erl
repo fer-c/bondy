@@ -133,11 +133,13 @@ untrusted_restart_rebuilds(Dirs) ->
     %% We assert the DECISION Step 3 owns: a shard whose durable trust marker
     %% is absent is rebuilt (not silently trusted). We do NOT assert the
     %% rebuilt contents here: the rebuild re-derives from the primary via
-    %% `reindex_from_projection` (cell directory = `distinct_cell_keys(MST)`),
-    %% whose completeness depends on the primary's own durable MST recovery /
-    %% tail-replay — a separate concern from the marker-driven decision, and
-    %% exercised by the rebuild suites (lag / writer / tier2). The trusted
-    %% path (and its full data survival) is covered by `clean_restart_trusts`.
+    %% `reindex_from_projection`, whose cell directory for this durable table is
+    %% the projection (`cell_keys/2`, the complete durable directory — see
+    %% `bondy_oplog_applier:primary_cell_directory/3`). Its completeness depends
+    %% on the primary's own durable recovery / tail-replay — a separate concern
+    %% from the marker-driven decision, and exercised by the rebuild suites
+    %% (lag / writer / tier2). The trusted path (and its full data survival) is
+    %% covered by `clean_restart_trusts`.
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
     {Db1, Sup1} = open(Dirs),

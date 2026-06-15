@@ -88,6 +88,7 @@ encoding.
 -export([route/2]).
 -export([bucket_for/3]).
 -export([index_clear_scope/2]).
+-export([primary_cell_scope/1]).
 -export([close_table/2]).
 -export([shutdown/1]).
 
@@ -157,6 +158,16 @@ there is no co-located sibling to over-wipe.
 """.
 index_clear_scope(IndexName, _TableState) when is_atom(IndexName) ->
     {suffix, IndexName}.
+
+-doc """
+Per-entity gives each `(EntityType, Shard)` its own dedicated Bookie whose
+primary bucket is the realm verbatim (`<<Realm>>`, no `ET`), and whose index
+cells live in separate Bookies. Every non-index bucket is therefore one of this
+table's primary buckets, so the rebuild enumerates them all (`all_primary`) —
+the entity type is not encoded in the bucket to filter on.
+""".
+primary_cell_scope(_TableState) ->
+    all_primary.
 
 close_table(#{shards := Shards}, State) ->
     %% T2 owns one Bookie per (EntityType, Shard); close_table stops

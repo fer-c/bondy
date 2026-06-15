@@ -987,6 +987,15 @@ resolve_cell_apply_ctx(Opts) ->
                             ),
                         secondary_indexes =>
                             maps:get(secondary_indexes, Opts, []),
+                        %% The rebuild's primary-cell enumeration scope
+                        %% (`bondy_oplog_projection_adapter:cell_keys_scope()`),
+                        %% stamped by `bondy_db` from the topology. `undefined`
+                        %% for an instance started outside `bondy_db` — the
+                        %% rebuild then falls back to the MST walk.
+                        primary_cell_scope =>
+                            bondy_oplog_core_registry:entry_primary_cell_scope(
+                                Entry
+                            ),
                         %% A3 — applier-private OldValue frame-cache (or
                         %% `undefined` when disabled). Created here in the
                         %% applier's init/1, so the ETS table is owned by
@@ -1934,10 +1943,11 @@ vv_merge(A, B) ->
 %% directory from `distinct_cell_keys(MST)` would silently miss every
 %% already-compacted (or crash-lost) cell, leaving a half-built index that
 %% is nonetheless marked trusted. The projection is the durable, complete
-%% materialised state, so the rebuild enumerates the primary's own cells
-%% there (`Adapter:cell_keys/2`, scoped to this entity type) and reads
-%% each value from it. The MST walk remains the fallback for an adapter
-%% that cannot enumerate.
+%% materialised state, so for a durable table the rebuild enumerates the
+%% primary's own cells there (`Adapter:cell_keys(Handle, Scope)`, the
+%% topology-chosen `cell_keys_scope()`) and reads each value from it. The
+%% MST walk remains the fallback for an adapter that cannot enumerate (the
+%% ephemeral ETS projection — see `primary_cell_directory/4`).
 do_rebuild_indexes(#state{cell_apply_ctx = undefined} = State) ->
     State;
 do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
@@ -1957,9 +1967,10 @@ do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
 %% back-pressure cap so the full working set lands in one pass even when a
 %% prior saturation left the cap tripped.
 reindex_from_projection(
-    #{adapter := Adapter, handle := Handle, kernel := Kernel}, Id, SecIdx
+    #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx, Id, SecIdx
 ) ->
-    CellKeys = primary_cell_directory(Adapter, Handle, Id),
+    Scope = maps:get(primary_cell_scope, Ctx, undefined),
+    CellKeys = primary_cell_directory(Adapter, Handle, Id, Scope),
     {IdxAcc, MaxHlc} = lists:foldl(
         fun({Bucket, Key}, {IAcc, HAcc}) ->
             case
@@ -1983,45 +1994,53 @@ reindex_from_projection(
     ok.
 
 %% @private
-%% The cell directory for a rebuild: the UNION of
-%%   1. the durable PROJECTION cells of this entity type (`Adapter:cell_keys/2`),
-%%      the authoritative directory for `shared_shards`/`single_bookie` — present
-%%      even after a crash that emptied the MST;
-%%   2. the MST `cell_apply` cells (`distinct_cell_keys/1`), which cover
-%%      `per_entity` (bucket = `<<Realm>>`, carries no `ET`, so the `ET`-scoped
-%%      `cell_keys/2` cannot see it) while the MST is intact.
-%% Both sources are per-table-scoped — `cell_keys/2` by `ET`, the MST by being
-%% per-instance — so the union never pulls in another table's cells; `usort`
-%% de-dups the overlap. Caveat: a `per_entity` table whose MST was emptied by a
-%% no-checkpoint crash is not covered (neither source yields its cells); that
-%% topology is not used in v1.
-primary_cell_directory(Adapter, Handle, Id) ->
-    FromProjection =
-        case erlang:function_exported(Adapter, cell_keys, 2) of
-            true -> Adapter:cell_keys(Handle, entity_type_of(Id));
-            false -> []
-        end,
-    FromMST =
-        case bondy_oplog_registry:mst(Id) of
-            undefined -> [];
-            MST -> distinct_cell_keys(MST)
-        end,
-    lists:usort(FromProjection ++ FromMST).
+%% The cell directory for a secondary-index rebuild. One of two sources,
+%% selected by whether the projection adapter can enumerate its own keyspace —
+%% never a union:
+%%
+%%   * DURABLE tables (leveled, every topology): the projection is the
+%%     authoritative, COMPLETE materialised state, so the directory is
+%%     `Adapter:cell_keys(Handle, Scope)`. `Scope` is the topology-chosen
+%%     `cell_keys_scope()` (`bondy_db` stamps it on the primary registry entry):
+%%     `{entity, ET}` for a co-located backend (`shared_shards`/`single_bookie`),
+%%     `all_primary` for a dedicated-Bookie backend (`per_entity`). Either way
+%%     `cell_keys/2` enumerates exactly this table's primary cells, so the MST is
+%%     NOT consulted — closing D-9 (the truncatable MST would miss every
+%%     already-compacted cell) for ALL durable topologies.
+%%
+%%   * EPHEMERAL / peer-synced tables (ETS — e.g. the registry): no durable
+%%     projection directory exists and the adapter does not export `cell_keys/2`;
+%%     the MST IS the authoritative source (its cells are re-shipped by the peer,
+%%     never compacted past that), so the directory is the MST `cell_apply` walk.
+%%
+%% A leveled instance started OUTSIDE `bondy_db` carries no `Scope`
+%% (`undefined`); it cannot be enumerated by entity type, so it too falls back
+%% to the MST walk (the pre-scope behaviour) rather than guessing a scope.
+primary_cell_directory(Adapter, Handle, Id, Scope) when
+    Scope =/= undefined
+->
+    case bondy_oplog_projection_adapter:cell_keys_exported(Adapter) of
+        true -> Adapter:cell_keys(Handle, Scope);
+        false -> mst_cell_directory(Id)
+    end;
+primary_cell_directory(_Adapter, _Handle, Id, undefined) ->
+    mst_cell_directory(Id).
 
 %% @private
-%% The entity type embedded in an instance id `<<DbName, "/", ET, "/", Shard>>`
-%% (`bondy_db:encode_instance_id/3`). Used to scope the rebuild's projection
-%% enumeration to this table's primary buckets.
-entity_type_of(Id) when is_binary(Id) ->
-    case binary:split(Id, <<"/">>, [global]) of
-        [_DbName, ET, _Shard] -> ET;
-        _ -> Id
+%% The MST `cell_apply` cell directory — the fallback for an adapter that cannot
+%% enumerate its keyspace (the ephemeral ETS adapter) or an instance with no
+%% `cell_keys_scope()`. Truncatable (see `primary_cell_directory/4`), so only
+%% sound where cells are never compacted past what a peer re-ships.
+mst_cell_directory(Id) ->
+    case bondy_oplog_registry:mst(Id) of
+        undefined -> [];
+        MST -> distinct_cell_keys(MST)
     end.
 
 %% @private
 %% The distinct `{Bucket, Key}` cell keys named by the MST's `cell_apply`
 %% events, de-duplicated. Fallback directory only (the MST is truncatable; see
-%% `primary_cell_directory/3`).
+%% `primary_cell_directory/4`).
 distinct_cell_keys(MST) ->
     lists:usort([
         {Bucket, Key}

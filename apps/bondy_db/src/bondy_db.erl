@@ -490,6 +490,9 @@ open_table_provision(
                             %% tail-replay, never a full re-derive. Freshening
                             %% (or the rebuild's own freshen) keeps a finite
                             %% `max_lag` read passing even on an empty shard.
+                            ok = assert_durable_rebuild_invariant(
+                                Backend, IndexMap
+                            ),
                             ok = cold_start_indexes(NS, InstanceIds, IndexMap),
                             {ok, #{
                                 db_name => DbName,
@@ -1259,11 +1262,16 @@ index_range(Table, Realm, IndexName, LoTerm, HiTerm, Opts) when
     end).
 
 -doc """
-Rebuild secondary index `IndexName` of `Table` from the primary:
-wipe its ETS shards, re-fold every primary shard's MST, and re-dispatch a
-`put` for every live term. Synchronous — returns once the index has been
-re-materialised and its shards freshened, so a `max_lag` read issued after
-this passes. `{error, {unknown_index, IndexName}}` for an unknown index.
+Rebuild secondary index `IndexName` of `Table` from the primary: clear its
+projection shards, re-fold every live primary cell, and re-dispatch a `put` for
+every term. For a **durable table** (any leveled topology) the cell directory
+is the complete durable projection (`cell_keys/2`, scoped per the topology —
+`{entity, ET}` for `shared_shards`/`single_bookie`, `all_primary` for
+`per_entity`); only the ephemeral ETS adapter falls back to the MST — see
+`bondy_oplog_applier:primary_cell_directory/4`. Synchronous — returns once the
+index has been re-materialised and its shards freshened, so a `max_lag` read
+issued after this passes. `{error, {unknown_index, IndexName}}` for an unknown
+index.
 
 The same recovery the substrate runs autonomously on a saturation drop or
 a writer crash; exposed for operators (and tests) to force on demand.
@@ -1522,6 +1530,17 @@ provision_shard(
                         %% Recorded so a secondary-index rebuild can find
                         %% this primary shard's applier from the registry.
                         instance_id => InstanceId,
+                        %% The rebuild's primary-cell enumeration scope. The
+                        %% topology owns it (it knows its keyspace layout):
+                        %% `{entity, ET}` on a backend whose bucket carries the
+                        %% entity type (`shared_shards`, `single_bookie`);
+                        %% `all_primary` on a dedicated-Bookie backend whose
+                        %% bucket is realm-keyed (`per_entity`). Lets the rebuild
+                        %% derive the complete cell directory from the durable
+                        %% projection (`cell_keys/2`) rather than the truncatable
+                        %% MST — see `bondy_oplog_applier:primary_cell_directory/4`.
+                        primary_cell_scope =>
+                            Topology:primary_cell_scope(TableState),
                         %% Bind the registry monitor to the topology's
                         %% long-lived owner (the calling process when the
                         %% topology has none), so the row survives the
@@ -2065,6 +2084,35 @@ index_descriptors(Specs, DefaultShardCount) ->
     ].
 
 %% @private
+%% Invariant tripwire for the durable-index rebuild. A durable (leveled) table
+%% that declares secondary indexes relies on its projection adapter exporting
+%% `cell_keys/2` to enumerate the COMPLETE cell directory (under the topology's
+%% `cell_keys_scope()`) — without it the rebuild would silently fall back to the
+%% truncatable MST and miss every compacted cell (D-9; see
+%% `bondy_oplog_applier:primary_cell_directory/4`). The leveled adapter always
+%% exports it, so this never fires in the current design; it pins the contract
+%% so a future durable adapter — or a deletion of `cell_keys/2` from the leveled
+%% adapter — fails loudly at open instead of silently degrading to the MST.
+%% (Ephemeral/ETS tables legitimately omit it and fall back to the MST by
+%% design, so only the `leveled` backend is asserted.)
+assert_durable_rebuild_invariant(leveled, IndexMap) when map_size(IndexMap) > 0 ->
+    case
+        bondy_oplog_projection_adapter:cell_keys_exported(
+            bondy_db_projection_leveled
+        )
+    of
+        true ->
+            ok;
+        false ->
+            error(
+                {missing_optional_callback,
+                    {bondy_db_projection_leveled, cell_keys, 2}}
+            )
+    end;
+assert_durable_rebuild_invariant(_Backend, _IndexMap) ->
+    ok.
+
+%% @private
 %% Cold-start index recovery. For each declared index, decide per shard whether
 %% to TRUST (the durable trust marker is present — built and kept complete
 %% `<= snapshot_wm` by the compaction flush barrier) or REBUILD (no marker: a
@@ -2081,13 +2129,14 @@ cold_start_indexes(_NS, _InstanceIds, IndexMap) when map_size(IndexMap) =:= 0 ->
     %% to return from the overlay before the drain completes).
     ok;
 cold_start_indexes(NS, InstanceIds, IndexMap) ->
-    %% Barrier the primary shards FIRST: drain each WAL to end-of-log and install
-    %% the overlay into the MST, so the trust/rebuild decision and any rebuild
-    %% observe a fully-replayed primary. Without this a `rebuild_sync` re-derives
-    %% from `distinct_cell_keys(MST)` while the tail is still being applied (the
-    %% MST lags the projection via the async overlay install), yielding an empty
-    %% or partial index. Best-effort: a missing applier just leaves the prior
-    %% (racy) behaviour, never blocks open.
+    %% Barrier the primary shards FIRST: drain each WAL to end-of-log and apply
+    %% the tail into the projection (and MST), so the trust/rebuild decision and
+    %% any rebuild observe a fully-replayed primary. Without this a `rebuild_sync`
+    %% derives its cell directory (the durable projection via `cell_keys/2` for a
+    %% durable table, else the MST for the ephemeral ETS adapter — see
+    %% `bondy_oplog_applier:primary_cell_directory/4`) while the tail is still
+    %% being applied, yielding an empty or partial index. Best-effort: a missing
+    %% applier just leaves the prior (racy) behaviour, never blocks open.
     ok = await_primary_shards(InstanceIds),
     maps:foreach(
         fun(Name, #{sec_shard_count := SecShardCount}) ->

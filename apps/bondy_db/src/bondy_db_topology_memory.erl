@@ -88,6 +88,7 @@ realms inside it — exactly like `bondy_db_topology_per_entity`.
 -export([route/2]).
 -export([bucket_for/3]).
 -export([index_clear_scope/2]).
+-export([primary_cell_scope/1]).
 -export([close_table/2]).
 -export([shutdown/1]).
 -export([provision_cache/5]).
@@ -155,6 +156,15 @@ bare-suffix scope is exact — there is no co-located sibling to over-wipe.
 """.
 index_clear_scope(IndexName, _TableState) when is_atom(IndexName) ->
     {suffix, IndexName}.
+
+-doc """
+Memory is ETS-backed; its projection adapter does not export `cell_keys/2`, so
+the rebuild always takes the MST walk and this scope is never consulted. A value
+is returned only to satisfy the behaviour — `all_primary` matches the dedicated
+per-`(EntityType, Shard)` ETS table conceptually.
+""".
+primary_cell_scope(_TableState) ->
+    all_primary.
 
 close_table(#{shards := Shards, owner := Owner}, State) ->
     %% The owner performs the whole-table `ets:delete/1` (the only

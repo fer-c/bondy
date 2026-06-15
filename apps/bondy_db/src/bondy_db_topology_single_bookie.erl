@@ -79,6 +79,7 @@ Bookie.
 -export([route/2]).
 -export([bucket_for/3]).
 -export([index_clear_scope/2]).
+-export([primary_cell_scope/1]).
 -export([close_table/2]).
 -export([shutdown/1]).
 
@@ -167,6 +168,14 @@ declaring the same `IndexName` would be over-wiped.
 """.
 index_clear_scope(IndexName, #{entity_type := ET}) when is_atom(IndexName) ->
     {entity, atom_to_binary(ET, utf8), IndexName}.
+
+-doc """
+Single-bookie co-locates every table in one Bookie, so the primary cell
+directory must be scoped to this table's entity type — its bucket is
+`<<Realm,"/",ET>>`, so the rebuild folds only buckets ending with `/ET`.
+""".
+primary_cell_scope(#{entity_type := ET}) ->
+    {entity, atom_to_binary(ET, utf8)}.
 
 close_table(_TableState, State) ->
     %% No-op: the Bookie is shared and outlives table close. Stopping
