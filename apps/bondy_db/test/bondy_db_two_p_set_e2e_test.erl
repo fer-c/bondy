@@ -17,7 +17,7 @@
 two_p_set_e2e_test_() ->
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(bondy_mst),
+            {ok, _} = application:ensure_all_started(bondy_db),
             {ok, Db} = bondy_db:open(two_p_set_db, #{
                 topology => bondy_db_topology_memory,
                 shard_count => 1,

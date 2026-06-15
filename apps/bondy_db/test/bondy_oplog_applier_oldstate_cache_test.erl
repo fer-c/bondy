@@ -33,7 +33,7 @@
 -define(REALM, <<"r1">>).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->

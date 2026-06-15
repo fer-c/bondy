@@ -19,7 +19,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Disable the periodic tick so tests can drive the gauge emit
     %% exclusively via `snapshot_now/0`. A background tick landing in
     %% the middle of a test's capture window produced an extra event

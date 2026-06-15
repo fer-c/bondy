@@ -228,7 +228,7 @@ prop_subscription_delivers_matches() ->
         {NSKey, Keys},
         {atom_ns(), non_empty(list(key_gen()))},
         begin
-            {ok, _} = application:ensure_all_started(bondy_mst),
+            {ok, _} = application:ensure_all_started(bondy_db),
             {ok, Ref} = bondy_oplog_core:subscribe(NSKey, {prefix, <<"a">>}),
             lists:foreach(
                 fun({K, I}) ->
@@ -343,7 +343,7 @@ with_shard(Fn) ->
     with_shard_count(1, fun(NS, _Shards) -> Fn(NS) end).
 
 with_shard_count(N, Fn) ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     NS = mk_ns(),
     Shards = lists:seq(0, N - 1),
     Handles = [start_shard(NS, primary, S, N) || S <- Shards],

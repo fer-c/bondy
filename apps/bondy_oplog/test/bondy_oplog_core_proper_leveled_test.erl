@@ -164,7 +164,7 @@ prop_range_monotonicity_leveled() ->
 %% =============================================================================
 
 with_shard(Fn) ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     NS = mk_ns(),
     Handle = start_shard(NS, primary, 0, 1),
     try

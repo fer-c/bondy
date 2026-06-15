@@ -35,7 +35,7 @@ fused_convergence_test_() ->
     ]}.
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Drive sync/compaction explicitly — no background dispatch.
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),

@@ -66,6 +66,12 @@ start(_Type, Args) ->
     %% We do not need to start partisan since plum_db will do it
     {ok, _} = application:ensure_all_started(plum_db, permanent),
 
+    %% Start the bondy_db storage substrate (pulls in bondy_oplog, bondy_mst and
+    %% leveled). Started here, after plum_db, because the substrate's cluster
+    %% replication uses Partisan, which plum_db brings up. Nothing reads from it
+    %% yet — tables are opened per-domain by the plum_db migration.
+    {ok, _} = application:ensure_all_started(bondy_db, permanent),
+
     %% Now that Partisan is up we can get our nodename
     ok = logger:update_primary_config(#{
         metadata => #{

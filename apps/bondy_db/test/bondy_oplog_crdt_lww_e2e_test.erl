@@ -27,7 +27,7 @@
 -define(CRDT, bondy_oplog_crdt_lww_register).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->
@@ -55,7 +55,7 @@ crdt_lww_e2e_test_() ->
 crdt_lww_public_api_test_() ->
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(bondy_mst),
+            {ok, _} = application:ensure_all_started(bondy_db),
             {ok, Db} = bondy_db:open(crdt_pub_db, #{
                 topology => bondy_db_topology_memory,
                 shard_count => 1,
@@ -263,7 +263,7 @@ barrier(Id) ->
 %% --- overlay fixture (deterministic, no live instance) ---------------------
 
 ov_setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     NS = ns_of(mk_id()),
     {ok, CH} = bondy_oplog_cache_ets:init(NS, primary, 0, #{}),
     {ok, PH} = bondy_oplog_projection_ets:open(NS, primary, 0, #{}),

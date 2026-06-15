@@ -150,7 +150,7 @@ init(Opts) ->
             {ok, V} ->
                 V;
             error ->
-                case application:get_env(bondy_mst, gc_trigger) of
+                case application:get_env(bondy_oplog, gc_trigger) of
                     {ok, EnvFun} -> EnvFun;
                     undefined -> fun default_trigger/1
                 end
@@ -160,7 +160,7 @@ init(Opts) ->
             enabled,
             Opts,
             application:get_env(
-                bondy_mst,
+                bondy_oplog,
                 gc_scheduler,
                 true
             )
@@ -169,7 +169,7 @@ init(Opts) ->
             interval_ms,
             Opts,
             application:get_env(
-                bondy_mst,
+                bondy_oplog,
                 gc_interval_ms,
                 1000
             )
@@ -178,7 +178,7 @@ init(Opts) ->
         max_concurrency = maps:get(
             max_concurrency,
             Opts,
-            application:get_env(bondy_mst, gc_max_concurrency, 4)
+            application:get_env(bondy_oplog, gc_max_concurrency, 4)
         ),
         in_flight = #{}
     },

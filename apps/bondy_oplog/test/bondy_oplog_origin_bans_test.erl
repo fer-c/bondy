@@ -4,7 +4,7 @@
 -include("bondy_oplog.hrl").
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Start with a clean ban list — other tests may have populated it.
     [
         bondy_oplog_origin_bans:unban(O)

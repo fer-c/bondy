@@ -19,7 +19,7 @@
 %% overlay, then registers it with bondy_oplog_core_registry.
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->

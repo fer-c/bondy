@@ -15,7 +15,7 @@
 -define(LWW, bondy_oplog_crdt_lww_register).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->

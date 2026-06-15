@@ -20,7 +20,7 @@
 -define(B, <<>>).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Disable periodic ticks; tests drive explicit triggers.
     ok = bondy_oplog_sync_scheduler:set_interval_ms(0),
     %% Use the lifecycle-aware default dispatch under test. (A prior

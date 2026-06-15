@@ -29,7 +29,7 @@ churn_test_() ->
     ]}.
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Use a separate NS per pool slot to avoid colliding with other
     %% test modules running in the same suite.
     Suffix = integer_to_list(erlang:unique_integer([positive, monotonic])),

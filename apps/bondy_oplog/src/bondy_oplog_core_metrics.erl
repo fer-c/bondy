@@ -259,7 +259,7 @@ resolve_interval(Opts) ->
         {ok, V} ->
             V;
         error ->
-            case application:get_env(bondy_mst, metrics) of
+            case application:get_env(bondy_oplog, metrics) of
                 {ok, M} when is_map(M) -> maps:get(interval_ms, M, 1000);
                 _ -> 1000
             end

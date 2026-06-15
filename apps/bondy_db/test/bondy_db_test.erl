@@ -43,7 +43,7 @@ memory_test_() ->
 ets_owner_survives_caller_death_test_() ->
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(bondy_mst),
+            {ok, _} = application:ensure_all_started(bondy_db),
             ok
         end,
         fun(_) -> ok end, fun ets_owner_survives_caller_death/0}.
@@ -82,7 +82,7 @@ setup(Topology) ->
     %% The substrate's per-shard `bondy_oplog_core_registry` lives inside the
     %% `bondy_mst` application; without this the facade's `open_table/3`
     %% cannot register a shard.
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     Dir = make_tempdir(),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),
     {ok, Db} = bondy_db:open(my_db, #{
@@ -466,7 +466,7 @@ ets_backend_no_disk_artifacts({Db, _Sup, Dir}) ->
 memory_db_rejects_leveled_backend_test_() ->
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(bondy_mst),
+            {ok, _} = application:ensure_all_started(bondy_db),
             ok
         end,
         fun(_) -> ok end, fun memory_db_rejects_leveled_backend/0}.

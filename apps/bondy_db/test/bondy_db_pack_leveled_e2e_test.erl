@@ -79,7 +79,7 @@ test(Title, Fn) ->
 
 setup(Topology) ->
     process_flag(trap_exit, true),
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     LeveledDir = make_tempdir("leveled"),
     PackDir = make_tempdir("pack"),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),

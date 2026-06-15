@@ -111,7 +111,7 @@ the subtree.
 ```erlang
 %% 1. Publish the new config under the per-instance key.
 application:set_env(
-    bondy_mst,
+    bondy_oplog,
     {validator_crypto, InstanceId},
     #{peer_pubkeys => NewPubkeys}  %% or accept_unknown_origin, or both
 ),
@@ -236,7 +236,7 @@ detect_equivocation(E1, E2) ->
 %% — see the "Snapshot refresh" section of the moduledoc for why
 %% `keypair` and `last_hash` cannot be rotated through this path.
 refresh(#state{instance_id = InstanceId} = State) ->
-    case application:get_env(bondy_mst, {validator_crypto, InstanceId}) of
+    case application:get_env(bondy_oplog, {validator_crypto, InstanceId}) of
         undefined ->
             {error, no_refreshed_config};
         {ok, NewOpts} when is_map(NewOpts) ->

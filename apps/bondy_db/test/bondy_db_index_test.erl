@@ -41,7 +41,7 @@ indexes() ->
 %% =============================================================================
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     Dir = make_tempdir(),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),
     {ok, Db} = bondy_db:open(idx_db, #{
@@ -117,7 +117,7 @@ force_ets_indices_test_() ->
     end}.
 
 force_ets_setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     {ok, _} = application:ensure_all_started(bondy_oplog),
     Prev = application:get_env(bondy_db, force_ets_indices),
     ok = application:set_env(bondy_db, force_ets_indices, true),
@@ -405,7 +405,7 @@ put_index_entry(Table, Realm, IndexName, Term, PrimaryKey, Cols, Hlc) ->
     ok = PA:put_batch(PH, [{SecBucket, SecKey, Frame}]).
 
 with_db(Fn) ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     Dir = make_tempdir(),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),
     {ok, Db} = bondy_db:open(idx_val_db, #{

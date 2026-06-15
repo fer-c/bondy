@@ -320,7 +320,7 @@ row_to_map(#cursor{
 
 %% @private
 ttl_ms() ->
-    application:get_env(bondy_mst, catalogue_cursor_ttl_ms, ?DEFAULT_TTL_MS).
+    application:get_env(bondy_oplog, catalogue_cursor_ttl_ms, ?DEFAULT_TTL_MS).
 
 %% @private
 schedule_gc() ->

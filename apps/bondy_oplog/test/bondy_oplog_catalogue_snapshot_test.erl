@@ -23,7 +23,7 @@
 -define(B, <<>>).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->
@@ -94,7 +94,7 @@ next_returns_batch_then_done() ->
 
 next_paginates_with_small_batch_size() ->
     %% Force a tiny batch size so we observe pagination.
-    application:set_env(bondy_mst, catalogue_snapshot_batch_size, 2),
+    application:set_env(bondy_oplog, catalogue_snapshot_batch_size, 2),
     try
         {Id, _NS, _, _} = setup_instance(),
         Keys = [
@@ -112,7 +112,7 @@ next_paginates_with_small_batch_size() ->
         ?assertEqual(lists:sort(Keys), lists:sort(ReturnedKeys)),
         teardown(Id)
     after
-        application:unset_env(bondy_mst, catalogue_snapshot_batch_size)
+        application:unset_env(bondy_oplog, catalogue_snapshot_batch_size)
     end.
 
 single_crdt_instance_returns_no_snapshot() ->

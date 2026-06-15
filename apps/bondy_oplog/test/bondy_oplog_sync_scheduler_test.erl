@@ -6,7 +6,7 @@
 -include("bondy_oplog.hrl").
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Reset state before each test:
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_sync_scheduler:set_peer_source(

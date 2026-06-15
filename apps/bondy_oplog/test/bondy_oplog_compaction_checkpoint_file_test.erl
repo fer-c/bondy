@@ -237,7 +237,7 @@ init_missing_path_returns_error_test() ->
 instance_init_test_() ->
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(bondy_mst),
+            {ok, _} = application:ensure_all_started(bondy_db),
             bondy_oplog_sync_scheduler:set_dispatch(undefined),
             bondy_oplog_gc_scheduler:set_trigger(undefined),
             ok
@@ -310,7 +310,7 @@ contains_corruption_marker(Term) ->
 default_test_() ->
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(bondy_mst),
+            {ok, _} = application:ensure_all_started(bondy_db),
             bondy_oplog_sync_scheduler:set_dispatch(undefined),
             bondy_oplog_gc_scheduler:set_trigger(undefined),
             ok

@@ -257,11 +257,11 @@ next_key_after(K) when is_binary(K) -> <<K/binary, 0>>.
 %% @private
 default_bucket() ->
     application:get_env(
-        bondy_mst, catalogue_default_bucket, ?DEFAULT_BUCKET
+        bondy_oplog, catalogue_default_bucket, ?DEFAULT_BUCKET
     ).
 
 %% @private
 batch_size() ->
     application:get_env(
-        bondy_mst, catalogue_snapshot_batch_size, ?DEFAULT_BATCH_SIZE
+        bondy_oplog, catalogue_snapshot_batch_size, ?DEFAULT_BATCH_SIZE
     ).

@@ -20,7 +20,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok = bondy_oplog_sync_scheduler:set_interval_ms(0),
     ok = bondy_oplog_sync_scheduler:set_dispatch(
         fun bondy_oplog_sync_scheduler:default_dispatch/2

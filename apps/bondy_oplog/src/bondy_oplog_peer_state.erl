@@ -293,7 +293,7 @@ Returns the configured `peer_timeout_ms` from app env, defaulting to
 -spec peer_timeout_ms() -> non_neg_integer().
 
 peer_timeout_ms() ->
-    application:get_env(bondy_mst, peer_timeout_ms, 30_000).
+    application:get_env(bondy_oplog, peer_timeout_ms, 30_000).
 
 ?DOC("""
 Synchronous round-trip through the gen_server. Returns when every

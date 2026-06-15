@@ -68,7 +68,7 @@ tier2_durability_test_() ->
 
 setup() ->
     process_flag(trap_exit, true),
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     Dirs = #{

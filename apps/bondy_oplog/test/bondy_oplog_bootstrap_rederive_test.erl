@@ -40,7 +40,7 @@ rederive_test_() ->
     ]}.
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     ok.
 

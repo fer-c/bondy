@@ -169,7 +169,7 @@ advice_carries_inputs_through_test() ->
 %% =============================================================================
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->

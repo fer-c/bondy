@@ -56,7 +56,7 @@ coldstart_test_() ->
 
 setup() ->
     process_flag(trap_exit, true),
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     {ok, _} = application:ensure_all_started(bondy_oplog),
     %% Tests want full control of compaction/GC timing — silence the
     %% schedulers (mirrors bondy_db_tier2_durability_test).

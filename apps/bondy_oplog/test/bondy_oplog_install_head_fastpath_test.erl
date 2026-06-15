@@ -26,7 +26,7 @@
 -define(PA, bondy_oplog_projection_head_counting).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->

@@ -292,7 +292,7 @@ resolve_config(Opts) ->
             true ->
                 Opts;
             false ->
-                case application:get_env(bondy_mst, oplog_latency) of
+                case application:get_env(bondy_oplog, oplog_latency) of
                     {ok, M} when is_map(M) -> M;
                     _ -> #{}
                 end

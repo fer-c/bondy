@@ -25,7 +25,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok = bondy_oplog_sync_scheduler:set_interval_ms(0),
     ok = bondy_oplog_sync_scheduler:set_dispatch(
         fun bondy_oplog_sync_scheduler:default_dispatch/2
@@ -110,7 +110,7 @@ round_robin_strategy_advances() ->
 unknown_strategy_falls_back_to_first() ->
     %% Write an unknown atom directly through app env (the setter
     %% guards against it).
-    application:set_env(bondy_mst, bootstrap_peer_strategy, gibberish),
+    application:set_env(bondy_oplog, bootstrap_peer_strategy, gibberish),
     Inst = pre_bootstrap_instance(),
     Peers = [p1, p2, p3],
     ok = bondy_oplog_sync_scheduler:set_peer_source(

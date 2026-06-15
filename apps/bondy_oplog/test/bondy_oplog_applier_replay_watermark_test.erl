@@ -23,7 +23,7 @@
 -define(TELEMETRY_EVENT, [bondy_oplog, applier, replay_cell_events]).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     ok.
 
 cleanup(_) ->

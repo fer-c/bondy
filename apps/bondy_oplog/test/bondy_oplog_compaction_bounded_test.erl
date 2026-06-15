@@ -25,7 +25,7 @@
 -define(B, <<>>).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Deterministic: no background sync dispatch, no auto-compaction, no GC
     %% (so a lagging peer root stays reachable for the diff path).
     bondy_oplog_sync_scheduler:set_dispatch(undefined),

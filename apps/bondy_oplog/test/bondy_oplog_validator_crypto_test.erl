@@ -158,7 +158,7 @@ equivocation_returns_ok_for_identical_events_test() ->
 %% =============================================================================
 
 integration_setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     ok.
@@ -286,7 +286,7 @@ crypto_validator_refresh_adds_peer_pubkey() ->
     %% Operator pushes B's pubkey into A's rotation config and
     %% triggers refresh.
     application:set_env(
-        bondy_mst,
+        bondy_oplog,
         {validator_crypto, IdA},
         #{peer_pubkeys => #{OriginA => PubA, OriginB => PubB}}
     ),
@@ -301,7 +301,7 @@ crypto_validator_refresh_adds_peer_pubkey() ->
     Key2 = bondy_oplog:append(IdB, {inc, 2}),
     {ok, Signed2} = bondy_oplog:get(IdB, Key2),
     ?assertEqual(ok, bondy_oplog:append_remote(IdA, Signed2)),
-    application:unset_env(bondy_mst, {validator_crypto, IdA}),
+    application:unset_env(bondy_oplog, {validator_crypto, IdA}),
     ok.
 
 %% Without a published env key, `refresh/1` returns
@@ -332,7 +332,7 @@ crypto_validator_refresh_returns_error_without_env() ->
         }
     }),
     %% Ensure no env key is set.
-    application:unset_env(bondy_mst, {validator_crypto, IdA}),
+    application:unset_env(bondy_oplog, {validator_crypto, IdA}),
     %% Refresh cast is delivered, applier logs the error, keeps old
     %% snapshot. Verify behaviourally: B's event is still rejected.
     ok = bondy_oplog_instance:refresh_validator(IdA, no_env_check),

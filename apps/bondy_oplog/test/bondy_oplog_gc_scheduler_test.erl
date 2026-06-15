@@ -7,7 +7,7 @@
 -include("bondy_oplog.hrl").
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     %% Disable periodic ticks for the duration of the suite — these
     %% tests assert on explicit `trigger/0` and `trigger_for/1` calls

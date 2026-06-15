@@ -235,7 +235,7 @@ also survives a scheduler restart within the same VM lifetime.
 set_bootstrap_peer_strategy(S) when
     S =:= first; S =:= random; S =:= round_robin
 ->
-    application:set_env(bondy_mst, bootstrap_peer_strategy, S),
+    application:set_env(bondy_oplog, bootstrap_peer_strategy, S),
     ok.
 
 ?DOC("""
@@ -247,7 +247,7 @@ Writes through to app env (`max_inflight_bootstraps`).
 -spec set_max_inflight_bootstraps(non_neg_integer()) -> ok.
 
 set_max_inflight_bootstraps(N) when is_integer(N), N >= 0 ->
-    application:set_env(bondy_mst, max_inflight_bootstraps, N),
+    application:set_env(bondy_oplog, max_inflight_bootstraps, N),
     ok.
 
 ?DOC("""
@@ -258,7 +258,7 @@ Doubled on each consecutive failure (clamped at
 -spec set_bootstrap_retry_base_ms(non_neg_integer()) -> ok.
 
 set_bootstrap_retry_base_ms(Ms) when is_integer(Ms), Ms >= 0 ->
-    application:set_env(bondy_mst, bootstrap_retry_base_ms, Ms),
+    application:set_env(bondy_oplog, bootstrap_retry_base_ms, Ms),
     ok.
 
 ?DOC("""
@@ -267,7 +267,7 @@ Sets the upper bound on the exponential bootstrap-retry backoff.
 -spec set_bootstrap_retry_max_ms(non_neg_integer()) -> ok.
 
 set_bootstrap_retry_max_ms(Ms) when is_integer(Ms), Ms >= 0 ->
-    application:set_env(bondy_mst, bootstrap_retry_max_ms, Ms),
+    application:set_env(bondy_oplog, bootstrap_retry_max_ms, Ms),
     ok.
 
 ?DOC("""
@@ -277,7 +277,7 @@ jitter the actual wait is `wait * uniform(0.5, 1.5)`.
 -spec set_bootstrap_retry_jitter(boolean()) -> ok.
 
 set_bootstrap_retry_jitter(B) when is_boolean(B) ->
-    application:set_env(bondy_mst, bootstrap_retry_jitter, B),
+    application:set_env(bondy_oplog, bootstrap_retry_jitter, B),
     ok.
 
 ?DOC("""
@@ -302,7 +302,7 @@ init(Opts) ->
             {ok, V} ->
                 V;
             error ->
-                case application:get_env(bondy_mst, sync_dispatch) of
+                case application:get_env(bondy_oplog, sync_dispatch) of
                     {ok, EnvFun} -> EnvFun;
                     undefined -> fun default_dispatch/2
                 end
@@ -312,7 +312,7 @@ init(Opts) ->
             enabled,
             Opts,
             application:get_env(
-                bondy_mst,
+                bondy_oplog,
                 sync_scheduler,
                 true
             )
@@ -321,7 +321,7 @@ init(Opts) ->
             interval_ms,
             Opts,
             application:get_env(
-                bondy_mst,
+                bondy_oplog,
                 sync_interval_ms,
                 500
             )
@@ -330,7 +330,7 @@ init(Opts) ->
             peer_source,
             Opts,
             application:get_env(
-                bondy_mst,
+                bondy_oplog,
                 peer_source,
                 bondy_oplog_peer_source_static
             )
@@ -339,7 +339,7 @@ init(Opts) ->
             peer_source_opts,
             Opts,
             application:get_env(
-                bondy_mst, peer_source_opts, #{}
+                bondy_oplog, peer_source_opts, #{}
             )
         ),
         dispatch = Dispatch
@@ -354,16 +354,16 @@ handle_call(info, _From, State) ->
         peer_source_opts => State#state.peer_source_opts,
         dispatch_set => State#state.dispatch =/= undefined,
         bootstrap_peer_strategy =>
-            application:get_env(bondy_mst, bootstrap_peer_strategy, first),
+            application:get_env(bondy_oplog, bootstrap_peer_strategy, first),
         max_inflight_bootstraps =>
-            application:get_env(bondy_mst, max_inflight_bootstraps, 4),
+            application:get_env(bondy_oplog, max_inflight_bootstraps, 4),
         current_inflight_bootstraps => inflight_count(),
         bootstrap_retry_base_ms =>
-            application:get_env(bondy_mst, bootstrap_retry_base_ms, 500),
+            application:get_env(bondy_oplog, bootstrap_retry_base_ms, 500),
         bootstrap_retry_max_ms =>
-            application:get_env(bondy_mst, bootstrap_retry_max_ms, 30000),
+            application:get_env(bondy_oplog, bootstrap_retry_max_ms, 30000),
         bootstrap_retry_jitter =>
-            application:get_env(bondy_mst, bootstrap_retry_jitter, true)
+            application:get_env(bondy_oplog, bootstrap_retry_jitter, true)
     },
     {reply, Reply, State};
 handle_call({set_dispatch, Fun}, _From, State) ->
@@ -531,7 +531,7 @@ maybe_dispatch_bootstrap(InstanceId, Peers) ->
 
 %% @private
 maybe_dispatch_bootstrap_cap_check(InstanceId, Peers) ->
-    Cap = application:get_env(bondy_mst, max_inflight_bootstraps, 4),
+    Cap = application:get_env(bondy_oplog, max_inflight_bootstraps, 4),
     Current = inflight_count(),
     case Current >= Cap of
         true ->
@@ -543,7 +543,7 @@ maybe_dispatch_bootstrap_cap_check(InstanceId, Peers) ->
             ok;
         false ->
             Strategy = application:get_env(
-                bondy_mst, bootstrap_peer_strategy, first
+                bondy_oplog, bootstrap_peer_strategy, first
             ),
             Peer = pick_bootstrap_peer(Strategy, InstanceId, Peers),
             dispatch_bootstrap(InstanceId, Peer, Strategy)
@@ -713,12 +713,12 @@ update_backoff(InstanceId, _Reason) ->
 %% Returns the wait in ms for failure-count N. Exponential with
 %% optional uniform jitter in [0.5, 1.5].
 backoff_wait_ms(N) when N >= 1 ->
-    Base = application:get_env(bondy_mst, bootstrap_retry_base_ms, 500),
-    Max = application:get_env(bondy_mst, bootstrap_retry_max_ms, 30000),
+    Base = application:get_env(bondy_oplog, bootstrap_retry_base_ms, 500),
+    Max = application:get_env(bondy_oplog, bootstrap_retry_max_ms, 30000),
     %% 2^31 caps the exponent to avoid overflow on adversarial N.
     Exp = min(N - 1, 30),
     Raw = min(Base bsl Exp, Max),
-    case application:get_env(bondy_mst, bootstrap_retry_jitter, true) of
+    case application:get_env(bondy_oplog, bootstrap_retry_jitter, true) of
         true ->
             %% uniform float in [0.5, 1.5].
             Factor = 0.5 + rand:uniform(),

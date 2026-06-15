@@ -60,7 +60,7 @@ test(Title, Fn) ->
 
 setup() ->
     process_flag(trap_exit, true),
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     Dir = make_tempdir(),
     DbName = list_to_atom(
         "idx_writer_" ++ integer_to_list(erlang:unique_integer([positive]))

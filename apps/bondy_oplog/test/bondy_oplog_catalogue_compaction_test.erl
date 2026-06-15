@@ -38,7 +38,7 @@
 -define(CRDT, bondy_oplog_crdt_lww_register).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
+    {ok, _} = application:ensure_all_started(bondy_db),
     %% Deterministic: no background sync dispatch, no auto-compaction.
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
