@@ -388,7 +388,9 @@ start_peer_node(NameSuffix) ->
     {ok, Peer, Node}.
 
 setup_peer(Node) ->
-    {ok, _} = erpc:call(Node, application, ensure_all_started, [bondy_mst]),
+    %% Start bondy_db on the peer (chain: bondy_db -> bondy_oplog -> bondy_mst);
+    %% starting bondy_mst alone brings up no supervision tree -> noproc.
+    {ok, _} = erpc:call(Node, application, ensure_all_started, [bondy_db]),
     %% Push this test module to the peer so the registration helpers
     %% can run via apply.
     {Mod, Bin, File} = code:get_object_code(?MODULE),

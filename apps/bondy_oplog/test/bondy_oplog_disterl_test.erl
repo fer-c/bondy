@@ -168,9 +168,11 @@ start_peer_node(NameSuffix) ->
     {ok, Peer, Node}.
 
 setup_peer(Node) ->
-    %% Bring the bondy_mst app up on the peer (its code path was
-    %% inherited at startup).
-    {ok, _} = erpc:call(Node, application, ensure_all_started, [bondy_mst]),
+    %% Bring the storage substrate up on the peer (its code path was
+    %% inherited at startup). Start bondy_db, not bondy_mst: the chain is
+    %% bondy_db -> bondy_oplog -> bondy_mst, and bondy_mst alone brings up
+    %% no supervision tree -> noproc.
+    {ok, _} = erpc:call(Node, application, ensure_all_started, [bondy_db]),
     %% Push the test module to the peer so it can run callbacks the
     %% test expects to see there. `-pa` only puts the paths on the
     %% peer; modules still need a `code:ensure_loaded` to be available

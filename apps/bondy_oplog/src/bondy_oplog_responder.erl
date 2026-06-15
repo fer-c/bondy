@@ -5,7 +5,7 @@
 
 -module(bondy_oplog_responder).
 
--behaviour(gen_server).
+-behaviour(partisan_gen_server).
 
 -include_lib("kernel/include/logger.hrl").
 -include("bondy_doc.hrl").
@@ -15,11 +15,20 @@
 ?MODULEDOC("""
 Node-level sync responder for distributed transports.
 
-A single `gen_server` per node, registered locally under the atom
-`?MODULE`. Distributed transport implementations
-(`bondy_oplog_transport_disterl`, partisan-based, gRPC-based, ...)
-deliver incoming sync requests *here*, and the responder dispatches
-them to the right local `bondy_oplog_instance`.
+A single `partisan_gen_server` per node, registered locally under the
+atom `?MODULE`. Distributed transport implementations
+(`bondy_oplog_transport_partisan`, `bondy_oplog_transport_disterl`,
+gRPC-based, ...) deliver incoming sync requests *here*, and the
+responder dispatches them to the right local `bondy_oplog_instance`.
+
+It is a `partisan_gen_server` (not a plain `gen_server`) so that the
+reply to a remote caller routes back over Partisan: a deployment with
+`connect_disterl => false` has no Erlang-distribution link to carry an
+OTP `gen_server:reply/2`, so the responder must speak Partisan on both
+the receive and reply legs. A plain disterl `gen_server:call` still
+reaches it (a `partisan_gen_server` handles the `'$gen_call'` protocol),
+so `bondy_oplog_transport_disterl` keeps working when Erlang
+distribution *is* connected.
 
 ## Why a single responder
 
@@ -34,7 +43,7 @@ addressing primitive distributed transports can rely on.
 Every incoming `{sync_protocol, InstanceId, Request}` call is handled
 by a *short-lived worker process* — the responder's `handle_call`
 spawns the worker, defers the reply (`{noreply, State}`) and the
-worker calls `gen_server:reply/2` once the dispatch completes. The
+worker calls `partisan_gen_server:reply/2` once the dispatch completes. The
 responder's mailbox is therefore freed almost immediately and many
 peers can drive sync requests in parallel.
 
@@ -44,13 +53,14 @@ serialise the entire node's incoming sync rate.
 
 ## Wire shape
 
-A remote transport issues:
+A Partisan transport issues (a disterl transport uses the OTP
+`gen_server:call` equivalent):
 
 ```erlang
-gen_server:call(
-    {bondy_oplog_responder, PeerNode},
+partisan_gen_server:call(
+    {bondy_oplog_responder, Peer},
     {sync_protocol, InstanceId, Request},
-    Timeout
+    [{timeout, Timeout}, {channel, Channel}]
 ).
 ```
 
@@ -69,7 +79,7 @@ Errors propagate as `{error, Reason}` (e.g. `{instance_not_running, Id}`).
 -export([dispatch/2]).
 -export([child_spec/0]).
 
-%% gen_server
+%% partisan_gen_server
 -export([init/1]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
@@ -83,7 +93,7 @@ Errors propagate as `{error, Reason}` (e.g. `{instance_not_running, Id}`).
 -spec start_link() -> {ok, pid()} | {error, term()}.
 
 start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    partisan_gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 -spec child_spec() -> supervisor:child_spec().
 
@@ -181,7 +191,7 @@ dispatch(InstanceId, {get_catalogue_snapshot_next, Cursor}) when
     end.
 
 %% =============================================================================
-%% gen_server CALLBACKS
+%% partisan_gen_server CALLBACKS
 %% =============================================================================
 
 init([]) ->
@@ -210,7 +220,7 @@ handle_call({sync_protocol, InstanceId, Request}, From, State) ->
                     }),
                     {error, {dispatch_failed, R}}
             end,
-        gen_server:reply(From, Reply)
+        partisan_gen_server:reply(From, Reply)
     end),
     {noreply, State};
 handle_call(_Req, _From, State) ->
