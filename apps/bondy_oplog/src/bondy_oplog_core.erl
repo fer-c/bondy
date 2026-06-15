@@ -89,7 +89,9 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 -export_type([range_spec/0]).
 
 -type bucket() :: term().
--type read_opts() :: map().
+-type read_opts() :: #{
+    shard => non_neg_integer()
+}.
 -type read_result() ::
     {Value :: term(), Hlc :: bondy_oplog_hlc:hlc()}
     | undefined.
@@ -152,6 +154,20 @@ read(NS, Index, Key) ->
 read(NS, Index, Bucket, Key) ->
     read(NS, Index, Bucket, Key, #{}).
 
+-doc """
+Bucket-aware point read of a single cell.
+
+The shard is selected by `phash2({Bucket, Key}, ShardCount)` unless the
+caller passes `Opts#{shard => N}`. The override exists for `shard_by =>
+realm` tables: their write hashes by `phash2(Realm, ShardCount)`, so the
+point read MUST be forced onto the same realm-derived shard or it would
+hash `{Bucket, Key}` to a different shard and silently miss. Symmetric
+with `range/5`'s `shard` override.
+
+## Opts
+
+- `shard` — explicit shard override (default: hash of `{Bucket, Key}`).
+""".
 -spec read(
     Namespace :: atom(),
     Index :: atom(),
@@ -160,8 +176,8 @@ read(NS, Index, Bucket, Key) ->
     Opts :: read_opts()
 ) -> read_result() | {error, term()}.
 
-read(NS, Index, Bucket, Key, _Opts) ->
-    case resolve_shard(NS, Index, Bucket, Key) of
+read(NS, Index, Bucket, Key, Opts) ->
+    case resolve_shard(NS, Index, Bucket, Key, Opts) of
         {ok, Entry} ->
             {_NS, _Idx, Shard} = bondy_oplog_core_registry:entry_key(Entry),
             T0 = erlang:monotonic_time(microsecond),
@@ -585,6 +601,19 @@ resolve_shard(NS, Index, Bucket, Key) ->
             end;
         {error, _} = Err ->
             Err
+    end.
+
+%% Point-read shard resolution honouring an explicit `shard` override
+%% (symmetry with `resolve_shard_for_range/5`). A `shard_by => realm`
+%% table forces the point read onto the realm-derived shard via
+%% `Opts#{shard => N}` so write and read address the same shard; without
+%% the override the shard is hashed from `{Bucket, Key}`.
+resolve_shard(NS, Index, Bucket, Key, Opts) ->
+    case maps:get(shard, Opts, undefined) of
+        undefined ->
+            resolve_shard(NS, Index, Bucket, Key);
+        Shard when is_integer(Shard) ->
+            registry_lookup(NS, Index, Shard)
     end.
 
 %% The per-cell projection kernel for a shard: a configured `crdt_module`

@@ -61,6 +61,65 @@
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Enables active anti-entropy (AAE) replication for the bondy_db storage
+%% substrate. When enabled the sync scheduler discovers peers from the live
+%% Partisan cluster membership and runs sync sessions over the dedicated
+%% Partisan AAE channel. Off by default — a single-node or non-replicated
+%% deployment needs no replication, and the substrate is not yet on any
+%% read/write hot path (this governs the plum_db-migration substrate only).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.aae", "bondy_oplog.aae_enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The interval between bondy_db sync scheduler ticks. Each tick the
+%% scheduler asks the peer source for peers and dispatches sync sessions. Only
+%% relevant when `oplog.aae` is on.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.aae.interval", "bondy_oplog.sync_interval_ms", [
+  {datatype, {duration, ms}},
+  {default, "500ms"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The number of peers the bondy_db sync scheduler samples from the
+%% Partisan cluster membership each tick. Only relevant when `oplog.aae` is on.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.aae.fanout", "bondy_oplog.aae_fanout", [
+  {datatype, integer},
+  {default, 3}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Provisions the bondy_db `core` namespace-catalogue tables at boot (see
+%% `bondy_namespace_catalog`). Off by default — during the plum_db→bondy_db
+%% migration nothing reads from bondy_db, so a default node skips provisioning
+%% and continues to serve every read from plum_db. Enable to validate that the
+%% durable core tables provision and appear in `bondy_db:info`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.catalog", "bondy_router.oplog_catalog_enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The shard count for the bondy_db `core` durable database. Applied when
+%% the catalogue is provisioned (`oplog.catalog = on`).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.core.shard_count", "bondy_router.oplog_core_shard_count", [
+  {datatype, integer},
+  {default, 16}
+]}.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc The period in seconds that Bondy will waith for clients to gracefully
 %% terminate their connections when the router is shutting down.
 %% @end

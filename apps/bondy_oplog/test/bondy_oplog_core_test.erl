@@ -31,6 +31,7 @@ read_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         fun shard_for_returns_no_shards_when_unregistered/0,
         fun read_returns_shard_not_registered_for_unknown_shard/0,
+        fun read_honours_shard_override/0,
         fun read_returns_undefined_when_projection_and_overlay_empty/0,
         fun read_returns_projection_value_when_no_overlay/0,
         fun read_merges_overlay_with_projection/0,
@@ -61,6 +62,33 @@ read_returns_shard_not_registered_for_unknown_shard() ->
     ?assertEqual(
         {error, shard_not_registered},
         bondy_oplog_core:read(NS, primary, Key)
+    ),
+    teardown_shard(Setup).
+
+read_honours_shard_override() ->
+    %% G-1: point reads honour an explicit `shard` override, mirroring the
+    %% range path. Register ONLY shard 0 (of 4) and materialise a cell
+    %% there. Pick a Key that hashes to shard 1 (not 0): without the
+    %% override the read hashes to the unregistered shard 1 → error; with
+    %% `shard => 0` it resolves to the registered shard and returns the
+    %% value. This proves the override forces a shard the hash would never
+    %% select — the invariant a `shard_by => realm` table relies on.
+    NS = mk_ns(),
+    {Setup, #{projection := PH}} = setup_shard(NS, primary, 0, 4, lww_register),
+    Key = pick_key_for_shard(NS, primary, 1),
+    Frame = bondy_oplog_test_helpers:frame(
+        lww_register, {set, <<"v">>, 42}, 42
+    ),
+    ok = bondy_oplog_projection_ets:put_batch(PH, [{?B, Key, Frame}]),
+    %% No override: hashes to shard 1 (unregistered).
+    ?assertEqual(
+        {error, shard_not_registered},
+        bondy_oplog_core:read(NS, primary, Key)
+    ),
+    %% Override to shard 0 (registered): resolves there, returns the value.
+    ?assertEqual(
+        {<<"v">>, 42},
+        bondy_oplog_core:read(NS, primary, ?B, Key, #{shard => 0})
     ),
     teardown_shard(Setup).
 

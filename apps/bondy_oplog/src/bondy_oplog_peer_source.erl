@@ -28,9 +28,10 @@ round. The behaviour abstracts:
 - Domain-specific topologies (service mesh, gossip, peer-discovery
   services) — consumers implement their own module.
 
-The library ships two built-ins:
+The library ships three built-ins:
 - `bondy_oplog_peer_source_static`
 - `bondy_oplog_peer_source_sample`
+- `bondy_oplog_peer_source_partisan`
 """).
 
 -callback peers_for(InstanceId :: instance_id(), Opts :: map()) ->

@@ -31,6 +31,7 @@ Read from app env at boot:
 | `peer_source`         | `bondy_oplog_peer_source_static` | Default behaviour module. |
 | `peer_source_opts`    | `#{}`   | Default opts passed to `peers_for/2`. |
 | `sync_dispatch`       | `undefined` | Optional `fun((InstanceId, [PeerId]) -> any())`; defaults to the lifecycle-aware dispatch below. |
+| `sync_session_opts`   | `#{}`   | Opts (`transport`, `transport_opts`) threaded into every session the default dispatch starts. `#{}` ⇒ `bondy_oplog_transport_inline`; a clustered node sets the Partisan transport + AE channel here. |
 | `bootstrap_peer_strategy` | `first` | One of `first \| random \| round_robin`. Selects which peer a `pre_bootstrap` instance bootstraps from. |
 | `max_inflight_bootstraps` | `4`     | Global cap on parallel bootstrap sessions. Dispatches above the cap are skipped (instance stays `pre_bootstrap` → retried next tick). |
 | `bootstrap_retry_base_ms` | `500`   | Initial backoff after a failed bootstrap session. Doubles per consecutive failure up to `bootstrap_retry_max_ms`. |
@@ -566,15 +567,16 @@ dispatch_bootstrap(InstanceId, Peer, Strategy) ->
             strategy => Strategy
         }
     ),
+    SessionOpts = session_opts(),
     {ok, Pid} =
         case Mode of
             catalogue ->
                 bondy_oplog_sync_session:start_bootstrap_catalogue(
-                    InstanceId, Peer, #{}
+                    InstanceId, Peer, SessionOpts
                 );
             single_crdt ->
                 bondy_oplog_sync_session:start_bootstrap(
-                    InstanceId, Peer, #{}
+                    InstanceId, Peer, SessionOpts
                 )
         end,
     track_inflight(Pid, InstanceId),
@@ -750,11 +752,22 @@ backoff_remaining(InstanceId) ->
 
 %% @private
 dispatch_live_sync(InstanceId, Peers) ->
+    SessionOpts = session_opts(),
     lists:foreach(
         fun(Peer) ->
             _ = bondy_oplog_sync_session:start(
-                InstanceId, Peer, #{}
+                InstanceId, Peer, SessionOpts
             )
         end,
         Peers
     ).
+
+%% @private
+%% Session opts threaded into every dispatched bootstrap / live-sync
+%% session, read from app env each tick so a runtime change is picked up
+%% on the next round. The default `#{}` keeps the historical behaviour:
+%% the session falls back to `bondy_oplog_transport_inline`. A clustered
+%% deployment sets `#{transport => bondy_oplog_transport_partisan,
+%% transport_opts => #{channel => ...}}` here (see `bondy_app`).
+session_opts() ->
+    application:get_env(bondy_oplog, sync_session_opts, #{}).

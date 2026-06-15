@@ -41,6 +41,9 @@ init([]) ->
         ?WORKER(bondy_system_gc, [], permanent, 5000),
         %% ets table owner used by several other processes
         ?WORKER(bondy_table_manager, [], permanent, 5000),
+        %% bondy_db namespace catalogue: owns the durable `core` DB + its
+        %% leveled supervisor (gated off by default — see the module).
+        ?WORKER(bondy_namespace_catalog, [], permanent, 5000),
         %% supervisor for event handlers
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         %% gen_event managers

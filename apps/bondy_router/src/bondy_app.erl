@@ -66,6 +66,11 @@ start(_Type, Args) ->
     %% We do not need to start partisan since plum_db will do it
     {ok, _} = application:ensure_all_started(plum_db, permanent),
 
+    %% When oplog anti-entropy is enabled (off by default) wire the sync
+    %% scheduler to Partisan BEFORE the substrate starts, so it reads the
+    %% peer source / transport from app env at init.
+    ok = maybe_setup_oplog_replication(),
+
     %% Start the bondy_db storage substrate (pulls in bondy_oplog, bondy_mst and
     %% leveled). Started here, after plum_db, because the substrate's cluster
     %% replication uses Partisan, which plum_db brings up. Nothing reads from it
@@ -388,6 +393,45 @@ restore_pdb_aae() ->
             ok = plum_db_config:set(aae_enabled, true),
             ?LOG_NOTICE(#{
                 description => "Active anti-entropy (AAE) re-enabled"
+            }),
+            ok;
+        false ->
+            ok
+    end.
+
+%% @private
+%% Wires the bondy_oplog sync scheduler to the Partisan cluster when oplog
+%% anti-entropy is enabled (`oplog.aae`, off by default). Sets the env the
+%% scheduler reads at init: peers from live Partisan membership
+%% (`bondy_oplog_peer_source_partisan`) and sessions over the Partisan
+%% transport on the dedicated AE channel. A no-op when disabled — the
+%% scheduler keeps its defaults (static no-peer source + inline transport),
+%% so a non-clustered or replication-off node boots exactly as before.
+maybe_setup_oplog_replication() ->
+    case application:get_env(bondy_oplog, aae_enabled, false) of
+        true ->
+            Fanout = application:get_env(bondy_oplog, aae_fanout, 3),
+            Channel = bondy_config:get(aae_channel),
+            ok = application:set_env(
+                bondy_oplog, peer_source, bondy_oplog_peer_source_partisan
+            ),
+            ok = application:set_env(
+                bondy_oplog, peer_source_opts, #{count => Fanout}
+            ),
+            ok = application:set_env(
+                bondy_oplog,
+                sync_session_opts,
+                #{
+                    transport => bondy_oplog_transport_partisan,
+                    transport_opts => #{channel => Channel}
+                }
+            ),
+            ?LOG_NOTICE(#{
+                description =>
+                    "Oplog anti-entropy enabled; sync scheduler wired to "
+                    "the Partisan transport and membership peer source",
+                channel => Channel,
+                fanout => Fanout
             }),
             ok;
         false ->

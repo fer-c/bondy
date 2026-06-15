@@ -41,7 +41,8 @@ sync_scheduler_test_() ->
         fun no_dispatch_when_dispatch_unset/0,
         fun peer_source_supplies_peers/0,
         fun static_source_returns_configured_peers/0,
-        fun sample_source_picks_subset/0
+        fun sample_source_picks_subset/0,
+        fun partisan_source_excludes_self/0
     ]}.
 
 trigger_invokes_dispatch() ->
@@ -156,6 +157,24 @@ sample_source_picks_subset() ->
         <<"i">>, #{pool => [1, 2, 3], count => 99}
     ),
     ?assertEqual([1, 2, 3], lists:sort(All)).
+
+partisan_source_excludes_self() ->
+    %% The partisan source reads live membership and removes the local
+    %% node, so a single-node test cluster (members = [self]) yields an
+    %% empty peer list. This pins both the self-exclusion and the
+    %% members → sample delegation without needing a real cluster.
+    ?assertEqual(
+        [partisan:node()],
+        element(2, partisan_peer_service:members())
+    ),
+    ?assertEqual(
+        [],
+        bondy_oplog_peer_source_partisan:peers_for(<<"i">>, #{})
+    ),
+    ?assertEqual(
+        [],
+        bondy_oplog_peer_source_partisan:peers_for(<<"i">>, #{count => 5})
+    ).
 
 %% Helpers
 
