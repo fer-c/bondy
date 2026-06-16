@@ -40,3 +40,4 @@ examples/custom_config/etc/generated/
 apps/bondy_cbor/bench/output/*
 /.vscode/settings.json
 /.env
+/etc
