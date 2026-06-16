@@ -167,8 +167,9 @@ provision_all() ->
     ?assertEqual(undefined, ?CAT:table(bondy_realm)).
 
 
-%% Default (flag off): only the migrated domain's table (api_gateway) is opened;
-%% the core DB still comes up to host it, but not-yet-migrated tables stay shut.
+%% Default (flag off): only the migrated domains' tables (api_gateway,
+%% bondy_bridge_relay) are opened; the core DB still comes up to host them, but
+%% not-yet-migrated tables stay shut.
 migrated_only() ->
     Tmp = make_tmpdir(),
     set_env(false, 1, Tmp),
@@ -177,6 +178,8 @@ migrated_only() ->
         ?assert(?CAT:is_open()),
         ?assertMatch(#{entity_type := api_gateway, db_name := core},
             ?CAT:table(api_gateway)),
+        ?assertMatch(#{entity_type := bondy_bridge_relay, db_name := core},
+            ?CAT:table(bondy_bridge_relay)),
         %% Not-yet-migrated core tables are NOT opened.
         ?assertEqual(undefined, ?CAT:table(bondy_realm)),
         ?assertEqual(undefined, ?CAT:table(security_user_grants)),

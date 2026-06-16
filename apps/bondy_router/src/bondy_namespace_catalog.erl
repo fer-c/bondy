@@ -39,7 +39,8 @@ Not-yet-migrated tables stay on `plum_db` and are not opened — unless
 `bondy_router.oplog_catalog_enabled` (`oplog.catalog`) is set, which provisions
 **all** declared core tables too (for validating a future domain's provisioning
 before its cut-over). So a default node opens exactly the migrated tables
-(currently `api_gateway`) and serves every other read from `plum_db`.
+(currently `api_gateway` and `bondy_bridge_relay`) and serves every other read
+from `plum_db`.
 
 ## Lifecycle
 
@@ -164,7 +165,12 @@ tables() ->
         %% prioritised over listing / range (mirrors the plum_db rationale).
         #{name => ?PLUM_DB_TICKET_TAB,       db => core, durability => durable, shard_by => key,   fold => lww},
         #{name => ?PLUM_DB_OAUTH_TOKEN_TAB,  db => core, durability => durable, shard_by => key,   fold => lww},
-        #{name => bondy_bridge_relay,        db => core, durability => durable, shard_by => realm, fold => lww},
+        %% bridge_relay — second domain cut over to bondy_db (§11.4): always
+        %% provisioned. Storage-only (no `publish`): bridge config has no
+        %% change reactor — `bondy_bridge_relay_manager` reads it once at boot
+        %% and runs only its OWN node's bridges (`nodestring` filter), so it
+        %% needs no cluster-wide change notification.
+        #{name => bondy_bridge_relay,        db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
 
         %% registry — ephemeral (ETS, memory topology); opened at §11.4. The
         %% fold is the presence-FSM, co-designed with the routing redesign (D-7).

@@ -14,6 +14,17 @@ them during startup.
 
 A transient bridge is restarted only if it terminated abnormally. In case of
 a node crash or manually stopped and re-started they will not be restarted.
+
+## Storage
+
+Permanent bridge configurations are persisted in the bondy_db
+`bondy_bridge_relay` core table (design §11.4 — the second domain cut over from
+plum_db), keyed by bridge name, with the config map carried in an
+`lww_register` cell. The table is provisioned by `bondy_namespace_catalog`.
+Storage is node-local: `bondy_bridge_relay_manager` reads the configs once at
+startup and runs only the bridges tagged with this node's `nodestring`, so the
+table needs no cluster-wide change notification (cross-node replication awaits
+bondy_db anti-entropy, `oplog.aae`).
 """.
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -21,7 +32,13 @@ a node crash or manually stopped and re-started they will not be restarted.
 
 -define(TYPE, bridge_relay).
 -define(VERSION, <<"1.0">>).
--define(PLUMDB_PREFIX, {?MODULE, all}).
+%% Permanent bridge configs live in the bondy_db `bondy_bridge_relay` core
+%% table (design §11.4 — the second domain cut over from plum_db). The store is
+%% a flat, name-keyed keyspace, so a single fixed bucket is used. The bridge map
+%% is stored directly in an `lww_register` cell (the substrate serialises terms;
+%% no manual encoding); `clear` deletes (non-terminal, so a later `add`
+%% reanimates). The catalogue (`bondy_namespace_catalog`) provisions the table.
+-define(BUCKET, <<>>).
 
 -define(BRIDGE_RELAY_SPEC, #{
     name => #{
@@ -573,13 +590,14 @@ add(#{type := ?TYPE, name := Name} = Bridge0) ->
             {error, already_exists};
         false ->
             Bridge = Bridge0#{nodestring => bondy_config:nodestring()},
-            plum_db:put(?PLUMDB_PREFIX, Name, Bridge)
+            bondy_db:apply(table(), ?BUCKET, Name, {set, Bridge})
     end.
 
 -spec remove(Name :: binary()) -> ok.
 
 remove(Name) ->
-    plum_db:delete(?PLUMDB_PREFIX, Name).
+    ok = bondy_db:apply(table(), ?BUCKET, Name, clear),
+    ok.
 
 -spec exists(Name :: binary()) -> boolean().
 
@@ -592,21 +610,18 @@ exists(Name) ->
 -spec lookup(Name :: binary()) -> {ok, t()} | {error, not_found}.
 
 lookup(Name) ->
-    case plum_db:get(?PLUMDB_PREFIX, Name) of
-        undefined ->
-            {error, not_found};
-        Value when is_map(Value) ->
-            {ok, Value}
+    case bondy_db:read(table(), ?BUCKET, Name) of
+        {ok, {Value, _Hlc}} when is_map(Value) ->
+            {ok, Value};
+        {error, not_found} ->
+            {error, not_found}
     end.
 
 -spec list() -> [t()].
 
 list() ->
-    PDBOpts = [
-        {resolver, lww},
-        {remove_tombstones, true}
-    ],
-    [V || {_, V} <- plum_db:match(?PLUMDB_PREFIX, '_', PDBOpts)].
+    {ok, Rows} = bondy_db:list(table(), ?BUCKET),
+    [Value || {_Name, Value, _Hlc} <- Rows, is_map(Value)].
 
 -spec to_external(Bridge :: t()) -> map().
 
@@ -625,6 +640,17 @@ to_external(Bridge) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% The open bondy_db `bondy_bridge_relay` table handle. Raises if the catalogue
+%% has not provisioned it — after the §11.4 cut-over the table is a hard
+%% dependency. The catalogue (a `bondy_sup` child) opens it before
+%% `bondy_bridge_relay_manager` (a later child) reads bridge config at boot.
+table() ->
+    case bondy_namespace_catalog:table(bondy_bridge_relay) of
+        undefined -> error(bridge_relay_table_unavailable);
+        Table -> Table
+    end.
 
 %% @private
 type_and_version(Map) ->
