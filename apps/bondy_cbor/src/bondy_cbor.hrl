@@ -105,6 +105,16 @@
 -define(TAG_SELF_DESCRIBE, 55799).
 
 %%--------------------------------------------------------------------
+%% DAG-CBOR (IPLD) constants
+%% https://ipld.io/specs/codecs/dag-cbor/spec/
+%%--------------------------------------------------------------------
+
+% CID / IPLD link tag (the only tag permitted by DAG-CBOR)
+-define(TAG_CID, 42).
+% Multibase identity prefix prepended to the binary CID inside tag 42
+-define(MULTIBASE_IDENTITY, 16#00).
+
+%%--------------------------------------------------------------------
 %% Pre-encoded bytes for common values
 %%--------------------------------------------------------------------
 
