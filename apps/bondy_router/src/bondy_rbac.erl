@@ -35,6 +35,18 @@ Usernames and group names are stored in lower case. All functions in this
 module are case sensitice so when using the functions in this module make
 sure the inputs you provide are in lowercase to. If you need to convert your
 input to lowercase use `string:casefold/1`.
+
+### Storage
+
+Grants are stored in the bondy_db `security_user_grants` and
+`security_group_grants` core tables (design §11.4 — seventh domain cut over
+from plum_db). The store is realm-sharded; the compound `{Rolename, Resource}`
+key is encoded to a binary with `term_to_binary/1`. That encoding is not
+order-preserving and the match was always on the `Rolename` (the `Resource`
+component is a wildcard), so the `plum_db:match` pattern scans become a
+realm scan (`bondy_db:list/2`) that decodes each key and filters by `Rolename`.
+Grants are storage-only (no change reactor): there is nothing to notify on a
+grant/revoke beyond the RBAC context epoch, which callers refresh on read.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -99,15 +111,6 @@ end#{
         datatype => {in, [?EXACT_MATCH, ?PREFIX_MATCH, ?WILDCARD_MATCH]}
     }
 }).
-
--define(USER_GRANTS_PREFIX(RealmUri), {?PLUM_DB_USER_GRANT_TAB, RealmUri}).
--define(GROUP_GRANTS_PREFIX(RealmUri), {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}).
--define(PLUMDB_PREFIX(RealmUri, Type),
-    case Type of
-        user -> ?USER_GRANTS_PREFIX(RealmUri);
-        group -> ?GROUP_GRANTS_PREFIX(RealmUri)
-    end
-).
 
 -ifdef(TEST).
 
@@ -484,27 +487,10 @@ revoke(RealmUri, Data) when is_map(Data) ->
     revoke(RealmUri, validate(Data)).
 
 revoke_user(RealmUri, Username) ->
-    Prefix = ?USER_GRANTS_PREFIX(RealmUri),
-    plum_db:foreach(
-        fun({Key, _Value}) ->
-            %% destructive iteration is allowed
-            ok = plum_db:delete(Prefix, Key)
-        end,
-        Prefix,
-        [{match, {Username, '_'}}, {resolver, lww}]
-    ).
+    revoke_role_grants(grant_table(user), RealmUri, Username).
 
 revoke_group(RealmUri, Name) ->
-    Prefix = ?GROUP_GRANTS_PREFIX(RealmUri),
-
-    plum_db:foreach(
-        fun({Key, _Value}) ->
-            %% destructive iteration is allowed
-            ok = plum_db:delete(Prefix, Key)
-        end,
-        Prefix,
-        [{match, {Name, '_'}}, {resolver, lww}]
-    ).
+    revoke_role_grants(grant_table(group), RealmUri, Name).
 
 -doc """
 Returns the local grants assigned in realm `RealmUri`. This function does not
@@ -579,21 +565,8 @@ check_permission(
 -spec remove_all(RealmUri :: uri(), Opts :: map()) -> ok.
 
 remove_all(RealmUri, _Opts) ->
-    Opts = [{remove_tombstones, true}, {keys_only, true}],
-
-    Users = ?PLUMDB_PREFIX(RealmUri, user),
-    ok = plum_db:foreach(
-        fun(Key) -> plum_db:delete(Users, Key) end,
-        Users,
-        Opts
-    ),
-
-    Groups = ?PLUMDB_PREFIX(RealmUri, group),
-    ok = plum_db:foreach(
-        fun(Key) -> plum_db:delete(Groups, Key) end,
-        Groups,
-        Opts
-    ).
+    ok = clear_all_grants(grant_table(user), RealmUri),
+    ok = clear_all_grants(grant_table(group), RealmUri).
 
 -doc "To list the grants for a realm, a role (group or user) or a resource.".
 -spec externalize_grant(grant()) -> map().
@@ -978,13 +951,15 @@ grant(RealmUri, RoleList0, Resources, Permissions, Opts) ->
 do_grant([], _, _, _, _) ->
     ok;
 do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
+    Table = grant_table(RoleType),
 
     ok = lists:foreach(
         fun(Resource) ->
+            Key = {Rolename, Resource},
+
             %% We store the list of permissions as the value
             Existing = bondy_stdlib:or_else(
-                plum_db:get(Prefix, {Rolename, Resource}),
+                do_get(Table, RealmUri, Key),
                 []
             ),
 
@@ -994,8 +969,7 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
             ),
 
             %% We finally store the updated grant
-            Key = {Rolename, Resource},
-            ok = store(Prefix, Key, Permissions1, Opts)
+            ok = store(Table, RealmUri, Key, Permissions1, Opts)
         end,
         Resources
     ),
@@ -1003,23 +977,12 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
     do_grant(T, RealmUri, Resources, Permissions0, Opts).
 
 %% @private
-store(Prefix, Key, Permissions, #{rebase := true} = Opts) ->
-    ActorId = maps:get(actor_id, Opts, undefined),
-    Object = bondy_utils:rebase_object(Permissions, ActorId),
-
-    case plum_db:dirty_put(Prefix, Key, Object, []) of
-        ok ->
-            ok;
-        {error, Reason} ->
-            throw(Reason)
-    end;
-store(Prefix, Key, Permissions, _) ->
-    case plum_db:put(Prefix, Key, Permissions) of
-        ok ->
-            ok;
-        {error, Reason} ->
-            throw(Reason)
-    end.
+%% Both the historical `rebase` (dirty_put) and normal paths collapse to a
+%% single lww write: a fresh bondy_db write already dominates by HLC, and
+%% grants carry no lifecycle side-effects, so the `rebase`/`actor_id` opts no
+%% longer apply.
+store(Table, RealmUri, Key, Permissions, _Opts) ->
+    bondy_db:apply(Table, RealmUri, encode_key(Key), {set, Permissions}).
 
 -doc "Revoke permissions to one or more roles".
 -spec revoke(
@@ -1075,12 +1038,13 @@ revoke(RealmUri, RoleList, Resources, Permissions) ->
 do_revoke([], _, _, _) ->
     ok;
 do_revoke([{Rolename, RoleType} | Roles], RealmUri, Resources, Permissions) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
+    Table = grant_table(RoleType),
 
     ok = lists:foreach(
         fun(Resource) ->
+            Key = {Rolename, Resource},
             %% check if there is currently a GRANT we can revoke
-            case plum_db:get(Prefix, {Rolename, Resource}) of
+            case do_get(Table, RealmUri, Key) of
                 undefined ->
                     %% can't REVOKE what wasn't GRANTED
                     ok;
@@ -1090,14 +1054,15 @@ do_revoke([{Rolename, RoleType} | Roles], RealmUri, Resources, Permissions) ->
                      || X <- GrantedPerms, not lists:member(X, Permissions)
                     ],
 
-                    %% TODO - do deletes here, once cluster metadata supports it for
-                    %% real, if NewPerms == []
-
                     case NewPerms of
                         [] ->
-                            plum_db:delete(Prefix, {Rolename, Resource});
+                            bondy_db:apply(
+                                Table, RealmUri, encode_key(Key), clear
+                            );
                         _ ->
-                            plum_db:put(Prefix, {Rolename, Resource}, NewPerms)
+                            bondy_db:apply(
+                                Table, RealmUri, encode_key(Key), {set, NewPerms}
+                            )
                     end
             end
         end,
@@ -1300,12 +1265,25 @@ find_grants(Realm, KeyPattern, Type) ->
 %% @private
 find_grants(undefined, _, _, _) ->
     [];
-find_grants(Realm, KeyPattern, Type, Opts0) ->
-    Opts = lists:merge(
-        lists:sort([{resolver, lww}, {remove_tombstones, true}]),
-        lists:sort(Opts0)
-    ),
-    plum_db:match(?PLUMDB_PREFIX(Realm, Type), KeyPattern, Opts).
+find_grants(Realm, KeyPattern, Type, _Opts) ->
+    %% `term_to_binary/1` keys are not order-preserving and the match is always
+    %% on the `Rolename` (the `Resource` component is a wildcard), so we scan the
+    %% realm and filter the decoded keys rather than running a key-prefix range.
+    Table = grant_table(Type),
+    {ok, Rows} = bondy_db:list(Table, Realm),
+    lists:filtermap(
+        fun
+            ({EncKey, Permissions, _Hlc}) when is_list(Permissions) ->
+                Key = decode_key(EncKey),
+                case grant_key_matches(Key, KeyPattern) of
+                    true -> {true, {Key, Permissions}};
+                    false -> false
+                end;
+            (_) ->
+                false
+        end,
+        Rows
+    ).
 
 %% @private
 concat_role(user, Name) ->
@@ -1330,6 +1308,79 @@ group_grants(Grants) ->
         {Resource, lists:usort(lists:flatten(ListOfLists))}
      || {Resource, ListOfLists} <- dict:to_list(D)
     ].
+
+%% =============================================================================
+%% PRIVATE: STORAGE
+%% =============================================================================
+
+%% @private
+%% Resolves the open bondy_db grant table for a role type. Raises if the
+%% catalogue has not provisioned it yet.
+grant_table(user) ->
+    grant_table(?PLUM_DB_USER_GRANT_TAB);
+grant_table(group) ->
+    grant_table(?PLUM_DB_GROUP_GRANT_TAB);
+grant_table(EntityType) ->
+    case bondy_namespace_catalog:table(EntityType) of
+        undefined ->
+            error(security_grants_table_unavailable);
+        Table ->
+            Table
+    end.
+
+%% @private
+%% Reads the permissions list for a grant key, or `undefined` (mirrors the old
+%% `plum_db:get/2`). Cleared cells read back as `not_found`.
+do_get(Table, RealmUri, Key) ->
+    case bondy_db:read(Table, RealmUri, encode_key(Key)) of
+        {ok, {Value, _Hlc}} ->
+            Value;
+        {error, not_found} ->
+            undefined
+    end.
+
+%% @private
+%% Clears every grant whose key's `Rolename` matches `Rolename` within the realm.
+revoke_role_grants(Table, RealmUri, Rolename) ->
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [
+        bondy_db:apply(Table, RealmUri, EncKey, clear)
+     || {EncKey, _V, _Hlc} <- Rows,
+        grant_key_matches(decode_key(EncKey), {Rolename, '_'})
+    ],
+    ok.
+
+%% @private
+%% Clears every grant in the realm's table.
+clear_all_grants(Table, RealmUri) ->
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [
+        bondy_db:apply(Table, RealmUri, EncKey, clear)
+     || {EncKey, _V, _Hlc} <- Rows
+    ],
+    ok.
+
+%% @private
+%% The grant store key is the compound `{Rolename, Resource}`; bondy_db keys are
+%% binaries, so encode deterministically (the same tuple → the same bytes).
+encode_key({_Rolename, _Resource} = Key) ->
+    term_to_binary(Key).
+
+%% @private
+%% Decodes a store key written by `encode_key/1`. `[safe]` is sufficient — the
+%% atoms in a grant key (`all`, `anonymous`, `any`) already exist.
+decode_key(Bin) when is_binary(Bin) ->
+    binary_to_term(Bin, [safe]).
+
+%% @private
+%% Whether a decoded grant key matches a (Rolename, '_') / '_' match pattern.
+%% The `Resource` component is always wildcarded — matching is on `Rolename`.
+grant_key_matches(_Key, '_') ->
+    true;
+grant_key_matches({Rolename, _Resource}, {Rolename, '_'}) ->
+    true;
+grant_key_matches(_Key, _Pattern) ->
+    false.
 
 % on_grant(RealmUri, RoleType, Rolename) ->
 %     ok = bondy_event_manager:notify(

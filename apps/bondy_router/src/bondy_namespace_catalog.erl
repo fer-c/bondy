@@ -40,8 +40,9 @@ Not-yet-migrated tables stay on `plum_db` and are not opened — unless
 **all** declared core tables too (for validating a future domain's provisioning
 before its cut-over). So a default node opens exactly the migrated tables
 (currently `api_gateway`, `bondy_bridge_relay`, `bondy_ticket`,
-`bondy_oauth_token`, `security_users` and `security_groups`) and serves every
-other read from `plum_db`.
+`bondy_oauth_token`, `security_users`, `security_groups`,
+`security_user_grants`, `security_group_grants` and `security_sources`)
+and serves every other read from `plum_db`.
 
 ## Lifecycle
 
@@ -164,9 +165,21 @@ tables() ->
         %% oplog.aae phase — its `aw` fold (observed-remove, design §3 table 5b)
         %% only matters under concurrent multi-node member edits.
         #{name => security_group_members,    db => core, durability => durable, shard_by => realm, fold => aw},
-        #{name => ?PLUM_DB_GROUP_GRANT_TAB,  db => core, durability => durable, shard_by => realm, fold => mv},
-        #{name => ?PLUM_DB_USER_GRANT_TAB,   db => core, durability => durable, shard_by => realm, fold => mv},
-        #{name => ?PLUM_DB_SOURCE_TAB,       db => core, durability => durable, shard_by => realm, fold => mv},
+        %% security_{group,user}_grants — seventh domain cut over to bondy_db
+        %% (§11.4): always provisioned, storage-only (no `publish` — grants carry
+        %% no lifecycle side-effects). Declared `mv` (sibling-preserving) but cut
+        %% as `lww` per the CRDT-fork resolution: mv only differs from lww under
+        %% concurrent multi-node grant edits, which need AAE (currently off), so
+        %% honouring mv is deferred to the oplog.aae phase (same deferral as the
+        %% dropped ticket resolver). Compound `{Rolename, Resource}` keys are
+        %% `term_to_binary`-encoded by `bondy_rbac`.
+        #{name => ?PLUM_DB_GROUP_GRANT_TAB,  db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        #{name => ?PLUM_DB_USER_GRANT_TAB,   db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        %% security_sources — eighth domain cut over to bondy_db (§11.4):
+        %% storage-only, same lww-defer as grants (declared mv → cut lww;
+        %% honouring mv deferred to oplog.aae). Compound `{Username, AMask,
+        %% Authmethod}` keys are `term_to_binary`-encoded by `bondy_rbac_source`.
+        #{name => ?PLUM_DB_SOURCE_TAB,       db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
         %% api_gateway — first domain cut over to bondy_db (§11.4): always
         %% provisioned, and publishes change events so the cowboy-dispatch
         %% reactor rebuilds on local + AE-replicated spec writes.

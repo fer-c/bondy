@@ -48,10 +48,12 @@ declarations_test_() ->
                 fun(S) -> maps:get(shard_by, S) =:= realm end, Others
             ))
         end},
-        {"grants + source are mv folds", fun() ->
-            ?assertEqual(mv, fold(ByName, security_group_grants)),
-            ?assertEqual(mv, fold(ByName, security_user_grants)),
-            ?assertEqual(mv, fold(ByName, security_sources))
+        {"grants + source cut as lww", fun() ->
+            %% grants + source declared mv but cut as lww per the CRDT-fork
+            %% resolution (honouring mv is deferred to oplog.aae).
+            ?assertEqual(lww, fold(ByName, security_group_grants)),
+            ?assertEqual(lww, fold(ByName, security_user_grants)),
+            ?assertEqual(lww, fold(ByName, security_sources))
         end},
         {"registry tables are presence folds, ephemeral", fun() ->
             ?assert(lists:all(
@@ -138,12 +140,9 @@ provision_all() ->
         %% Registry tables are declared but NOT opened here.
         ?assertEqual(undefined, ?CAT:table(bondy_registration)),
         ?assertEqual(undefined, ?CAT:table(bondy_subscription)),
-        %% Fold → CRDT wiring: mv tables carry the mv_register CRDT, the
-        %% membership table the aw_map CRDT; lww tables resolve to lww_register.
-        ?assertMatch(
-            #{crdt_module := bondy_oplog_crdt_mv_register},
-            bondy_db:info(?CAT:table(security_user_grants))
-        ),
+        %% Fold → CRDT wiring: the membership table carries the aw_map CRDT;
+        %% lww tables resolve to lww_register. (No mv table is provisioned —
+        %% grants + sources were cut as lww per the CRDT-fork resolution.)
         ?assertMatch(
             #{crdt_module := bondy_oplog_crdt_aw_map},
             bondy_db:info(?CAT:table(security_group_members))
@@ -151,6 +150,10 @@ provision_all() ->
         ?assertMatch(
             #{fold_module := lww_register},
             bondy_db:info(?CAT:table(bondy_realm))
+        ),
+        ?assertMatch(
+            #{fold_module := lww_register},
+            bondy_db:info(?CAT:table(security_sources))
         ),
         %% info/0 summary.
         Info = ?CAT:info(),
@@ -169,7 +172,8 @@ provision_all() ->
 
 %% Default (flag off): only the migrated domains' tables (api_gateway,
 %% bondy_bridge_relay, bondy_ticket, bondy_oauth_token, security_users,
-%% security_groups) are opened; the core DB still comes up to host them, but
+%% security_groups, security_user_grants, security_group_grants,
+%% security_sources) are opened; the core DB still comes up to host them, but
 %% not-yet-migrated tables stay shut.
 migrated_only() ->
     Tmp = make_tmpdir(),
@@ -189,9 +193,14 @@ migrated_only() ->
             ?CAT:table(security_users)),
         ?assertMatch(#{entity_type := security_groups, db_name := core},
             ?CAT:table(security_groups)),
+        ?assertMatch(#{entity_type := security_user_grants, db_name := core},
+            ?CAT:table(security_user_grants)),
+        ?assertMatch(#{entity_type := security_group_grants, db_name := core},
+            ?CAT:table(security_group_grants)),
+        ?assertMatch(#{entity_type := security_sources, db_name := core},
+            ?CAT:table(security_sources)),
         %% Not-yet-migrated core tables are NOT opened.
         ?assertEqual(undefined, ?CAT:table(bondy_realm)),
-        ?assertEqual(undefined, ?CAT:table(security_user_grants)),
         %% security_group_members reverse-index stays dormant (members live on
         %% the user side until the oplog.aae phase).
         ?assertEqual(undefined, ?CAT:table(security_group_members)),

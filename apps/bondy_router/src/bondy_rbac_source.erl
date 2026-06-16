@@ -10,6 +10,16 @@ Usernames and group names are stored in lower case. All functions in this
 module are case sensitice so when using the functions in this module make
 sure the inputs you provide are in lowercase to. If you need to convert your
 input to lowercase use `string:casefold/1`.
+
+### Storage
+
+Sources are stored in the bondy_db `security_sources` core table (design §11.4
+— eighth domain cut over from plum_db). The store is realm-sharded; the compound
+`{Username, AMask, Authmethod}` key is encoded to a binary with
+`term_to_binary/1`. That encoding is not order-preserving and the match is on
+the `Username` (and optionally the `AMask`) — never the `Authmethod` alone — so
+the `plum_db:match` patterns become a realm scan (`bondy_db:list/2`) that decodes
+each key and filters. Storage-only (no change reactor).
 """.
 -include_lib("partisan/include/partisan_util.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -61,8 +71,6 @@ input to lowercase use `string:casefold/1`.
 }).
 
 -define(VERSION, <<"1.1">>).
--define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_SOURCE_TAB, RealmUri}).
--define(FOLD_OPTS, [{resolver, lww}]).
 
 -record(source_assignment, {
     usernames :: [binary() | all | anonymous],
@@ -210,14 +218,14 @@ remove(RealmUri, Usernames0, CIDR0) when is_list(Usernames0) ->
                 ?ERROR(badarg, [RealmUri, Usernames, CIDR0], invalid_cidr)
         end,
 
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
+    Table = table(),
 
     UserSources = lists:flatten([
         do_match(RealmUri, Username, AMask)
      || Username <- Usernames
     ]),
     _ = [
-        plum_db:delete(Prefix, Key)
+        bondy_db:apply(Table, RealmUri, encode_key(Key), clear)
      || {Key, _} <- UserSources
     ],
     ok;
@@ -230,31 +238,28 @@ Removes all sources from all users in realm identifier by uri `RealmUri`.
 -spec remove_all(RealmUri :: uri()) -> ok.
 
 remove_all(RealmUri) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
-    Opts = [{remove_tombstones, true}, {keys_only, true}],
-
-    plum_db:foreach(
-        fun(Key) -> plum_db:delete(Prefix, Key) end,
-        Prefix,
-        Opts
-    ).
+    Table = table(),
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [
+        bondy_db:apply(Table, RealmUri, EncKey, clear)
+     || {EncKey, _V, _Hlc} <- Rows
+    ],
+    ok.
 
 -spec remove_all(RealmUri :: uri(), Username :: binary()) -> ok.
 
 remove_all(RealmUri, Username) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
-    Opts = [{remove_tombstones, true}, {keys_only, true}],
-
-    plum_db:foreach(
-        fun
-            ({Id, _Mask, _Method} = Key) when Id == Username ->
-                plum_db:delete(Prefix, Key);
-            (_) ->
-                ok
-        end,
-        Prefix,
-        Opts
-    ).
+    Table = table(),
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [
+        bondy_db:apply(Table, RealmUri, EncKey, clear)
+     || {EncKey, _V, _Hlc} <- Rows,
+        case decode_key(EncKey) of
+            {Id, _Mask, _Method} -> Id == Username;
+            _ -> false
+        end
+    ],
+    ok.
 
 -doc """
 Returns all the sources for user including the ones for special use 'all'.
@@ -325,27 +330,14 @@ list(RealmUri) ->
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
 list(RealmUri, Opts) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
+    Sources = [from_term(Term) || Term <- scan(RealmUri)],
 
-    FoldOpts =
-        case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
-            undefined ->
-                ?FOLD_OPTS;
-            Limit ->
-                [{limit, Limit} | ?FOLD_OPTS]
-        end,
-
-    plum_db:fold(
-        fun
-            ({_, ?TOMBSTONE}, Acc) ->
-                Acc;
-            ({_, _} = Term, Acc) ->
-                [from_term(Term) | Acc]
-        end,
-        [],
-        Prefix,
-        FoldOpts
-    ).
+    case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
+        undefined ->
+            Sources;
+        Limit ->
+            lists:sublist(Sources, Limit)
+    end.
 
 -doc "Returns the external representation of the source `Source`.".
 -spec to_external(Source :: t()) -> external().
@@ -389,18 +381,12 @@ do_add(RealmUri, Usernames, #{type := source} = Source, Opts) ->
     ),
     {ok, Source}.
 
-store(RealmUri, Key, Source, #{rebase := true} = Opts) ->
-    ActorId = maps:get(actor_id, Opts, undefined),
-    Object = bondy_utils:rebase_object(Source, ActorId),
-
-    case plum_db:dirty_put(?PLUMDB_PREFIX(RealmUri), Key, Object, []) of
-        ok ->
-            {ok, Source};
-        Error ->
-            Error
-    end;
-store(RealmUri, Key, Source, _) ->
-    case plum_db:put(?PLUMDB_PREFIX(RealmUri), Key, Source) of
+%% Both the historical `rebase` (dirty_put) and normal paths collapse to a
+%% single lww write: a fresh bondy_db write already dominates by HLC, and
+%% sources carry no lifecycle side-effects, so the `rebase`/`actor_id` opts no
+%% longer apply.
+store(RealmUri, Key, Source, _Opts) ->
+    case bondy_db:apply(table(), RealmUri, encode_key(Key), {set, Source}) of
         ok ->
             {ok, Source};
         Error ->
@@ -420,37 +406,33 @@ Example:
 ```
 """.
 do_match(RealmUri, Username) ->
-    Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
-    ProtoSources =
-        case bondy_realm:prototype_uri(RealmUri) of
-            undefined ->
-                [];
-            ProtoUri ->
-                %% TODO when we enable assigned to groups here we need to also
-                %% union the sources assigned to the group in the proto
-                plum_db:match(?PLUMDB_PREFIX(ProtoUri), {all, '_', '_'}, Opts)
-        end,
-    Sources = plum_db:match(
-        ?PLUMDB_PREFIX(RealmUri), {Username, '_', '_'}, Opts
-    ),
-    lists:append(Sources, ProtoSources).
+    Sources = [
+        KV
+     || {{U, _Mask, _Method}, _} = KV <- scan(RealmUri), U == Username
+    ],
+    lists:append(Sources, proto_all_sources(RealmUri)).
 
 %% @private
 do_match(RealmUri, Username, AMask) ->
-    Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
-    ProtoSources =
-        case bondy_realm:prototype_uri(RealmUri) of
-            undefined ->
-                [];
-            ProtoUri ->
-                %% TODO when we enable assigned to groups here we need to also
-                %% union the sources assigned to the group in the proto
-                plum_db:match(?PLUMDB_PREFIX(ProtoUri), {all, '_', '_'}, Opts)
-        end,
-    Sources = plum_db:match(
-        ?PLUMDB_PREFIX(RealmUri), {Username, AMask, '_'}, Opts
-    ),
-    lists:append(Sources, ProtoSources).
+    Sources = [
+        KV
+     || {{U, Mask, _Method}, _} = KV <- scan(RealmUri),
+        U == Username,
+        Mask == AMask
+    ],
+    lists:append(Sources, proto_all_sources(RealmUri)).
+
+%% @private
+%% The prototype realm's `all` sources, unioned into a realm's match results.
+%% TODO when we enable assigned to groups here we need to also union the
+%% sources assigned to the group in the proto.
+proto_all_sources(RealmUri) ->
+    case bondy_realm:prototype_uri(RealmUri) of
+        undefined ->
+            [];
+        ProtoUri ->
+            [KV || {{all, _Mask, _Method}, _} = KV <- scan(ProtoUri)]
+    end.
 
 %% @private
 from_term(
@@ -479,6 +461,38 @@ type_and_version(Map) ->
         version => ?VERSION,
         type => source
     }.
+
+%% @private
+%% The open bondy_db `security_sources` table handle. Raises if the catalogue
+%% has not provisioned it yet.
+table() ->
+    case bondy_namespace_catalog:table(?PLUM_DB_SOURCE_TAB) of
+        undefined ->
+            error(security_sources_table_unavailable);
+        Table ->
+            Table
+    end.
+
+%% @private
+%% All live sources in a realm as decoded `{Key, Value}` pairs (the same shape
+%% the old `plum_db:match` returned), where `Key` is the 3-tuple
+%% `{Username, AMask, Authmethod}`. Cleared cells (non-map values) are dropped.
+scan(RealmUri) ->
+    {ok, Rows} = bondy_db:list(table(), RealmUri),
+    [{decode_key(EncKey), V} || {EncKey, V, _Hlc} <- Rows, is_map(V)].
+
+%% @private
+%% The source store key is the 3-tuple `{Username, AMask, Authmethod}`; bondy_db
+%% keys are binaries, so encode deterministically (the same tuple → the same
+%% bytes).
+encode_key({_Username, _AMask, _Authmethod} = Key) ->
+    term_to_binary(Key).
+
+%% @private
+%% Decodes a store key written by `encode_key/1`. `[safe]` is sufficient — the
+%% atoms in a source key (`all`, `anonymous`) already exist.
+decode_key(Bin) when is_binary(Bin) ->
+    binary_to_term(Bin, [safe]).
 
 sort_sources(Sources) ->
     %% sort sources first by userlist, so that 'all' matches come last
