@@ -10,6 +10,22 @@ Usernames and group names are stored in lower case. All functions in this
 module are case sensitice so when using the functions in this module make
 sure the inputs you provide are in lowercase to. If you need to convert your
 input to lowercase use `string:casefold/1`.
+
+## Storage
+
+Groups are persisted in `bondy_db` (design §11.4 — cut over from plum_db). The
+durable `security_groups` table is provisioned by `bondy_namespace_catalog`
+(`fold => lww`, `shard_by => realm`); each group is a cell keyed by its `Name`
+binary, addressed as `(Table, RealmUri, Name)`. The value carries the group's
+`groups` property (its parent groups, for role inheritance) — group *membership*
+is held on the user side (`user.groups`), so there is nothing inline to split;
+the `security_group_members` reverse-index table stays dormant until the
+`oplog.aae` phase.
+
+The plum_db prefix callbacks are gone: the **local** `on_update`/`on_delete`
+side-effects (the `{[bondy, rbac, group, added | updated | deleted], ...}`
+events) fire **inline** at the write / delete chokepoints; `on_merge` was a
+no-op.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -76,8 +92,6 @@ input to lowercase use `string:casefold/1`.
 
 -define(TYPE, group).
 -define(VERSION, <<"1.1">>).
--define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_GROUP_TAB, RealmUri}).
--define(FOLD_OPTS, [{resolver, lww}]).
 
 -type t() :: #{
     type := group,
@@ -128,13 +142,6 @@ input to lowercase use `string:casefold/1`.
 -export([topsort/1]).
 -export([unknown/2]).
 -export([update/3]).
-
-%% PLUM_DB PREFIX CALLBACKS
--export([will_merge/3]).
--export([on_merge/3]).
--export([on_update/3]).
--export([on_delete/2]).
--export([on_erase/2]).
 
 %% =============================================================================
 %% API
@@ -208,11 +215,9 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
     try
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
 
-        Prefix = ?PLUMDB_PREFIX(RealmUri),
-
         ok = not_reserved_name_check(Name),
 
-        case plum_db:get(Prefix, Name) of
+        case do_get(RealmUri, Name) of
             undefined ->
                 throw(unknown_group);
             Group ->
@@ -222,7 +227,7 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
                 %% or in its prototype
                 ok = group_exists_check(RealmUri, maps:get(groups, NewGroup)),
 
-                ok = plum_db:put(Prefix, Name, NewGroup),
+                ok = store(RealmUri, Name, NewGroup, #{}),
                 {ok, NewGroup}
         end
     catch
@@ -303,7 +308,7 @@ remove(RealmUri, #{type := ?TYPE, name := Name}, Opts) ->
 remove(RealmUri, Name, _Opts) ->
     try
         ok = not_reserved_name_check(Name),
-        ok = exists_check(?PLUMDB_PREFIX(RealmUri), Name),
+        ok = exists_check(RealmUri, Name),
 
         %% delete any associated grants, so if a group with the same name
         %% is added again, they don't pick up these grants
@@ -317,8 +322,10 @@ remove(RealmUri, Name, _Opts) ->
         ok = bondy_rbac_user:remove_group(RealmUri, all, Name),
         ok = remove_group(RealmUri, all, Name),
 
-        %% We finally delete the group, on_delete/2 will be called by plum_db
-        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name)
+        %% Delete the group and fire the local delete side-effect (formerly
+        %% plum_db's on_delete callback).
+        ok = bondy_db:apply(table(), RealmUri, Name, clear),
+        do_on_delete(RealmUri, Name)
     catch
         throw:Reason ->
             {error, Reason}
@@ -337,32 +344,33 @@ entirely.
 
 remove_all(RealmUri, Opts) ->
     Dirty = maps:get(dirty, Opts, false),
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
-    FoldOpts = [{keys_only, true}, {remove_tombstones, true}],
+    Table = table(),
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
 
-    _ = plum_db:foreach(
-        fun
-            (Name) when Dirty == true ->
-                _ = plum_db:delete(Prefix, Name);
-            (Name) ->
-                _ = remove(RealmUri, Name, Opts)
-        end,
-        Prefix,
-        FoldOpts
-    ),
+    _ = [
+        case Dirty of
+            true ->
+                %% Realm teardown: clear the cell and mirror plum_db's
+                %% per-delete on_delete event.
+                ok = bondy_db:apply(Table, RealmUri, Name, clear),
+                do_on_delete(RealmUri, Name);
+            false ->
+                remove(RealmUri, Name, Opts)
+        end
+     || {Name, V, _Hlc} <- Rows, is_map(V)
+    ],
     ok.
 
 -spec lookup(uri(), list() | binary()) -> t() | {error, not_found}.
 
 lookup(RealmUri, Name0) ->
     Name = normalise_name(Name0),
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
 
     case Name == anonymous of
         true ->
             ?ANONYMOUS;
         false ->
-            case plum_db:get(Prefix, Name) of
+            case do_get(RealmUri, Name) of
                 undefined ->
                     {error, not_found};
                 Value ->
@@ -396,28 +404,21 @@ list(RealmUri) ->
 list(RealmUri, Opts) ->
     %% TODO We SHOULD list the realm's prototype roups as well (amd potentially
     %% marking them with a flag)
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
+    {ok, Rows} = bondy_db:list(table(), RealmUri),
 
-    FoldOpts =
-        case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
-            undefined ->
-                ?FOLD_OPTS;
-            Limit ->
-                [{limit, Limit} | ?FOLD_OPTS]
-        end,
+    Groups = [
+        from_term({Name, V})
+     || {Name, V, _Hlc} <- Rows, is_map(V)
+    ],
 
-    plum_db:fold(
-        fun
-            ({_, ?TOMBSTONE}, Acc) ->
-                Acc;
-            ({_, _} = Term, Acc) ->
-                %% Consider legacy storage formats
-                [from_term(Term) | Acc]
-        end,
-        [?ANONYMOUS],
-        Prefix,
-        FoldOpts
-    ).
+    All = [?ANONYMOUS | Groups],
+
+    case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
+        undefined ->
+            All;
+        Limit ->
+            lists:sublist(All, Limit)
+    end.
 
 -doc "Returns the external representation of the Group.".
 -spec to_external(Group :: t()) -> external().
@@ -508,50 +509,50 @@ normalise_name(_) ->
     error(badarg).
 
 %% =============================================================================
-%% PLUM_DB PREFIX CALLBACKS
-%% =============================================================================
-
--doc "bondy_config".
-will_merge(_PKey, _New, _Old) ->
-    true.
-
-on_merge(_PKey, _New, _Old) ->
-    ok.
-
--doc "A local update".
-on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
-    IsCreate =
-        Old == undefined orelse
-            ?TOMBSTONE ==
-                plum_db_object:value(plum_db_object:resolve(Old, lww)),
-
-    case IsCreate of
-        true ->
-            bondy_event_manager:notify(
-                {[bondy, rbac, group, added], RealmUri, Name}
-            );
-        false ->
-            bondy_event_manager:notify(
-                {[bondy, rbac, group, updated], RealmUri, Name}
-            )
-    end.
-
--doc "A local delete".
-on_delete({?PLUMDB_PREFIX(RealmUri), Name}, _Old) ->
-    bondy_event_manager:notify({[bondy, rbac, group, deleted], RealmUri, Name}).
-
--doc "A local erase".
-on_erase(_PKey, _Old) ->
-    ok.
-
-%% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
 %% @private
-do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
+%% The published `security_groups` table handle, or an error when the catalogue
+%% has not provisioned it yet.
+table() ->
+    case bondy_namespace_catalog:table(?PLUM_DB_GROUP_TAB) of
+        undefined -> error(security_groups_table_unavailable);
+        Table -> Table
+    end.
 
+%% @private
+%% Reads a cell, returning the bare value or `undefined` when the cell is absent
+%% or cleared — mirroring the old `plum_db:get/2` contract.
+do_get(RealmUri, Name) ->
+    case bondy_db:read(table(), RealmUri, Name) of
+        {ok, {Value, _Hlc}} -> Value;
+        {error, not_found} -> undefined
+    end.
+
+%% @private
+%% These were the plum_db `on_update` / `on_delete` prefix callbacks (`on_merge`
+%% was a no-op). They publish the group lifecycle events; with bondy_db they are
+%% invoked inline from the write / delete chokepoints (`store/4`, `remove/3`,
+%% `remove_all/2`).
+-spec do_on_update(uri(), name(), IsCreate :: boolean()) -> ok.
+
+do_on_update(RealmUri, Name, true) ->
+    bondy_event_manager:notify({[bondy, rbac, group, added], RealmUri, Name}),
+    ok;
+
+do_on_update(RealmUri, Name, false) ->
+    bondy_event_manager:notify({[bondy, rbac, group, updated], RealmUri, Name}),
+    ok.
+
+-spec do_on_delete(uri(), name()) -> ok.
+
+do_on_delete(RealmUri, Name) ->
+    bondy_event_manager:notify({[bondy, rbac, group, deleted], RealmUri, Name}),
+    ok.
+
+%% @private
+do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     %% This should have been validated before but just to avoid any issues
     %% we do it again.
     ok = not_reserved_name_check(Name),
@@ -559,9 +560,9 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
 
     %% We avoid checking when we are rebasing
     Rebase = maps:get(rebase, Opts, false),
-    Rebase == true orelse not_exists_check(Prefix, Name),
+    Rebase == true orelse not_exists_check(RealmUri, Name),
 
-    case store(Prefix, Name, Group, Opts) of
+    case store(RealmUri, Name, Group, Opts) of
         ok ->
             {ok, Group};
         Error ->
@@ -569,25 +570,30 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     end.
 
 %% @private
-store(Prefix, Name, Group, #{rebase := true} = Opts) ->
-    ActorId = maps:get(actor_id, Opts, undefined),
-    Object = bondy_utils:rebase_object(Group, ActorId),
-    plum_db:dirty_put(Prefix, Name, Object, []);
-store(Prefix, Name, Group, _) ->
-    plum_db:put(Prefix, Name, Group).
+store(RealmUri, Name, Group, #{rebase := true}) ->
+    %% Dirty/rebase write: like plum_db:dirty_put it writes WITHOUT firing the
+    %% lifecycle event. The rebase (plum_db dvvset lineage) collapses to a plain
+    %% set — a fresh bondy_db write already dominates via its HLC.
+    bondy_db:apply(table(), RealmUri, Name, {set, Group});
+store(RealmUri, Name, Group, _) ->
+    %% Capture the previous value to tell a create from an update (the way
+    %% plum_db passed `Old` to the on_update callback), then fire the event.
+    Old = do_get(RealmUri, Name),
+    ok = bondy_db:apply(table(), RealmUri, Name, {set, Group}),
+    do_on_update(RealmUri, Name, Old == undefined).
 
 %% @private
 -doc "Doesn't take into account realm inheritance.".
-exists_check(Prefix, Name) ->
-    case plum_db:get(Prefix, Name) of
+exists_check(RealmUri, Name) ->
+    case do_get(RealmUri, Name) of
         undefined -> throw(unknown_group);
         _ -> ok
     end.
 
 %% @private
 -doc "Doesn't take into account realm inheritance".
-not_exists_check(Prefix, Name) ->
-    case plum_db:get(Prefix, Name) of
+not_exists_check(RealmUri, Name) ->
+    case do_get(RealmUri, Name) of
         undefined -> ok;
         _ -> throw(already_exists)
     end.
@@ -606,7 +612,6 @@ group_exists_check(RealmUri, Groups) ->
 %% @private
 -doc "Takes into account realm inheritance".
 do_unknown(RealmUri, Names) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
     ordsets:fold(
         fun
             (all, Acc) ->
@@ -614,7 +619,7 @@ do_unknown(RealmUri, Names) ->
             (anonymous, Acc) ->
                 Acc;
             (Name, Acc) ->
-                case plum_db:get(Prefix, Name) of
+                case do_get(RealmUri, Name) of
                     undefined -> [Name | Acc];
                     _ -> Acc
                 end
@@ -655,18 +660,12 @@ type_and_version(Group) ->
 ) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
-    plum_db:foreach(
-        fun
-            ({_, ?TOMBSTONE}) ->
-                ok;
-            ({_, [?TOMBSTONE]}) ->
-                ok;
-            ({_, _} = Term) ->
-                ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun)
-        end,
-        ?PLUMDB_PREFIX(RealmUri),
-        ?FOLD_OPTS
-    );
+    {ok, Rows} = bondy_db:list(table(), RealmUri),
+    _ = [
+        update_groups(RealmUri, from_term({Name, V}), Groupnames, Fun)
+     || {Name, V, _Hlc} <- Rows, is_map(V)
+    ],
+    ok;
 update_groups(RealmUri, Groups, Groupnames, Fun) when is_list(Groups) ->
     _ = [update_groups(RealmUri, Group, Groupnames, Fun) || Group <- Groups],
     ok;

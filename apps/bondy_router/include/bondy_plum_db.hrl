@@ -80,13 +80,10 @@
     {?PLUM_DB_GROUP_TAB, #{
         type => ram_disk,
         shard_by => prefix,
-        callbacks => #{
-            will_merge => {bondy_rbac_group, will_merge},
-            on_merge => {bondy_rbac_group, on_merge},
-            on_update => {bondy_rbac_group, on_update},
-            on_delete => {bondy_rbac_group, on_delete},
-            on_erase => {bondy_rbac_group, on_erase}
-        }
+        %% Cut over to bondy_db (design §11.4): groups are no longer written to
+        %% plum_db, so the prefix callbacks are gone. The local lifecycle events
+        %% fire inline in bondy_rbac_group (on_merge was already a no-op).
+        callbacks => #{}
     }},
     {?PLUM_DB_GROUP_GRANT_TAB, #{
         type => ram_disk,

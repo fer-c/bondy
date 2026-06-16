@@ -168,9 +168,9 @@ provision_all() ->
 
 
 %% Default (flag off): only the migrated domains' tables (api_gateway,
-%% bondy_bridge_relay, bondy_ticket, bondy_oauth_token, security_users) are
-%% opened; the core DB still comes up to host them, but not-yet-migrated tables
-%% stay shut.
+%% bondy_bridge_relay, bondy_ticket, bondy_oauth_token, security_users,
+%% security_groups) are opened; the core DB still comes up to host them, but
+%% not-yet-migrated tables stay shut.
 migrated_only() ->
     Tmp = make_tmpdir(),
     set_env(false, 1, Tmp),
@@ -187,9 +187,14 @@ migrated_only() ->
             ?CAT:table(bondy_oauth_token)),
         ?assertMatch(#{entity_type := security_users, db_name := core},
             ?CAT:table(security_users)),
+        ?assertMatch(#{entity_type := security_groups, db_name := core},
+            ?CAT:table(security_groups)),
         %% Not-yet-migrated core tables are NOT opened.
         ?assertEqual(undefined, ?CAT:table(bondy_realm)),
         ?assertEqual(undefined, ?CAT:table(security_user_grants)),
+        %% security_group_members reverse-index stays dormant (members live on
+        %% the user side until the oplog.aae phase).
+        ?assertEqual(undefined, ?CAT:table(security_group_members)),
         ?assertMatch(#{provision_all := false, core := #{kind := db}}, ?CAT:info())
     after
         ok = stop_catalog(Pid),

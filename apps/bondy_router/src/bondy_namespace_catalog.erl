@@ -40,8 +40,8 @@ Not-yet-migrated tables stay on `plum_db` and are not opened — unless
 **all** declared core tables too (for validating a future domain's provisioning
 before its cut-over). So a default node opens exactly the migrated tables
 (currently `api_gateway`, `bondy_bridge_relay`, `bondy_ticket`,
-`bondy_oauth_token` and `security_users`) and serves every other read from
-`plum_db`.
+`bondy_oauth_token`, `security_users` and `security_groups`) and serves every
+other read from `plum_db`.
 
 ## Lifecycle
 
@@ -154,11 +154,15 @@ tables() ->
         %% session-close is deferred to the oplog.aae phase (a publish/reactor
         %% seam then).
         #{name => ?PLUM_DB_USER_TAB,         db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
-        #{name => ?PLUM_DB_GROUP_TAB,        db => core, durability => durable, shard_by => realm, fold => lww},
-        %% security_group_members — net-new split table (no plum_db prefix).
-        %% Membership is its own observed-remove map so a concurrent add
-        %% survives a remove that did not observe it (design §3, table 5b),
-        %% rather than the inline LWW member list `security_groups` keeps today.
+        %% security_groups — sixth domain cut over to bondy_db (§11.4): always
+        %% provisioned, storage-only (no `publish`). Local lifecycle events fire
+        %% inline in bondy_rbac_group; on_merge was a no-op.
+        #{name => ?PLUM_DB_GROUP_TAB,        db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        %% security_group_members — net-new split table (no plum_db prefix), a
+        %% reverse membership index. Membership currently lives on the user side
+        %% (`user.groups`), so this stays DORMANT (not `migrated`) until the
+        %% oplog.aae phase — its `aw` fold (observed-remove, design §3 table 5b)
+        %% only matters under concurrent multi-node member edits.
         #{name => security_group_members,    db => core, durability => durable, shard_by => realm, fold => aw},
         #{name => ?PLUM_DB_GROUP_GRANT_TAB,  db => core, durability => durable, shard_by => realm, fold => mv},
         #{name => ?PLUM_DB_USER_GRANT_TAB,   db => core, durability => durable, shard_by => realm, fold => mv},
