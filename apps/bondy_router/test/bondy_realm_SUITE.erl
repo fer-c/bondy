@@ -319,7 +319,6 @@ strip_private_keys(_) ->
 
 migration(_) ->
     Uri = gen_uri(),
-    Prefix = {?PLUM_DB_REALM_TAB, Uri},
     %% 0.9.SNAPSHOT-SSO
     %% -record(realm, {
     %%     [2] uri                      ::  gen_uri(),
@@ -350,10 +349,13 @@ migration(_) ->
     Old =
         {realm, Uri, Desc, Authmethods, Sec, IsSSO, AllowConnections, SSOUri,
             PrivKeys, PubKeys, PassOpts, EncKeys, Info},
-    %% We store and olger version realm
-    ok = plum_db:put(Prefix, Uri, Old),
+    %% We store an older-version realm directly into the global realm band
+    %% (the empty binary) so that fetch/1 exercises the legacy from_term
+    %% migration path (design §11.4: realms now live in bondy_db).
+    Table = bondy_namespace_catalog:table(?PLUM_DB_REALM_TAB),
+    ok = bondy_db:apply(Table, <<>>, Uri, {set, Old}),
 
-    %% We should not have a migrated realm
+    %% We should now have a migrated realm
     New = bondy_realm:fetch(Uri),
 
     ?assertMatch(

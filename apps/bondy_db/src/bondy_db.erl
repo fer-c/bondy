@@ -136,12 +136,16 @@ it).
 -export([probe_write/1]).
 -export([read/3]).
 -export([range/5]).
+-export([range_all/5]).
 -export([list/2]).
 -export([index_get/5]).
 -export([index_range/6]).
+-export([index_prefix/5]).
+-export([index_prefix_range/6]).
 -export([rebuild_index/2]).
 -export([rebuild_indexes/1]).
 -export([index_lag/2]).
+-export([await_index/2]).
 -export([info/1]).
 -export([namespace/1]).
 -export([publish_event/1]).
@@ -475,7 +479,9 @@ open_table_provision(
     %% appliers need them at start to term-diff and dispatch index updates;
     %% the live writers they dispatch to are resolved from the registry, so
     %% the descriptors only carry the spec + secondary shard count.
-    SecIndexes = index_descriptors(maps:get(indexes, Merged, []), ShardCount),
+    SecIndexes = index_descriptors(
+        maps:get(indexes, Merged, []), ShardCount, Topology
+    ),
     case Topology:open_table(EntityType, ShardCount, Merged, State) of
         {ok, TableState, _NewState} ->
             case
@@ -1196,6 +1202,65 @@ list(#{namespace := NS, db_topology := Topology} = Table, Realm) when
     end.
 
 -doc """
+Bounded, globally-ordered range scan over `(Realm, [Low, High))` across
+**every** shard of `Table`.
+
+Like `range/5` but scatters the `[Low, High)` window to every shard and
+merges the per-shard results into one key-ordered list (ascending, or
+descending under `Opts#{direction => desc}`), capped at `Opts`' `limit`
+(default 1000). The merge is correct because each shard is internally
+sorted and every key in the global top-`limit` appears in some shard's
+top-`limit` (see `bondy_oplog_core:range_all/5`).
+
+This is the keyset-pagination primitive to use while `shard_by => realm`
+is not yet honoured: a realm's keys are spread across shards by
+`phash2({Bucket, Key})`, so a single-shard `range/5` would return only
+the fraction of the window that hashes to one shard — an incomplete page.
+When realm-sharding lands, all of a realm's keys collapse onto one shard,
+the other shards return empty, and this degenerates to a single-shard
+scan for free.
+
+`Low`/`High` are realm-folded exactly as `range/5`; `High => infinity`
+scans to the end of the realm band. Returns `{ok, [Row]}` of `t:row/0`
+(`{Key, Value, Hlc}`) in key order; `Value` is the fold-decoded value.
+""".
+-spec range_all(
+    Table :: table(),
+    Realm :: realm(),
+    Low :: binary(),
+    High :: binary() | infinity,
+    Opts :: bondy_oplog_core:range_opts()
+) ->
+    {ok, [row()]} | {error, term()}.
+
+range_all(
+    #{namespace := NS, db_topology := Topology} = Table,
+    Realm,
+    Low,
+    High,
+    Opts
+) when
+    is_binary(Realm),
+    is_binary(Low),
+    (is_binary(High) orelse High =:= infinity),
+    is_map(Opts)
+->
+    Bucket = primary_bucket(Table, Realm),
+    %% G-1: fold the realm into both bounds (no-op for realm-in-bucket
+    %% topologies, so their scan stays inside the realm's bucket).
+    Lo = cell_key(Topology, Realm, Low),
+    Hi = fold_high(Topology, Realm, High),
+    case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, Hi}, Opts) of
+        {ok, Rows} ->
+            {ok, [
+                {uncell_key(Topology, Realm, K), V, Hlc}
+             || {K, V, Hlc} <- Rows
+            ]};
+        {error, _} = Err ->
+            Err
+    end.
+
+-doc """
 Equality lookup against secondary index `IndexName`: the primary keys
 (and any denormalised columns) whose indexed term equals `Term` within
 `Realm`.
@@ -1204,6 +1269,16 @@ Equality lookup against secondary index `IndexName`: the primary keys
 matches the stored terms, then resolved to the single secondary shard
 that holds it (`phash2({SecBucket, Term}, SecShardCount)`) and scanned
 over that term's contiguous key window.
+
+The scan is **realm-scoped**: under a realm-folding topology (G-1) the
+index entry key is `<<enc(Term), 0, Realm, 0, Key>>` (the primary key is
+realm-folded), so one realm's entries for a term are a contiguous
+sub-band and the read restricts to `[<<enc(Term),0,Realm,0>>,
+<<enc(Term),0,Realm,1>>)`. Cross-realm entries that share a term are
+therefore never returned. (The `index_range/6` term-RANGE case is not yet
+realm-scoped — a term range spans realms non-contiguously; that lands with
+the realm-before-term index fold, piece #2. The stale `fallback => primary`
+path below is likewise not yet realm-scoped.)
 
 ## Opts
 
@@ -1219,6 +1294,11 @@ over that term's contiguous key window.
   Bounded by an internal cell cap.
 - `limit`, `direction` — forwarded to the underlying range scan (and the
   fallback).
+- `after_key => PrimaryKey` — resume strictly after this primary key,
+  scanning only the term's remaining entries (keyset pagination within one
+  term's realm-scoped band). Combine with `limit` to page a high-cardinality
+  term (a popular index value) without materialising all its matches.
+  (Named `after_key`, not `after` — `after` is a reserved word.)
 
 Returns `{ok, [{PrimaryKey, Columns}]}` (in `(term, primary-key)` order;
 `Columns` is the decoded projection map, `#{}` for a pointer-only index),
@@ -1248,7 +1328,8 @@ index_get(Table, Realm, IndexName, Term, Opts) when
             bondy_oplog_index_key:shard(SecBucket, Norm, SecShardCount),
         case ensure_shard_fresh(NS, IndexName, SecShard, MaxLag) of
             ok ->
-                {Low, High} = bondy_oplog_index_key:equality_bounds(Norm),
+                After = maps:get(after_key, Opts, undefined),
+                {Low, High} = index_eq_bounds(Topology, Realm, Norm, After),
                 RangeOpts = (index_range_opts(Opts))#{shard => SecShard},
                 read_index(
                     Topology, Realm, NS, IndexName, SecBucket, Low, High,
@@ -1330,6 +1411,86 @@ index_range(Table, Realm, IndexName, LoTerm, HiTerm, Opts) when
     end).
 
 -doc """
+Composite (covering) index PREFIX scan: every fact whose leading collation
+columns equal `PrefixCols` — a list shorter than, or equal to, the index's
+declared `collation` — within `Realm`.
+
+Returns `{ok, [{Columns, Projections}]}` where `Columns` is the **full** decoded
+collation tuple (the fact's indexed columns, in collation order) and
+`Projections` is the denormalised-columns map (`#{}` when none). This is the
+covering read: a single prefix scan answers the query without a primary fetch.
+
+Realm-scoped: on a realm-folding topology (G-1) the composite index is keyed
+realm-first (`«Realm, 0, enc(Tuple), 0, Key»`), so the prefix band stays inside
+`Realm`; on a non-folding topology the index bucket already isolates the realm.
+The scan scatters across all secondary shards (a composite index is sharded by
+the full tuple) and the merged result is ordered by the collation.
+""".
+-spec index_prefix(
+    Table :: table(),
+    Realm :: realm(),
+    IndexName :: atom(),
+    PrefixCols :: [bondy_oplog_index_key:column()],
+    Opts :: map()
+) ->
+    {ok, [{Columns :: [bondy_oplog_index_key:column()], Projections :: map()}]}
+    | {error, term()}.
+
+index_prefix(Table, Realm, IndexName, PrefixCols, Opts) when
+    is_binary(Realm), is_atom(IndexName), is_list(PrefixCols), is_map(Opts)
+->
+    with_index(Table, IndexName, fun(Spec, SecShardCount) ->
+        case bondy_oplog_index_spec:is_composite(Spec) of
+            false ->
+                {error, {not_a_composite_index, IndexName}};
+            true ->
+                Topology = maps:get(db_topology, Table),
+                Enc = composite_enc(Spec, PrefixCols),
+                Bounds = composite_eq_bounds(Topology, Realm, Enc),
+                composite_scan(
+                    Table, Realm, IndexName, Spec, SecShardCount, Bounds, Opts
+                )
+        end
+    end).
+
+-doc """
+Composite index range scan over the half-open prefix range `[LoCols, HiCols)`:
+every fact whose leading collation columns sort in that range, within `Realm`.
+Same `{ok, [{Columns, Projections}]}` shape and realm-scoping as
+`index_prefix/5`; use it to scan a contiguous slice of a collation order (e.g.
+all facts with `p = P0` and `o` in `[O1, O2)`).
+""".
+-spec index_prefix_range(
+    Table :: table(),
+    Realm :: realm(),
+    IndexName :: atom(),
+    LoCols :: [bondy_oplog_index_key:column()],
+    HiCols :: [bondy_oplog_index_key:column()],
+    Opts :: map()
+) ->
+    {ok, [{Columns :: [bondy_oplog_index_key:column()], Projections :: map()}]}
+    | {error, term()}.
+
+index_prefix_range(Table, Realm, IndexName, LoCols, HiCols, Opts) when
+    is_binary(Realm), is_atom(IndexName), is_list(LoCols), is_list(HiCols),
+    is_map(Opts)
+->
+    with_index(Table, IndexName, fun(Spec, SecShardCount) ->
+        case bondy_oplog_index_spec:is_composite(Spec) of
+            false ->
+                {error, {not_a_composite_index, IndexName}};
+            true ->
+                Topology = maps:get(db_topology, Table),
+                EncLo = composite_enc(Spec, LoCols),
+                EncHi = composite_enc(Spec, HiCols),
+                Bounds = composite_range_bounds(Topology, Realm, EncLo, EncHi),
+                composite_scan(
+                    Table, Realm, IndexName, Spec, SecShardCount, Bounds, Opts
+                )
+        end
+    end).
+
+-doc """
 Rebuild secondary index `IndexName` of `Table` from the primary: clear its
 projection shards, re-fold every live primary cell, and re-dispatch a `put` for
 every term. For a **durable table** (any leveled topology) the cell directory
@@ -1386,6 +1547,50 @@ index_lag(Table, IndexName) when is_atom(IndexName) ->
          || Shard <- lists:seq(0, SecShardCount - 1)
         ]),
         {ok, Map}
+    end).
+
+-doc """
+Flush every pending secondary-index write for `IndexName` of `Table`,
+returning once each shard's writer has drained its coalesce buffer into
+the projection.
+
+The secondary writer is asynchronous (a `coalesce_ms` timer), so an
+`apply/4` returns before its index ops are visible to `index_get`/
+`index_range` — read-your-writes does NOT hold for the index. This is the
+read-side barrier that restores it: after `await_index/2` returns, an
+index read reflects every `apply/4` that returned before the call. Use it
+when a caller must enumerate an index *completely* — e.g. draining a
+relation's reverse access path before deleting its key, where a missed
+entry would leak a dangling reference.
+
+Cost is `O(pending ops)`, not `O(table)` — it flushes buffers, it does not
+re-derive (that is `rebuild_index/2`). `{error, {unknown_index, IndexName}}`
+for an unknown index.
+""".
+-spec await_index(Table :: table(), IndexName :: atom()) ->
+    ok | {error, term()}.
+
+await_index(Table, IndexName) when is_atom(IndexName) ->
+    with_index(Table, IndexName, fun(_Spec, SecShardCount) ->
+        NS = maps:get(namespace, Table),
+        lists:foreach(
+            fun(Shard) ->
+                case bondy_oplog_core_registry:lookup(NS, IndexName, Shard) of
+                    {ok, Entry} ->
+                        case
+                            bondy_oplog_core_registry:entry_writer_pid(Entry)
+                        of
+                            Pid when is_pid(Pid) ->
+                                bondy_oplog_secondary_writer:flush_sync(Pid);
+                            _ ->
+                                ok
+                        end;
+                    not_found ->
+                        ok
+                end
+            end,
+            lists:seq(0, SecShardCount - 1)
+        )
     end).
 
 -doc """
@@ -2183,7 +2388,13 @@ flush_and_mark_clean(NS, Name, Shard, Writers) ->
 %% Build the static secondary-index descriptors handed to each primary
 %% applier (term-diff + dispatch). `sec_shard_count` defaults to the
 %% primary's shard count, matching `provision_index/5`.
-index_descriptors(Specs, DefaultShardCount) ->
+index_descriptors(Specs, DefaultShardCount, Topology) ->
+    %% Composite (collation) indexes on a realm-folding topology (G-1) are keyed
+    %% realm-FIRST («Realm,0,enc(Tuple),0,Key») so a prefix/range scan stays
+    %% inside one realm. Scalar indexes keep their term-first layout regardless
+    %% (realm-scoped via the equality sub-band, `index_eq_bounds/4`). `?FOLDS_REALM`
+    %% is defined later in the file, so the comparison is inlined here.
+    RealmFolded = Topology =:= bondy_db_topology_shared_shards,
     [
         #{
             index_name => bondy_oplog_index_spec:name(Spec),
@@ -2193,7 +2404,8 @@ index_descriptors(Specs, DefaultShardCount) ->
             ),
             %% Back-pressure cap, read by the primary applier at dispatch
             %% to decide whether to drop a saturating batch.
-            max_inflight => bondy_oplog_index_spec:max_inflight(Spec)
+            max_inflight => bondy_oplog_index_spec:max_inflight(Spec),
+            realm_folded => RealmFolded
         }
      || Spec <- Specs
     ].
@@ -2592,8 +2804,11 @@ read_index(Topology, Realm, NS, IndexName, SecBucket, Low, High, RangeOpts) ->
 %% (G-1) has NUL-prefixed with the realm — undo that so callers get the key
 %% they wrote (and can feed back to `read/3`). NOTE: the secondary index
 %% bucket is still realm-agnostic, so cross-realm entries sharing a term are
-%% co-located; realm separation of the index itself is deferred (no production
-%% table uses a secondary index yet).
+%% physically co-located. `index_get/5` reads correctly anyway because it
+%% restricts its scan to the term's realm sub-band (`index_eq_bounds/4`); the
+%% term-RANGE `index_range/6` cannot (a term range spans realms
+%% non-contiguously), so it is not yet realm-scoped — that lands with the
+%% realm-before-term index fold (piece #2).
 index_rows(Topology, Realm, Rows) ->
     [
         {
@@ -2667,6 +2882,118 @@ fold_high(Topology, Realm, infinity) ->
     end;
 fold_high(Topology, Realm, High) when is_binary(High) ->
     cell_key(Topology, Realm, High).
+
+%% @private
+%% Realm-scoped equality bounds for `index_get/5`. An index entry key is
+%% `<<enc(Term), 0, PrimaryKey>>`. Under a realm-folding topology (G-1) the
+%% `PrimaryKey` is itself `<<Realm, 0, Key>>`, so within a term's band the
+%% entries group by realm and one realm's entries are the contiguous
+%% sub-band `[<<enc(Term),0,Realm,0>>, <<enc(Term),0,Realm,1>>)` — the same
+%% NUL-separator argument as `realm_scan_range/2`, one level deeper.
+%% Restricting to that sub-band is what makes the read realm-correct on the
+%% shared (realm-agnostic) index bucket. `After` (a primary key in caller
+%% terms — for a folding topology the un-folded `Key`) resumes strictly
+%% after that entry: `<<…, After, 0>>` is the smallest key greater than
+%% `After`'s, so its own entry is excluded and the next page begins.
+%% Non-folding topologies isolate the realm in the bucket, so they scan the
+%% plain term band (`equality_bounds/1`) with the same `After` successor.
+index_eq_bounds(Topology, Realm, Norm, After) ->
+    Enc = bondy_oplog_index_key:encode_term(Norm),
+    case ?FOLDS_REALM(Topology) of
+        true ->
+            Lo =
+                case After of
+                    undefined ->
+                        <<Enc/binary, 0, Realm/binary, 0>>;
+                    _ when is_binary(After) ->
+                        <<Enc/binary, 0, Realm/binary, 0, After/binary, 0>>
+                end,
+            {Lo, <<Enc/binary, 0, Realm/binary, 1>>};
+        false ->
+            Lo =
+                case After of
+                    undefined -> <<Enc/binary, 0>>;
+                    _ when is_binary(After) -> <<Enc/binary, 0, After/binary, 0>>
+                end,
+            {Lo, <<Enc/binary, 1>>}
+    end.
+
+%% @private
+%% The order-preserving tuple encoding of a composite query (a prefix of, or full,
+%% collation), per-column normalised the same way the stored term was.
+composite_enc(Spec, Cols) ->
+    bondy_oplog_index_key:encode_tuple(
+        bondy_oplog_index_spec:normalize_term(Spec, Cols)
+    ).
+
+%% @private
+%% Realm-scoped prefix-equality bounds for a composite index. Under a folding
+%% topology (G-1) the index key is realm-FIRST («Realm,0,enc(Tuple),0,Key»), so
+%% the band stays inside `Realm`; non-folding topologies isolate the realm in the
+%% bucket and scan the plain prefix band. `Enc` is the prefix's tuple encoding,
+%% so the `0`/`1` suffix selects every fact whose leading columns match.
+composite_eq_bounds(Topology, Realm, Enc) ->
+    case ?FOLDS_REALM(Topology) of
+        true ->
+            {<<Realm/binary, 0, Enc/binary, 0>>, <<Realm/binary, 0, Enc/binary, 1>>};
+        false ->
+            {<<Enc/binary, 0>>, <<Enc/binary, 1>>}
+    end.
+
+%% @private
+%% Realm-scoped half-open range bounds `[LoCols, HiCols)` for a composite index,
+%% realm-FIRST under a folding topology (so the term range stays in one realm).
+composite_range_bounds(Topology, Realm, EncLo, EncHi) ->
+    case ?FOLDS_REALM(Topology) of
+        true ->
+            {<<Realm/binary, 0, EncLo/binary, 0>>, <<Realm/binary, 0, EncHi/binary, 0>>};
+        false ->
+            {<<EncLo/binary, 0>>, <<EncHi/binary, 0>>}
+    end.
+
+%% @private
+%% Freshness-gated scatter scan of a composite index over `{Low, High}`, decoding
+%% each entry's full collation tuple. A composite index is sharded by the whole
+%% tuple, so a prefix/range scatters across all shards and merges (`range_all`).
+composite_scan(Table, Realm, IndexName, Spec, SecShardCount, {Low, High}, Opts) ->
+    NS = maps:get(namespace, Table),
+    Topology = maps:get(db_topology, Table),
+    SecBucket = index_bucket(Table, Realm, IndexName),
+    Arity = bondy_oplog_index_spec:arity(Spec),
+    MaxLag = maps:get(max_lag, Opts, bondy_oplog_index_spec:max_lag(Spec)),
+    case ensure_index_fresh(NS, IndexName, SecShardCount, MaxLag) of
+        ok ->
+            case
+                bondy_oplog_core:range_all(
+                    NS, IndexName, SecBucket, {Low, High}, index_range_opts(Opts)
+                )
+            of
+                {ok, Rows} ->
+                    {ok, composite_rows(Topology, Realm, Arity, Rows)};
+                {error, _} = Err ->
+                    Err
+            end;
+        {stale, Lag} ->
+            {error, {stale_secondary, IndexName, Lag}}
+    end.
+
+%% @private
+%% Decode each composite entry into `{Columns, Projections}`: strip the realm
+%% prefix (folding topology only), then split the body into its `Arity` collation
+%% columns (the fact) and the trailing primary key (discarded — the covering
+%% answer is the columns).
+composite_rows(Topology, Realm, Arity, Rows) ->
+    Folded = ?FOLDS_REALM(Topology),
+    [composite_row(Folded, Realm, Arity, SecKey, Columns) || {SecKey, Columns, _Hlc} <- Rows].
+
+composite_row(true, Realm, Arity, SecKey, Columns) ->
+    Skip = byte_size(Realm) + 1,
+    <<_:Skip/binary, Body/binary>> = SecKey,
+    {Cols, _PK} = bondy_oplog_index_key:decode_composite(Body, Arity),
+    {Cols, bondy_oplog_index_spec:decode_projection(Columns)};
+composite_row(false, _Realm, Arity, SecKey, Columns) ->
+    {Cols, _PK} = bondy_oplog_index_key:decode_composite(SecKey, Arity),
+    {Cols, bondy_oplog_index_spec:decode_projection(Columns)}.
 
 %% @private
 encode_instance_id(DbName, EntityType, Shard) ->

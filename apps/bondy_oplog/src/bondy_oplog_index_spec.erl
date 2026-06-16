@@ -23,7 +23,8 @@ optionally denormalises further columns alongside the index pointer.
 #{
     name      := atom(),                 %% index name, e.g. by_status
     extract   := path(),                 %% path to the indexed column
-    normalize => none | downcase,        %% term normaliser (default none)
+    normalize => none | downcase         %% term normaliser (default none)
+               | canonical,
     projects  => [path()],               %% denormalised columns (default [])
     max_lag   => non_neg_integer()       %% read-side freshness bound, ms
                | infinity                %%   (default infinity)
@@ -48,6 +49,14 @@ Navigates `extract` into `Value` and normalises the leaf:
 `normalize => downcase` lowercases binary terms (via
 `string:lowercase/1`) and passes non-binaries through unchanged.
 
+`normalize => canonical` maps *any* term to its deterministic binary
+encoding (`term_to_binary/2` with `[deterministic]`), so a structured
+column — an RBAC resource (`any | {Uri, Strategy}`), a CIDR tuple — becomes
+a single binary index term suitable for **equality** lookups (the same
+canonicalisation runs on the query term via `normalize_term/2`, so they
+match byte-for-byte). It is deterministic, not order-preserving, so it
+supports `index_get` but not a meaningful `index_range` over the raw term.
+
 ## `project/2` (value -> columns binary)
 
 For an empty `projects` (pointer-only index) returns `<<>>`. Otherwise
@@ -65,16 +74,22 @@ inverts it.
 -export([max_inflight/1]).
 -export([coalesce_ms/1]).
 -export([projects/1]).
+-export([is_composite/1]).
+-export([arity/1]).
 -export([terms/2]).
 -export([normalize_term/2]).
 -export([project/2]).
 -export([decode_projection/1]).
 
 -type path() :: [atom() | binary() | integer()].
--type normalizer() :: none | downcase.
+-type normalizer() :: none | downcase | canonical.
 -type spec() :: #{
     name := atom(),
-    extract := path(),
+    %% Exactly one of `extract` (scalar inverted index) or `collation`
+    %% (composite covering index — a config-declared ordered list of column
+    %% paths) is required.
+    extract => path(),
+    collation => [path()],
     normalize => normalizer(),
     projects => [path()],
     max_lag => non_neg_integer() | infinity,
@@ -106,7 +121,7 @@ nested-tuple reason: `{missing_key, name | extract}`,
 validate(Spec) when is_map(Spec) ->
     Steps = [
         fun check_name/1,
-        fun check_extract/1,
+        fun check_columns/1,
         fun check_normalize/1,
         fun check_projects/1,
         fun check_max_inflight/1,
@@ -152,11 +167,39 @@ coalesce_ms(Spec) -> maps:get(coalesce_ms, Spec, undefined).
 projects(Spec) -> maps:get(projects, Spec, []).
 
 -doc """
+Whether this is a composite (covering) index — declared with `collation` (an
+ordered list of column paths) rather than `extract` (a single column).
+""".
+-spec is_composite(spec()) -> boolean().
+
+is_composite(#{collation := _}) -> true;
+is_composite(_) -> false.
+
+-doc """
+The number of columns in the index term: the `collation` length for a composite
+index, `1` for a scalar (`extract`) index. The read path uses it to split a
+composite index entry's columns from the trailing primary key.
+""".
+-spec arity(spec()) -> pos_integer().
+
+arity(#{collation := Paths}) -> length(Paths);
+arity(_) -> 1.
+
+-doc """
 Extract the (possibly empty, possibly multi-valued) list of normalised
 index terms for a value.
 """.
 -spec terms(spec(), term()) -> [bondy_oplog_index_key:term_value()].
 
+terms(#{collation := Paths} = Spec, Value) ->
+    %% A composite (covering) term: one tuple of columns in collation order. The
+    %% whole fact is indexed under exactly one tuple, so a missing column (or a
+    %% multi-valued one, unsupported in v1) yields no entry.
+    Norm = maps:get(normalize, Spec, none),
+    case collation_columns(Paths, Norm, Value, []) of
+        missing -> [];
+        Cols -> [Cols]
+    end;
 terms(#{extract := Path} = Spec, Value) ->
     Norm = maps:get(normalize, Spec, none),
     case navigate(Path, Value) of
@@ -170,6 +213,19 @@ terms(#{extract := Path} = Spec, Value) ->
             [normalize(Norm, Leaf)]
     end.
 
+%% @private
+collation_columns([], _Norm, _Value, Acc) ->
+    lists:reverse(Acc);
+collation_columns([Path | Rest], Norm, Value, Acc) ->
+    case navigate(Path, Value) of
+        ?MISSING -> missing;
+        undefined -> missing;
+        %% Multi-valued composite columns (a cartesian product) are unsupported
+        %% in v1 — a list column drops the whole tuple rather than crash the codec.
+        Leaf when is_list(Leaf) -> missing;
+        Leaf -> collation_columns(Rest, Norm, Value, [normalize(Norm, Leaf) | Acc])
+    end.
+
 -doc """
 Apply the spec's normaliser to a single query term, so a lookup term is
 encoded the same way the stored terms were by `terms/2`. Use this on the
@@ -178,6 +234,11 @@ caller-supplied term in `index_get`/`index_range` before encoding bounds.
 -spec normalize_term(spec(), bondy_oplog_index_key:term_value()) ->
     bondy_oplog_index_key:term_value().
 
+normalize_term(Spec, Term) when is_list(Term) ->
+    %% A composite query term (a prefix of, or full, collation columns):
+    %% normalise each column the same way `terms/2` normalised the stored ones.
+    Norm = maps:get(normalize, Spec, none),
+    [normalize(Norm, C) || C <- Term];
 normalize_term(Spec, Term) ->
     normalize(maps:get(normalize, Spec, none), Term).
 
@@ -236,18 +297,29 @@ check_name(#{name := Name}) when is_atom(Name) -> ok;
 check_name(#{name := Name}) -> {error, {invalid_name, Name}};
 check_name(_) -> {error, {missing_key, name}}.
 
-check_extract(#{extract := Path}) ->
+%% Exactly one of `extract` (scalar) or `collation` (composite) is required.
+check_columns(#{extract := _, collation := _}) ->
+    {error, {conflicting_keys, [extract, collation]}};
+check_columns(#{extract := Path}) ->
     case is_path(Path) of
         true -> ok;
         false -> {error, {invalid_extract, Path}}
     end;
-check_extract(_) ->
+check_columns(#{collation := Paths}) ->
+    case
+        is_list(Paths) andalso Paths =/= [] andalso lists:all(fun is_path/1, Paths)
+    of
+        true -> ok;
+        false -> {error, {invalid_collation, Paths}}
+    end;
+check_columns(_) ->
     {error, {missing_key, extract}}.
 
 check_normalize(Spec) ->
     case maps:get(normalize, Spec, none) of
         none -> ok;
         downcase -> ok;
+        canonical -> ok;
         Other -> {error, {invalid_normalize, Other}}
     end.
 
@@ -297,6 +369,8 @@ navigate(_Path, _NonMap) ->
 
 normalize(none, V) ->
     V;
+normalize(canonical, V) ->
+    term_to_binary(V, [deterministic]);
 normalize(downcase, V) when is_binary(V) ->
     string:lowercase(V);
 normalize(downcase, V) ->

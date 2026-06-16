@@ -139,6 +139,91 @@ terms_integer_term_test() ->
     ?assertEqual([42], ?MOD:terms(Spec, #{age => 42})).
 
 %% =============================================================================
+%% normalize => canonical (structured columns → deterministic binary term)
+%% =============================================================================
+
+validate_canonical_normalize_test() ->
+    ?assertEqual(
+        ok,
+        ?MOD:validate(#{name => s, extract => [resource], normalize => canonical})
+    ).
+
+%% A structured leaf (an RBAC resource `{Uri, Strategy}`, the atom `any`) becomes
+%% its deterministic `term_to_binary`, which `encode_term` can then encode.
+terms_canonical_tuple_test() ->
+    Spec = #{name => s, extract => [resource], normalize => canonical},
+    Res = {<<"com.example.>">>, <<"prefix">>},
+    ?assertEqual(
+        [term_to_binary(Res, [deterministic])],
+        ?MOD:terms(Spec, #{resource => Res})
+    ).
+
+terms_canonical_atom_test() ->
+    Spec = #{name => s, extract => [resource], normalize => canonical},
+    ?assertEqual(
+        [term_to_binary(any, [deterministic])],
+        ?MOD:terms(Spec, #{resource => any})
+    ).
+
+%% The equality-match invariant: a query term canonicalised by `normalize_term/2`
+%% equals the stored term `terms/2` produced for the same value, so `index_get`
+%% finds it.
+normalize_term_canonical_matches_stored_test() ->
+    Spec = #{name => s, extract => [resource], normalize => canonical},
+    Res = {<<"a.b.c">>, <<"exact">>},
+    [Stored] = ?MOD:terms(Spec, #{resource => Res}),
+    ?assertEqual(Stored, ?MOD:normalize_term(Spec, Res)).
+
+%% =============================================================================
+%% collation => composite (covering) index
+%% =============================================================================
+
+validate_collation_ok_test() ->
+    Spec = #{name => pogs, collation => [[p], [o], [g], [s]]},
+    ?assertEqual(ok, ?MOD:validate(Spec)).
+
+validate_collation_conflicts_with_extract_test() ->
+    Spec = #{name => x, extract => [a], collation => [[a], [b]]},
+    ?assertEqual({error, {conflicting_keys, [extract, collation]}}, ?MOD:validate(Spec)).
+
+validate_empty_collation_test() ->
+    ?assertEqual(
+        {error, {invalid_collation, []}},
+        ?MOD:validate(#{name => x, collation => []})
+    ).
+
+validate_bad_collation_paths_test() ->
+    ?assertEqual(
+        {error, {invalid_collation, [a, b]}},
+        ?MOD:validate(#{name => x, collation => [a, b]})
+    ).
+
+is_composite_and_arity_test() ->
+    Comp = #{name => pogs, collation => [[p], [o], [g], [s]]},
+    Scalar = #{name => by_g, extract => [g]},
+    ?assert(?MOD:is_composite(Comp)),
+    ?assertNot(?MOD:is_composite(Scalar)),
+    ?assertEqual(4, ?MOD:arity(Comp)),
+    ?assertEqual(1, ?MOD:arity(Scalar)).
+
+%% A composite term is ONE tuple of columns in collation order.
+terms_collation_tuple_test() ->
+    Spec = #{name => pog, collation => [[p], [o], [g]]},
+    Value = #{p => <<"P">>, o => <<"O">>, g => <<"G">>, extra => 1},
+    ?assertEqual([[<<"P">>, <<"O">>, <<"G">>]], ?MOD:terms(Spec, Value)).
+
+%% A missing column drops the whole tuple (no partial composite entry).
+terms_collation_missing_column_test() ->
+    Spec = #{name => pog, collation => [[p], [o], [g]]},
+    ?assertEqual([], ?MOD:terms(Spec, #{p => <<"P">>, o => <<"O">>})).
+
+%% Per-column normalise applies to both stored and query terms.
+collation_normalize_test() ->
+    Spec = #{name => pog, collation => [[p], [o]], normalize => downcase},
+    ?assertEqual([[<<"p">>, <<"o">>]], ?MOD:terms(Spec, #{p => <<"P">>, o => <<"O">>})),
+    ?assertEqual([<<"p">>, <<"o">>], ?MOD:normalize_term(Spec, [<<"P">>, <<"O">>])).
+
+%% =============================================================================
 %% project/2 + decode_projection/1
 %% =============================================================================
 

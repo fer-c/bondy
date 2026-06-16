@@ -36,9 +36,14 @@ Realm security is enabled by default.
 
 ## Storage
 
-Realms (and the associated users, credentials, groups, sources and
-permissions) are persisted to disk and replicated across the cluster using
-the `plum_db` subsystem.
+Realms are persisted to disk and replicated across the cluster via the
+bondy_db `bondy_realm` core table (design §11.4 — ninth domain cut over from
+plum_db). Unlike the per-realm tables, the realm table is a **global registry**:
+all realms share a single bondy_db band (the empty binary, like the API Gateway
+specs) and are keyed by their Uri, with `shard_by => key` spreading them across
+shards. `list/0` therefore scatter-scans the band across every shard. Realms'
+associated RBAC objects (users, credentials, groups, sources, grants) live in
+their own bondy_db tables.
 
 ## Bondy Master Realm
 When you start Bondy for the first time it creates and stores the Bondy
@@ -132,11 +137,11 @@ connected to any realm.
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
-%% -define(PLUM_DB_PREFIX, {security, realms}).
-%% TODO This is a breaking change, we need to migrate the realms in
-%% {security, realms} into their new {security, RealmUri}
--define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_REALM_TAB, Uri}).
--define(PLUM_DB_PKEY(Uri), {?PLUM_DB_PREFIX(Uri), Uri}).
+%% The realm table is a global registry: every realm shares this one bondy_db
+%% band (the empty binary, mirroring the api_gateway specs) and is keyed by its
+%% Uri. `shard_by => key` (see bondy_namespace_catalog) spreads realms across
+%% shards while `bondy_db:list/2` over the band scatter-scans every realm.
+-define(REALM_BAND, <<>>).
 
 -define(DEFAULT_AUTHMETHODS, [
     ?WAMP_ANON_AUTH,
@@ -814,13 +819,6 @@ connected to any realm.
 -export([users/1]).
 -export([users/2]).
 
-%% PLUM_DB PREFIX CALLBACKS
--export([will_merge/3]).
--export([on_merge/3]).
--export([on_update/3]).
--export([on_delete/2]).
--export([on_erase/2]).
-
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -1409,10 +1407,9 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             ok = close(Uri, ?WAMP_CLOSE_REALM),
 
             %% We synchronously delete the realm.
-            %% This will be replicated and each node will
-            %% handle the update (either due to a broadcast or an AAE exchange)
-            %% and will close the realm
-            plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
+            %% This will be replicated and each node will handle the update
+            %% (via an AAE exchange, once oplog.aae lands) and close the realm.
+            ok = bondy_db:apply(table(), ?REALM_BAND, Uri, clear),
 
             %% We notify
             ok = on_delete(Uri),
@@ -1542,8 +1539,10 @@ from_file(Filename, Opts) ->
 -spec list() -> [t()].
 
 list() ->
-    Opts = [{remove_tombstones, true}, {resolver, lww}],
-    [from_term(V) || {_K, V} <- plum_db:match(?PLUM_DB_PREFIX('_'), '_', Opts)].
+    %% The realm table is a global registry under one band, so a single
+    %% `list/2` scatter-scans every realm across all shards.
+    {ok, Rows} = bondy_db:list(table(), ?REALM_BAND),
+    [from_term(V) || {_K, V, _Hlc} <- Rows, is_tuple(V)].
 
 -doc "Returns the external map representation of the realm.".
 -spec to_external(t() | uri()) -> external().
@@ -1672,40 +1671,17 @@ grants(Uri, Opts) when is_binary(Uri) ->
     grants(fetch(Uri), Opts).
 
 %% =============================================================================
-%% PLUM_DB PREFIX CALLBACKS
-%% =============================================================================
-
--doc "bondy_config".
-will_merge(_PKey, _New, _Old) ->
-    true.
-
-on_merge(?PLUM_DB_PKEY(Uri), New, _Old) ->
-    Resolved = plum_db_object:resolve(New, lww),
-
-    case plum_db_object:value(Resolved) of
-        '$deleted' ->
-            %% Realm was deleted on another node, call close
-            close(Uri, ?WAMP_CLOSE_REALM);
-        _ ->
-            %% Realm updated, do nothing
-            ok
-    end.
-
--doc "A local update".
-on_update(_PKey, _New, _Old) ->
-    ok.
-
--doc "A local delete".
-on_delete(_PKey, _Old) ->
-    ok.
-
--doc "A local erase".
-on_erase(_PKey, _Old) ->
-    ok.
-
-%% =============================================================================
 %% PRIVATE
 %% =============================================================================
+%%
+%% The plum_db prefix callbacks were removed with the bondy_db cut-over (design
+%% §11.4). The LOCAL callbacks (`on_update`/`on_delete`/`on_erase`) were no-ops —
+%% the real local lifecycle is the inline `on_create/1`/`on_update/1`/
+%% `on_delete/1` notifications fired from the create/update/delete paths. The
+%% only meaningful one was the REMOTE `on_merge` (close all sessions when a peer
+%% deleted the realm via AAE) — that side-effect is DEFERRED to the oplog.aae
+%% phase, where it becomes a publish/reactor seam (same deferral as the bridge
+%% sync and the user on_merge).
 
 %% @private
 add_master_realm() ->
@@ -1893,7 +1869,7 @@ do_create(#{uri := Uri} = Map, Opts) ->
 -spec do_lookup(uri()) -> {ok, t()} | {error, not_found}.
 
 do_lookup(Uri) ->
-    case plum_db:get(?PLUM_DB_PREFIX(Uri), Uri) of
+    case do_get(Uri) of
         #realm{} = Realm ->
             {ok, Realm};
         undefined ->
@@ -1901,7 +1877,7 @@ do_lookup(Uri) ->
         Term ->
             try
                 Realm = from_term(Term),
-                ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
+                ok = store(Uri, Realm),
                 {ok, Realm}
             catch
                 throw:badarg ->
@@ -1911,6 +1887,28 @@ do_lookup(Uri) ->
                     }),
                     {error, not_found}
             end
+    end.
+
+%% @private
+%% The open bondy_db `bondy_realm` table handle. Raises if the catalogue has not
+%% provisioned it yet.
+table() ->
+    case bondy_namespace_catalog:table(?PLUM_DB_REALM_TAB) of
+        undefined ->
+            error(bondy_realm_table_unavailable);
+        Table ->
+            Table
+    end.
+
+%% @private
+%% Reads the realm record (or a legacy term, migrated by `do_lookup`), or
+%% `undefined` (mirrors the old `plum_db:get/2`).
+do_get(Uri) ->
+    case bondy_db:read(table(), ?REALM_BAND, Uri) of
+        {ok, {Value, _Hlc}} ->
+            Value;
+        {error, not_found} ->
+            undefined
     end.
 
 %% @private
@@ -1933,17 +1931,7 @@ merge_and_store(Realm0, Map, Opts) ->
     %% We then create the realm
     Uri = Realm#realm.uri,
 
-    %% We override Opts for realms, this is because realms are assigned new
-    %% singing and encryption keys by default, each node will then generate
-    %% different keys. Combined with rebase this will create a situation where
-    %% plum_db refuses to merge the values (as they have the same actorID and
-    %% clock) but trying to do it forever.
-    %% At the moment this will mean that every new Bondy node that is deployed
-    %% without keys, will produce a new version, updating the keys in all other
-    %% Bondy nodes.
-    %% TODO consider forcing the user to provide the keys instead of generating
-    %% default ones to avoid the issue and enable rebase back.
-    ok = store(?PLUM_DB_PREFIX(Uri), Uri, Realm, #{rebase => false}),
+    ok = store(Uri, Realm),
 
     %% We finally apply all the RBAC objects that have been validated
     %% but for them we do use the Opts as we received it (potentially using
@@ -1953,18 +1941,12 @@ merge_and_store(Realm0, Map, Opts) ->
     Realm.
 
 %% @private
-store(Prefix, Key, Realm, #{rebase := true} = Opts) ->
-    ActorId = maps:get(actor_id, Opts, undefined),
-    Object = bondy_utils:rebase_object(Realm, ActorId),
-
-    case plum_db:dirty_put(Prefix, Key, Object, []) of
-        ok ->
-            ok;
-        {error, Reason} ->
-            throw(Reason)
-    end;
-store(Prefix, Key, Realm, _) ->
-    case plum_db:put(Prefix, Key, Realm) of
+%% Writes the realm record to the global band keyed by its Uri. The historical
+%% `rebase` (dirty_put) / normal split is gone: a fresh bondy_db write already
+%% dominates by HLC, so the plum_db actorID/clock merge-refusal that forced
+%% `rebase => false` for realms no longer applies.
+store(Uri, Realm) ->
+    case bondy_db:apply(table(), ?REALM_BAND, Uri, {set, Realm}) of
         ok ->
             ok;
         {error, Reason} ->

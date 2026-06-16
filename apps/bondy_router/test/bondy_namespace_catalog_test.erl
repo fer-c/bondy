@@ -36,14 +36,18 @@ declarations_test_() ->
             ?assertEqual(realm, maps:get(shard_by, Spec)),
             ?assertEqual(aw, maps:get(fold, Spec))
         end},
-        {"ticket/oauth_token shard by key", fun() ->
+        {"ticket/oauth_token/realm shard by key", fun() ->
+            %% ticket/oauth_token prioritise point lookup; bondy_realm is a
+            %% global registry under one band, so realm-sharding would be
+            %% degenerate (every realm on one shard) — it shards by key.
             ?assertEqual(key, shard_by(ByName, bondy_ticket)),
-            ?assertEqual(key, shard_by(ByName, bondy_oauth_token))
+            ?assertEqual(key, shard_by(ByName, bondy_oauth_token)),
+            ?assertEqual(key, shard_by(ByName, bondy_realm))
         end},
         {"all other tables shard by realm", fun() ->
             Others = [S || S <- Tables,
                 not lists:member(maps:get(name, S),
-                    [bondy_ticket, bondy_oauth_token])],
+                    [bondy_ticket, bondy_oauth_token, bondy_realm])],
             ?assert(lists:all(
                 fun(S) -> maps:get(shard_by, S) =:= realm end, Others
             ))
@@ -171,8 +175,8 @@ provision_all() ->
 
 
 %% Default (flag off): only the migrated domains' tables (api_gateway,
-%% bondy_bridge_relay, bondy_ticket, bondy_oauth_token, security_users,
-%% security_groups, security_user_grants, security_group_grants,
+%% bondy_realm, bondy_bridge_relay, bondy_ticket, bondy_oauth_token,
+%% security_users, security_groups, security_user_grants, security_group_grants,
 %% security_sources) are opened; the core DB still comes up to host them, but
 %% not-yet-migrated tables stay shut.
 migrated_only() ->
@@ -181,6 +185,8 @@ migrated_only() ->
     {ok, Pid} = ?CAT:start_link(),
     try
         ?assert(?CAT:is_open()),
+        ?assertMatch(#{entity_type := bondy_realm, db_name := core},
+            ?CAT:table(bondy_realm)),
         ?assertMatch(#{entity_type := api_gateway, db_name := core},
             ?CAT:table(api_gateway)),
         ?assertMatch(#{entity_type := bondy_bridge_relay, db_name := core},
@@ -200,9 +206,9 @@ migrated_only() ->
         ?assertMatch(#{entity_type := security_sources, db_name := core},
             ?CAT:table(security_sources)),
         %% Not-yet-migrated core tables are NOT opened.
-        ?assertEqual(undefined, ?CAT:table(bondy_realm)),
         %% security_group_members reverse-index stays dormant (members live on
-        %% the user side until the oplog.aae phase).
+        %% the user side until the oplog.aae phase) — the sole core table still
+        %% on plum_db.
         ?assertEqual(undefined, ?CAT:table(security_group_members)),
         ?assertMatch(#{provision_all := false, core := #{kind := db}}, ?CAT:info())
     after

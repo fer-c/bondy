@@ -154,6 +154,14 @@ end#{
     meta => #{}
 }).
 
+%% The substrate `by_group` secondary index on `security_users` — the reverse
+%% membership access path. MUST match the index name declared in
+%% `bondy_namespace_catalog:user_indexes/0`.
+-define(BY_GROUP_INDEX, by_group).
+
+%% Internal page size for the bounded member fold / drain over `by_group`.
+-define(MEMBER_PAGE, 1000).
+
 -type t() :: #{
     type := ?USER_TYPE,
     version := binary(),
@@ -201,7 +209,8 @@ end#{
     password_opts => bondy_password:opts()
 }.
 -type list_opts() :: #{
-    limit => pos_integer()
+    limit => pos_integer(),
+    cursor => bondy_relation:cursor()
 }.
 -type add_error() ::
     {no_such_realm, uri()}
@@ -245,6 +254,7 @@ end#{
 -export([is_sso_user/1]).
 -export([list/1]).
 -export([list/2]).
+-export([list_members/3]).
 -export([lookup/2]).
 -export([meta/1]).
 -export([new/1]).
@@ -256,6 +266,7 @@ end#{
 -export([remove_all/2]).
 -export([remove_alias/3]).
 -export([remove_group/3]).
+-export([remove_group_from_members/2]).
 -export([remove_groups/3]).
 -export([resolve/1]).
 -export([resolve/2]).
@@ -606,24 +617,36 @@ entirely.
 remove_all(RealmUri, Opts) ->
     Dirty = maps:get(dirty, Opts, false),
     Table = table(),
-    {ok, Rows} = bondy_db:list(Table, RealmUri),
-
-    _ = [
-        case Dirty of
-            true ->
-                %% Realm teardown: clear every cell (users and alias indexes).
-                %% Mirror plum_db's per-delete on_delete for user records only;
-                %% alias index cells fire no lifecycle side-effects.
-                ok = bondy_db:apply(Table, RealmUri, Key, clear),
-                ?IS_USER(V) andalso do_on_delete(RealmUri, Key);
-            false ->
-                %% Route user records through remove/3 (which also clears their
-                %% aliases, sources and grants). Alias cells are skipped — they
-                %% are removed as part of their user's removal.
-                ?IS_USER(V) andalso remove(RealmUri, Key, Opts)
-        end
-     || {Key, V, _Hlc} <- Rows, is_map(V)
-    ],
+    %% Stream every cell (user records AND alias-pointer cells) through a
+    %% bounded keyset fold instead of materialising the whole realm. Deleting
+    %% behind a forward keyset cursor is safe — cleared cells simply drop out
+    %% of the next page.
+    {ok, ok} = bondy_relation:fold(
+        raw_relation(Table),
+        RealmUri,
+        fun({Key, V}, ok) ->
+            _ =
+                case {Dirty, ?IS_USER(V)} of
+                    {true, true} ->
+                        %% Realm teardown: clear the cell and mirror plum_db's
+                        %% per-delete on_delete for user records.
+                        ok = bondy_db:apply(Table, RealmUri, Key, clear),
+                        do_on_delete(RealmUri, Key);
+                    {true, false} ->
+                        %% Alias cell — clear it; no lifecycle side-effects.
+                        bondy_db:apply(Table, RealmUri, Key, clear);
+                    {false, true} ->
+                        %% Route user records through remove/3 (which also
+                        %% clears their aliases, sources and grants).
+                        remove(RealmUri, Key, Opts);
+                    {false, false} ->
+                        %% Alias cell — removed as part of its user's removal.
+                        ok
+                end,
+            ok
+        end,
+        ok
+    ),
     ok.
 
 -spec lookup(RealmUri :: uri(), Username :: username_int()) ->
@@ -679,23 +702,70 @@ list(RealmUri) ->
 
 -spec list(RealmUri :: uri(), Opts :: list_opts()) ->
     [t()]
-    | {[t()], Continuation :: term()}.
+    | {[t()], Continuation :: bondy_relation:cursor() | undefined}.
 
 list(RealmUri, Opts) ->
-    {ok, Rows} = bondy_db:list(table(), RealmUri),
-
-    Users = [
-        from_term({Key, V})
-     || {Key, V, _Hlc} <- Rows, is_map(V), not (?IS_ALIAS(V))
-    ],
-
+    Relation = relation(),
     case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
-            Users;
+            %% Whole-realm listing — streamed through a bounded keyset fold so
+            %% it never materialises the raw cell set (the prior `bondy_db:list`
+            %% + `lists:sublist` could OOM a large realm).
+            {ok, Acc} = bondy_relation:fold(
+                Relation, RealmUri, fun(User, A) -> [User | A] end, []
+            ),
+            lists:reverse(Acc);
         Limit ->
-            %% bondy_db:list is not paginated; truncate and return a terminal
-            %% continuation to preserve the `{List, Continuation}` contract.
-            {lists:sublist(Users, Limit), undefined}
+            %% Keyset page — `Cursor` resumes a prior page (the `Continuation`
+            %% returned here), `undefined` is the first page.
+            Cursor = maps_utils:get_any([cursor, <<"cursor">>], Opts, undefined),
+            PageOpts0 = #{limit => Limit},
+            PageOpts =
+                case Cursor of
+                    undefined -> PageOpts0;
+                    _ -> PageOpts0#{cursor => Cursor}
+                end,
+            {ok, #{values := Users, next := Next}} =
+                bondy_relation:list(Relation, RealmUri, PageOpts),
+            {Users, Next}
+    end.
+
+-doc """
+Lists the usernames of the members of group `Groupname` in realm
+`RealmUri`, paginated.
+
+This is the reverse membership access path — the `member` relation read by
+group. It answers "which users are in group G" via the substrate
+`by_group` secondary index, bounded to `RealmUri`, instead of scanning the
+realm's users. `Opts` carries `limit` (page size, default `1000`) and
+`cursor` (a username returned as the previous page's continuation, or
+absent for the first page). Returns `{Usernames, Continuation}` where
+`Continuation` is the last returned username when more pages remain, or
+`undefined` at the end.
+
+The read is eventually-consistent with `user.groups` (the index is
+maintained asynchronously), so a just-added member may not appear until the
+index flushes.
+""".
+-spec list_members(
+    RealmUri :: uri(),
+    Groupname :: bondy_rbac_group:name(),
+    Opts :: map()
+) ->
+    {[username()], Continuation :: username() | undefined}.
+
+list_members(RealmUri, Groupname, Opts) ->
+    Group = bondy_rbac_group:normalise_name(Groupname),
+    Limit = maps_utils:get_any([limit, <<"limit">>], Opts, ?MEMBER_PAGE),
+    After = maps_utils:get_any([cursor, <<"cursor">>], Opts, undefined),
+    %% Fetch limit+1 to learn whether another page exists without a count.
+    Users = members_page(RealmUri, Group, After, Limit + 1),
+    case length(Users) > Limit of
+        true ->
+            Page = lists:sublist(Users, Limit),
+            {Page, lists:last(Page)};
+        false ->
+            {Users, undefined}
     end.
 
 -spec change_password(
@@ -881,6 +951,41 @@ remove_groups(RealmUri, Users, Groupnames) ->
             {error, Reason}
     end.
 
+-doc """
+Removes group `Groupname` from every user that is a member of it, in realm
+`RealmUri`.
+
+Drains the group's members via the `by_group` secondary index (the reverse
+membership access path) instead of scanning every user in the realm — the
+bounded replacement for `remove_group(RealmUri, all, Groupname)` on the
+group-deletion path (O(members-of-G) rather than O(all-users)). The index
+is flushed first (`bondy_db:await_index/2`) so the drain reflects every
+committed membership and the cleanup is complete; a member whose record was
+concurrently removed (a stale index entry) is skipped.
+""".
+-spec remove_group_from_members(
+    RealmUri :: uri(),
+    Groupname :: bondy_rbac_group:name()
+) -> ok.
+
+remove_group_from_members(RealmUri, Groupname) ->
+    ok = await_member_index(),
+    Group = bondy_rbac_group:normalise_name(Groupname),
+    Fun = fun(Username, ok) ->
+        case lookup(RealmUri, Username) of
+            {ok, #{type := ?USER_TYPE} = User} ->
+                %% `Group` is normalised so it matches the casefolded names
+                %% stored in `user.groups`.
+                ok = remove_group(RealmUri, User, Group);
+            {error, not_found} ->
+                %% Stale index entry: the user's own deletion already dropped
+                %% its `by_group` entries, so nothing to do.
+                ok
+        end
+    end,
+    {ok, ok} = fold_members(RealmUri, Group, Fun, ok),
+    ok.
+
 -doc "Takes a list of usernames and returns any that can't be found.".
 -spec unknown(RealmUri :: uri(), Usernames :: [username()]) ->
     Unknown :: [username()].
@@ -927,6 +1032,91 @@ table() ->
         undefined -> error(security_users_table_unavailable);
         Table -> Table
     end.
+
+%% @private
+%% The `security_users` table as a paginatable relation of user records.
+%% Alias-pointer cells co-located in the same table are rejected, so they never
+%% surface in a user listing or `update_groups` fold.
+relation() ->
+    bondy_relation:new(?PLUM_DB_USER_TAB, #{
+        table => table(),
+        decode => fun decode_user_row/1
+    }).
+
+%% @private
+decode_user_row({Key, V, _Hlc}) when is_map(V) ->
+    case ?IS_ALIAS(V) of
+        true -> skip;
+        false -> {ok, from_term({Key, V})}
+    end;
+decode_user_row(_) ->
+    skip.
+
+%% @private
+%% Every cell of the user table (user records AND alias-pointer cells) as
+%% `{Key, RawValue}` — for whole-table maintenance (`remove_all/2`) that must
+%% visit and clear alias cells too.
+raw_relation(Table) ->
+    bondy_relation:new(?PLUM_DB_USER_TAB, #{
+        table => Table,
+        decode => fun decode_raw_row/1
+    }).
+
+%% @private
+decode_raw_row({Key, V, _Hlc}) when is_map(V) ->
+    {ok, {Key, V}};
+decode_raw_row(_) ->
+    skip.
+
+%% @private
+%% One realm-scoped page of group `Group`'s members from the `by_group`
+%% index: up to `Limit` usernames in ascending order, resuming strictly after
+%% `After` (a username, or `undefined` for the first page). `Group` MUST
+%% already be normalised (casefolded) so it matches the stored index terms.
+members_page(RealmUri, Group, After, Limit) ->
+    Opts0 = #{limit => Limit},
+    Opts =
+        case After of
+            undefined -> Opts0;
+            _ -> Opts0#{after_key => After}
+        end,
+    {ok, Rows} = bondy_db:index_get(
+        table(), RealmUri, ?BY_GROUP_INDEX, Group, Opts
+    ),
+    [Username || {Username, _Cols} <- Rows].
+
+%% @private
+%% Bounded streaming fold over group `Groupname`'s members, paging the
+%% `by_group` index so it never materialises the whole member set. `Fun` is
+%% applied to each username in ascending order. Returns `{ok, Acc}`.
+fold_members(RealmUri, Groupname, Fun, Acc0) when is_function(Fun, 2) ->
+    Group = bondy_rbac_group:normalise_name(Groupname),
+    do_fold_members(RealmUri, Group, undefined, Fun, Acc0).
+
+%% @private
+do_fold_members(RealmUri, Group, After, Fun, Acc) ->
+    case members_page(RealmUri, Group, After, ?MEMBER_PAGE) of
+        [] ->
+            {ok, Acc};
+        Users ->
+            Acc1 = lists:foldl(Fun, Acc, Users),
+            case length(Users) < ?MEMBER_PAGE of
+                true ->
+                    {ok, Acc1};
+                false ->
+                    do_fold_members(
+                        RealmUri, Group, lists:last(Users), Fun, Acc1
+                    )
+            end
+    end.
+
+%% @private
+%% Flush the `by_group` index so a subsequent member fold/list reflects every
+%% committed `user.groups` write — read-your-writes for the asynchronous
+%% index, used before a group-deletion drain so the cleanup is complete.
+await_member_index() ->
+    _ = bondy_db:await_index(table(), ?BY_GROUP_INDEX),
+    ok.
 
 %% @private
 %% Reads a cell, returning the bare value or `undefined` when the cell is absent
@@ -1161,11 +1351,14 @@ update_credentials(RealmUri, Username, Data) ->
 ) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
-    {ok, Rows} = bondy_db:list(table(), RealmUri),
-    _ = [
-        update_groups(RealmUri, from_term({Key, V}), Groupnames, Fun)
-     || {Key, V, _Hlc} <- Rows, is_map(V), not (?IS_ALIAS(V))
-    ],
+    %% Bounded keyset fold over every user record (alias cells rejected by the
+    %% relation decoder) — replaces a full-realm materialise.
+    {ok, ok} = bondy_relation:fold(
+        relation(),
+        RealmUri,
+        fun(User, ok) -> update_groups(RealmUri, User, Groupnames, Fun) end,
+        ok
+    ),
     ok;
 update_groups(RealmUri, Users, Groupnames, Fun) when is_list(Users) ->
     _ = [update_groups(RealmUri, User, Groupnames, Fun) || User <- Users],

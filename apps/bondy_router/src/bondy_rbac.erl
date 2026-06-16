@@ -182,6 +182,7 @@ end#{
 -export([grant/2]).
 -export([grant/3]).
 -export([grants/2]).
+-export([grants_on_resource/2]).
 -export([group_grants/2]).
 -export([is_reserved_name/1]).
 -export([normalise_name/1]).
@@ -515,6 +516,45 @@ grants(RealmUri, Opts0) ->
     ],
 
     lists:append(GroupGrants, UserGrants).
+
+-doc """
+The **reverse** grant lookup: every role (user and group) holding a grant on
+exactly `Resource` within `RealmUri`, as `{{Rolename, Resource}, Permissions}`.
+
+This is the equality reverse of `find_grants` — "who can act on resource R" —
+served by the `by_resource` covering index (piece #2). It is intended for
+admin/introspection, NOT the authorization hot path (which always reads forward,
+by role): the index is asynchronous, so a just-written grant may take a coalesce
+window to appear, and a grant cleared after the index read is filtered by the
+forward fetch below. `Resource` must be a normalised resource (`any |
+{Uri, Strategy}`), the same form `grant/2` stores.
+""".
+-spec grants_on_resource(RealmUri :: uri(), Resource :: normalised_resource()) ->
+    [{{binary() | all | anonymous, normalised_resource()}, [permission()]}].
+
+grants_on_resource(RealmUri, Resource) ->
+    lists:append(
+        grants_on_resource(grant_table(user), RealmUri, Resource),
+        grants_on_resource(grant_table(group), RealmUri, Resource)
+    ).
+
+%% @private
+%% Realm-scoped equality read of the `by_resource` index gives the candidate
+%% primary keys; the forward fetch returns each grant's *fresh* permissions and
+%% drops any entry whose primary was cleared since the index was written.
+grants_on_resource(Table, RealmUri, Resource) ->
+    {ok, Rows} = bondy_db:index_get(Table, RealmUri, by_resource, Resource, #{}),
+    lists:filtermap(
+        fun({EncKey, _Cols}) ->
+            case bondy_db:read(Table, RealmUri, EncKey) of
+                {ok, {#{permissions := Permissions}, _Hlc}} ->
+                    {true, {decode_key(EncKey), Permissions}};
+                _ ->
+                    false
+            end
+        end,
+        Rows
+    ).
 
 -spec grants(
     RealmUri :: uri(), Name :: binary(), RoleType :: user | group
@@ -981,8 +1021,12 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
 %% single lww write: a fresh bondy_db write already dominates by HLC, and
 %% grants carry no lifecycle side-effects, so the `rebase`/`actor_id` opts no
 %% longer apply.
-store(Table, RealmUri, Key, Permissions, _Opts) ->
-    bondy_db:apply(Table, RealmUri, encode_key(Key), {set, Permissions}).
+store(Table, RealmUri, {_Rolename, Resource} = Key, Permissions, _Opts) ->
+    %% The grant cell value is the fact map `#{resource, permissions}` (reshaped
+    %% from the bare permissions list) so the `by_resource` reverse index can
+    %% reach the resource column — it lives only in the key otherwise.
+    Value = #{resource => Resource, permissions => Permissions},
+    bondy_db:apply(Table, RealmUri, encode_key(Key), {set, Value}).
 
 -doc "Revoke permissions to one or more roles".
 -spec revoke(
@@ -1060,9 +1104,8 @@ do_revoke([{Rolename, RoleType} | Roles], RealmUri, Resources, Permissions) ->
                                 Table, RealmUri, encode_key(Key), clear
                             );
                         _ ->
-                            bondy_db:apply(
-                                Table, RealmUri, encode_key(Key), {set, NewPerms}
-                            )
+                            %% Through `store/5` so the value is the fact map.
+                            store(Table, RealmUri, Key, NewPerms, [])
                     end
             end
         end,
@@ -1265,25 +1308,31 @@ find_grants(Realm, KeyPattern, Type) ->
 %% @private
 find_grants(undefined, _, _, _) ->
     [];
-find_grants(Realm, KeyPattern, Type, _Opts) ->
-    %% `term_to_binary/1` keys are not order-preserving and the match is always
-    %% on the `Rolename` (the `Resource` component is a wildcard), so we scan the
-    %% realm and filter the decoded keys rather than running a key-prefix range.
+find_grants(Realm, {Rolename, '_'}, Type, _Opts) ->
+    %% The match is always on the `Rolename` (the `Resource` component is a
+    %% wildcard) and the composite key is order-preserving on the role column, so
+    %% this is a bounded role-band range scan — `O(grants-for-role)`. Every row in
+    %% the band is one of `Rolename`'s grants; a non-matching value (a cleared
+    %% cell) simply fails the generator pattern and is skipped.
+    Table = grant_table(Type),
+    {Lo, Hi} = bondy_oplog_index_key:col_bounds(Rolename),
+    {ok, Rows} = bondy_db:range_all(Table, Realm, Lo, Hi, #{}),
+    grant_rows(Rows);
+find_grants(Realm, '_', Type, _Opts) ->
+    %% Whole-realm enumeration (`grants/2`, an admin "list all grants" call):
+    %% inherently `O(realm)`, no role to bound it by, and off the authz hot path.
     Table = grant_table(Type),
     {ok, Rows} = bondy_db:list(Table, Realm),
-    lists:filtermap(
-        fun
-            ({EncKey, Permissions, _Hlc}) when is_list(Permissions) ->
-                Key = decode_key(EncKey),
-                case grant_key_matches(Key, KeyPattern) of
-                    true -> {true, {Key, Permissions}};
-                    false -> false
-                end;
-            (_) ->
-                false
-        end,
-        Rows
-    ).
+    grant_rows(Rows).
+
+%% @private
+%% Decode the fact-map rows of a grant scan into `{{Rolename, Resource}, Perms}`;
+%% the `#{permissions := _}` generator pattern skips cleared (non-map) cells.
+grant_rows(Rows) ->
+    [
+        {decode_key(EncKey), Permissions}
+     || {EncKey, #{permissions := Permissions}, _Hlc} <- Rows
+    ].
 
 %% @private
 concat_role(user, Name) ->
@@ -1330,23 +1379,28 @@ grant_table(EntityType) ->
 
 %% @private
 %% Reads the permissions list for a grant key, or `undefined` (mirrors the old
-%% `plum_db:get/2`). Cleared cells read back as `not_found`.
+%% `plum_db:get/2`). Extracts `permissions` from the fact-map value; cleared
+%% cells read back as `not_found`.
 do_get(Table, RealmUri, Key) ->
     case bondy_db:read(Table, RealmUri, encode_key(Key)) of
-        {ok, {Value, _Hlc}} ->
-            Value;
+        {ok, {#{permissions := Permissions}, _Hlc}} ->
+            Permissions;
+        {ok, {_Other, _Hlc}} ->
+            undefined;
         {error, not_found} ->
             undefined
     end.
 
 %% @private
-%% Clears every grant whose key's `Rolename` matches `Rolename` within the realm.
+%% Clears every grant for `Rolename` within the realm. The role band
+%% (`col_bounds/1`) selects exactly that role's grants, so the scan is bounded
+%% to `O(grants-for-role)` — no full-realm decode-and-filter.
 revoke_role_grants(Table, RealmUri, Rolename) ->
-    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    {Lo, Hi} = bondy_oplog_index_key:col_bounds(Rolename),
+    {ok, Rows} = bondy_db:range_all(Table, RealmUri, Lo, Hi, #{}),
     _ = [
         bondy_db:apply(Table, RealmUri, EncKey, clear)
-     || {EncKey, _V, _Hlc} <- Rows,
-        grant_key_matches(decode_key(EncKey), {Rolename, '_'})
+     || {EncKey, _V, _Hlc} <- Rows
     ],
     ok.
 
@@ -1361,26 +1415,38 @@ clear_all_grants(Table, RealmUri) ->
     ok.
 
 %% @private
-%% The grant store key is the compound `{Rolename, Resource}`; bondy_db keys are
-%% binaries, so encode deterministically (the same tuple → the same bytes).
-encode_key({_Rolename, _Resource} = Key) ->
-    term_to_binary(Key).
+%% The grant store key is the compound `{Rolename, Resource}`, encoded as an
+%% **order-preserving composite**: the role as a type-tagged leading column
+%% (`encode_col/1`, so the reserved atoms `all`/`anonymous` and binary rolenames
+%% coexist), a `0x00` separator, then the canonical `term_to_binary` of the
+%% resource (`any | {Uri, Strategy}`). The role column is `0x00`-free, so every
+%% grant for a role is a contiguous band (`col_bounds(Rolename)`) and the forward
+%% "grants for role" query is a bounded range scan, not a full-realm filter.
+encode_key({Rolename, Resource}) ->
+    <<
+        (bondy_oplog_index_key:encode_col(Rolename))/binary,
+        0,
+        (term_to_binary(Resource, [deterministic]))/binary
+    >>.
 
 %% @private
-%% Decodes a store key written by `encode_key/1`. `[safe]` is sufficient — the
-%% atoms in a grant key (`all`, `anonymous`, `any`) already exist.
+%% Inverse of `encode_key/1`: split at the single `0x00` separator (the role
+%% column is `0x00`-free), decode the role column, then `[safe]`-decode the
+%% resource (its atoms — `any` — already exist).
 decode_key(Bin) when is_binary(Bin) ->
-    binary_to_term(Bin, [safe]).
+    {ColBin, ResBin} = split_key(Bin),
+    {bondy_oplog_index_key:decode_col(ColBin), binary_to_term(ResBin, [safe])}.
 
 %% @private
-%% Whether a decoded grant key matches a (Rolename, '_') / '_' match pattern.
-%% The `Resource` component is always wildcarded — matching is on `Rolename`.
-grant_key_matches(_Key, '_') ->
-    true;
-grant_key_matches({Rolename, _Resource}, {Rolename, '_'}) ->
-    true;
-grant_key_matches(_Key, _Pattern) ->
-    false.
+split_key(Bin) ->
+    case binary:match(Bin, <<0>>) of
+        {Pos, 1} ->
+            Col = binary:part(Bin, 0, Pos),
+            Rest = binary:part(Bin, Pos + 1, byte_size(Bin) - Pos - 1),
+            {Col, Rest};
+        nomatch ->
+            error({badarg, Bin})
+    end.
 
 % on_grant(RealmUri, RoleType, Rolename) ->
 %     ok = bondy_event_manager:notify(

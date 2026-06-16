@@ -29,7 +29,9 @@ all() ->
         update_groups,
         add_group,
         remove_group,
-        remove_user
+        remove_user,
+        list_members,
+        group_deletion_cleans_members
     ].
 
 init_per_suite(Config) ->
@@ -466,3 +468,83 @@ remove_user(_) ->
         ok,
         bondy_rbac_user:remove(?SSO_REALM_URI, ?SSOU1)
     ).
+
+%% The `member` relation's reverse access path: list a group's members via
+%% the substrate `by_group` index, paginated and realm-isolated, instead of
+%% scanning the realm's users.
+list_members(_) ->
+    G = <<"member_test_group">>,
+    ok = add_group(?REALM1_URI, G),
+    ok = add_group(?REALM2_URI, G),
+    R1Users = [<<"mtu_01">>, <<"mtu_02">>, <<"mtu_03">>],
+    [ok = add_member(?REALM1_URI, U, [G]) || U <- R1Users],
+    %% Same group NAME in another realm with a different member — must not
+    %% cross over (the index bucket is realm-agnostic; the read is not).
+    ok = add_member(?REALM2_URI, <<"mtu_other">>, [G]),
+    ok = flush_member_index(),
+
+    %% All members, in (normalised username) key order, realm-scoped.
+    ?assertEqual({R1Users, undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})),
+    ?assertEqual(
+        {[<<"mtu_other">>], undefined},
+        bondy_rbac_group:members(?REALM2_URI, G, #{})
+    ),
+
+    %% Keyset pagination: limit 2 ⇒ a page of 2 + a continuation, then the rest.
+    {P1, Cont} = bondy_rbac_group:members(?REALM1_URI, G, #{limit => 2}),
+    ?assertEqual([<<"mtu_01">>, <<"mtu_02">>], P1),
+    ?assertNotEqual(undefined, Cont),
+    ?assertEqual(
+        {[<<"mtu_03">>], undefined},
+        bondy_rbac_group:members(?REALM1_URI, G, #{limit => 2, cursor => Cont})
+    ).
+
+%% Deleting a group drains its members through the reverse index (bounded to
+%% the group's members, not the whole realm) and removes it from each
+%% member's `user.groups`.
+group_deletion_cleans_members(_) ->
+    G = <<"deletable_group">>,
+    ok = add_group(?REALM1_URI, G),
+    Users = [<<"dgu_01">>, <<"dgu_02">>],
+    [ok = add_member(?REALM1_URI, U, [G]) || U <- Users],
+    ok = flush_member_index(),
+    ?assertEqual({Users, undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})),
+
+    ok = bondy_rbac_group:remove(?REALM1_URI, G),
+
+    %% Each former member still exists but no longer references the group.
+    [
+        ?assertEqual(
+            [],
+            bondy_rbac_user:groups(bondy_rbac_user:fetch(?REALM1_URI, U))
+        )
+     || U <- Users
+    ],
+    %% And the reverse index has no entries left for the deleted group.
+    ok = flush_member_index(),
+    ?assertEqual({[], undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})).
+
+%% =============================================================================
+%% Member-test helpers
+%% =============================================================================
+
+add_group(RealmUri, Name) ->
+    {ok, _} = bondy_rbac_group:add(
+        RealmUri, bondy_rbac_group:new(#{name => Name})
+    ),
+    ok.
+
+add_member(RealmUri, Username, Groups) ->
+    User = bondy_rbac_user:new(#{
+        username => Username,
+        password => Username,
+        groups => Groups
+    }),
+    {ok, _} = bondy_rbac_user:add(RealmUri, User),
+    ok.
+
+%% Flush the by_group index so an immediately-following members/3 read
+%% reflects the writes above (the index is maintained asynchronously).
+flush_member_index() ->
+    Table = bondy_namespace_catalog:table(security_users),
+    ok = bondy_db:await_index(Table, by_group).

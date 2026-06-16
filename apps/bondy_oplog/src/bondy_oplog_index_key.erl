@@ -76,6 +76,12 @@ off-by-one.
 
 -export([encode/2]).
 -export([encode_term/1]).
+-export([encode_col/1]).
+-export([decode_col/1]).
+-export([col_bounds/1]).
+-export([encode_tuple/1]).
+-export([decode_tuple/1]).
+-export([decode_composite/2]).
 -export([decode_pk/1]).
 -export([equality_bounds/1]).
 -export([range_bounds/2]).
@@ -85,18 +91,32 @@ off-by-one.
 -export([clean_flag_loc/3]).
 -export([shard/3]).
 
--type term_value() :: binary() | integer().
-%% A single index term, before order-preserving encoding. v1 restricts a
-%% column to one type (binary OR integer); mixing types in one index
-%% would need a leading type tag, deferred.
+-type column() :: binary() | integer() | atom().
+%% One column of a composite term, encoded by the type-tagged `encode_col/1`.
+-type term_value() :: binary() | integer() | [column()].
+%% An index term before order-preserving encoding. A scalar (`binary()` /
+%% `integer()`) is a single-column inverted-index term; a **list of columns** is
+%% a composite (covering) term — a config-declared collation order — encoded by
+%% `encode_tuple/1` into one order-preserving key so any *prefix* of the columns
+%% is a bounded range scan (Hexastore / RDF-permutation indices).
 
--export_type([term_value/0]).
+-export_type([term_value/0, column/0]).
 
 -define(SEP, 0).
 -define(INT_BIAS, (1 bsl 63)).
 -define(INT_MIN, -(1 bsl 63)).
 -define(INT_MAX, ((1 bsl 63) - 1)).
 -define(IDX_INFIX, "/$idx/").
+%% Leading type tags for `encode_col/1`, so one column may mix value types
+%% (a rolename `binary()` and the reserved atoms `all`/`anonymous`) and still
+%% compare unambiguously. Tags are `>= 1` (never the `0x00` separator) and are
+%% NOT escaped — `decode_col/1` dispatches on the first byte. Cross-type order
+%% follows the tag (`int < atom < binary`); within a type the escaped body is
+%% order-preserving. (Cross-type order is irrelevant to the equality bands the
+%% only current caller uses; it is fixed only so the codec is total.)
+-define(COL_INT, 1).
+-define(COL_ATOM, 2).
+-define(COL_BIN, 3).
 
 %% =============================================================================
 %% API
@@ -123,7 +143,105 @@ encode_term(Term) when is_integer(Term), Term >= ?INT_MIN, Term =< ?INT_MAX ->
     escape(<<(Term + ?INT_BIAS):64/big-unsigned>>);
 encode_term(Term) when is_integer(Term) ->
     %% Outside the signed 64-bit range supported in v1.
-    erlang:error(badarg, [Term]).
+    erlang:error(badarg, [Term]);
+encode_term(Term) when is_list(Term) ->
+    %% A composite (covering) term — a list of columns in collation order.
+    encode_tuple(Term).
+
+-doc """
+Encode a single **type-tagged** column into its order-preserving,
+`0x00`-free byte form — the building block of a composite primary key
+(`<<encode_col(C1), 0, encode_col(C2), 0, ...>>`) and of the future
+`encode_tuple`.
+
+Unlike `encode_term/1` (which restricts a column to one type), `encode_col/1`
+prepends a 1-byte type tag so a column may mix `binary()` with the reserved
+atoms (`all`/`anonymous`) — the RBAC role/username leading column — and still
+decode unambiguously via `decode_col/1`. Integers reuse the same sign-biased
+64-bit form as `encode_term/1`. The body is run through the same monotone
+escape, so the whole result contains no `0x00` and a `[<<Col,0>>, <<Col,1>>)`
+band (`col_bounds/1`) selects exactly the rows whose leading column equals `C`.
+""".
+-spec encode_col(binary() | atom() | integer()) -> binary().
+
+encode_col(V) when is_integer(V), V >= ?INT_MIN, V =< ?INT_MAX ->
+    <<?COL_INT, (escape(<<(V + ?INT_BIAS):64/big-unsigned>>))/binary>>;
+encode_col(V) when is_atom(V) ->
+    <<?COL_ATOM, (escape(atom_to_binary(V, utf8)))/binary>>;
+encode_col(V) when is_binary(V) ->
+    <<?COL_BIN, (escape(V))/binary>>.
+
+-doc """
+Inverse of `encode_col/1`. The atom branch uses `binary_to_existing_atom/2`,
+so a column atom must already be loaded on the decoding node — true for the
+RBAC reserved atoms (`all`/`anonymous`), which the codebase references directly.
+""".
+-spec decode_col(binary()) -> binary() | atom() | integer().
+
+decode_col(<<?COL_INT, Rest/binary>>) ->
+    <<N:64/big-unsigned>> = unescape(Rest),
+    N - ?INT_BIAS;
+decode_col(<<?COL_ATOM, Rest/binary>>) ->
+    binary_to_existing_atom(unescape(Rest), utf8);
+decode_col(<<?COL_BIN, Rest/binary>>) ->
+    unescape(Rest).
+
+-doc """
+Half-open `[Low, High)` bounds selecting exactly the composite keys whose
+leading column equals `C`: `{<<encode_col(C), 0>>, <<encode_col(C), 1>>}`. The
+`0x00` separator that follows the (escaped, `0x00`-free) column sorts below any
+suffix byte, so the band captures every `<<encode_col(C), 0, Suffix>>` and no
+other column's keys — the same construction as `equality_bounds/1`.
+""".
+-spec col_bounds(binary() | atom() | integer()) -> {binary(), binary()}.
+
+col_bounds(V) ->
+    Col = encode_col(V),
+    {<<Col/binary, 0>>, <<Col/binary, 1>>}.
+
+-doc """
+Encode a **composite term** — a list of columns in collation order — into one
+order-preserving binary: `«encode_col(c1), 0, encode_col(c2), 0, …, encode_col(ck)»`.
+
+This is the covering-permutation key (Hexastore / RDF-3X): each column is the
+type-tagged, `0x00`-free `encode_col/1`, joined by the `0x00` separator. Because
+every column is `0x00`-free, a **prefix** of the columns `[c1,…,cj]` (`j ≤ k`)
+has `encode_tuple([c1,…,cj])` as a byte-prefix of the full tuple's encoding, so
+`equality_bounds/1` on that prefix is a bounded range scan over every fact whose
+first `j` columns match — the property that makes a single index serve every
+prefix access pattern. An empty list encodes to `<<>>`.
+""".
+-spec encode_tuple([column()]) -> binary().
+
+encode_tuple(Cols) when is_list(Cols) ->
+    iolist_to_binary(lists:join(<<0>>, [encode_col(C) || C <- Cols])).
+
+-doc """
+Inverse of `encode_tuple/1`: split a composite-term encoding back into its
+columns. The input must be exactly the tuple bytes (no trailing primary key) —
+each column is `0x00`-free, so splitting on `0x00` recovers them. `<<>>` decodes
+to `[]`.
+""".
+-spec decode_tuple(binary()) -> [column()].
+
+decode_tuple(<<>>) ->
+    [];
+decode_tuple(Bin) when is_binary(Bin) ->
+    [decode_col(C) || C <- binary:split(Bin, <<0>>, [global])].
+
+-doc """
+Split a composite index entry's `«enc(c1),0,…,0,enc(ck),0,PrimaryKey»` body
+(the bytes *after* any realm prefix) into its `Arity` decoded columns and the
+trailing primary key. The columns are `0x00`-free so the first `Arity`
+separators delimit them; everything past the `Arity`-th separator is the primary
+key (which MAY contain `0x00`). Used by the read path for covering composite
+indices, where the columns are the answer.
+""".
+-spec decode_composite(binary(), pos_integer()) -> {[column()], binary()}.
+
+decode_composite(Bin, Arity) when is_binary(Bin), is_integer(Arity), Arity > 0 ->
+    {ColBins, PK} = take_columns(Bin, Arity, []),
+    {[decode_col(C) || C <- ColBins], PK}.
 
 -doc """
 Recover the primary key from a composite secondary key by scanning to
@@ -325,3 +443,32 @@ escape(Bin) ->
 esc_byte(0) -> <<1, 1>>;
 esc_byte(1) -> <<1, 2>>;
 esc_byte(B) -> <<B>>.
+
+%% Inverse of `escape/1`: `0x01 0x01 -> 0x00`, `0x01 0x02 -> 0x01`, every other
+%% byte unchanged. Fast path returns the input unchanged when it holds no escape
+%% intro byte (`0x01`) — the common case for validated names (no bytes `<= 0x20`).
+unescape(Bin) ->
+    case binary:match(Bin, <<1>>) of
+        nomatch -> Bin;
+        _ -> unescape(Bin, <<>>)
+    end.
+
+unescape(<<>>, Acc) ->
+    Acc;
+unescape(<<1, 1, Rest/binary>>, Acc) ->
+    unescape(Rest, <<Acc/binary, 0>>);
+unescape(<<1, 2, Rest/binary>>, Acc) ->
+    unescape(Rest, <<Acc/binary, 1>>);
+unescape(<<B, Rest/binary>>, Acc) ->
+    unescape(Rest, <<Acc/binary, B>>).
+
+%% Peel `Arity` `0x00`-delimited columns off the front; the remainder (past the
+%% Arity-th separator) is the primary key, returned verbatim (it may contain
+%% `0x00`).
+take_columns(Bin, 0, Acc) ->
+    {lists:reverse(Acc), Bin};
+take_columns(Bin, N, Acc) ->
+    case binary:split(Bin, <<0>>) of
+        [Col, Rest] -> take_columns(Rest, N - 1, [Col | Acc]);
+        [Col] -> {lists:reverse([Col | Acc]), <<>>}
+    end.

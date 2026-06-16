@@ -250,14 +250,11 @@ remove_all(RealmUri) ->
 
 remove_all(RealmUri, Username) ->
     Table = table(),
-    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    {Lo, Hi} = bondy_oplog_index_key:col_bounds(Username),
+    {ok, Rows} = bondy_db:range_all(Table, RealmUri, Lo, Hi, #{}),
     _ = [
         bondy_db:apply(Table, RealmUri, EncKey, clear)
-     || {EncKey, _V, _Hlc} <- Rows,
-        case decode_key(EncKey) of
-            {Id, _Mask, _Method} -> Id == Username;
-            _ -> false
-        end
+     || {EncKey, _V, _Hlc} <- Rows
     ],
     ok.
 
@@ -406,18 +403,13 @@ Example:
 ```
 """.
 do_match(RealmUri, Username) ->
-    Sources = [
-        KV
-     || {{U, _Mask, _Method}, _} = KV <- scan(RealmUri), U == Username
-    ],
-    lists:append(Sources, proto_all_sources(RealmUri)).
+    lists:append(scan_user(RealmUri, Username), proto_all_sources(RealmUri)).
 
 %% @private
 do_match(RealmUri, Username, AMask) ->
     Sources = [
         KV
-     || {{U, Mask, _Method}, _} = KV <- scan(RealmUri),
-        U == Username,
+     || {{_U, Mask, _Method}, _} = KV <- scan_user(RealmUri, Username),
         Mask == AMask
     ],
     lists:append(Sources, proto_all_sources(RealmUri)).
@@ -431,7 +423,7 @@ proto_all_sources(RealmUri) ->
         undefined ->
             [];
         ProtoUri ->
-            [KV || {{all, _Mask, _Method}, _} = KV <- scan(ProtoUri)]
+            scan_user(ProtoUri, all)
     end.
 
 %% @private
@@ -482,17 +474,49 @@ scan(RealmUri) ->
     [{decode_key(EncKey), V} || {EncKey, V, _Hlc} <- Rows, is_map(V)].
 
 %% @private
-%% The source store key is the 3-tuple `{Username, AMask, Authmethod}`; bondy_db
-%% keys are binaries, so encode deterministically (the same tuple → the same
-%% bytes).
-encode_key({_Username, _AMask, _Authmethod} = Key) ->
-    term_to_binary(Key).
+%% All live sources for one username in a realm — a bounded username-band range
+%% scan (`O(sources-for-user)`), used by the auth-path match instead of the
+%% full-realm `scan/1`. Same decoded `{Key, Value}` shape; cleared (non-map)
+%% cells are dropped.
+scan_user(RealmUri, Username) ->
+    {Lo, Hi} = bondy_oplog_index_key:col_bounds(Username),
+    {ok, Rows} = bondy_db:range_all(table(), RealmUri, Lo, Hi, #{}),
+    [{decode_key(EncKey), V} || {EncKey, V, _Hlc} <- Rows, is_map(V)].
 
 %% @private
-%% Decodes a store key written by `encode_key/1`. `[safe]` is sufficient — the
-%% atoms in a source key (`all`, `anonymous`) already exist.
+%% The source store key is the 3-tuple `{Username, AMask, Authmethod}`, encoded
+%% as an **order-preserving composite**: the username as a type-tagged leading
+%% column (`encode_col/1`, covering binary usernames and the reserved atoms
+%% `all`/`anonymous`), a `0x00` separator, then the canonical `term_to_binary`
+%% of `{AMask, Authmethod}`. The username column is `0x00`-free, so all of a
+%% user's sources are a contiguous band (`col_bounds(Username)`) — the auth-path
+%% match (`do_match/2,3`) is a bounded range scan, not a full-realm filter.
+encode_key({Username, AMask, Authmethod}) ->
+    <<
+        (bondy_oplog_index_key:encode_col(Username))/binary,
+        0,
+        (term_to_binary({AMask, Authmethod}, [deterministic]))/binary
+    >>.
+
+%% @private
+%% Inverse of `encode_key/1`: split at the single `0x00` separator (the username
+%% column is `0x00`-free), decode the username column, then `[safe]`-decode
+%% `{AMask, Authmethod}` (their atoms already exist).
 decode_key(Bin) when is_binary(Bin) ->
-    binary_to_term(Bin, [safe]).
+    {ColBin, Rest} = split_key(Bin),
+    {AMask, Authmethod} = binary_to_term(Rest, [safe]),
+    {bondy_oplog_index_key:decode_col(ColBin), AMask, Authmethod}.
+
+%% @private
+split_key(Bin) ->
+    case binary:match(Bin, <<0>>) of
+        {Pos, 1} ->
+            Col = binary:part(Bin, 0, Pos),
+            Suffix = binary:part(Bin, Pos + 1, byte_size(Bin) - Pos - 1),
+            {Col, Suffix};
+        nomatch ->
+            error({badarg, Bin})
+    end.
 
 sort_sources(Sources) ->
     %% sort sources first by userlist, so that 'all' matches come last

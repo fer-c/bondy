@@ -71,7 +71,7 @@ behaviour is byte-identical.
 -export([oldstate_cache_clear/1]).
 -export([max_hlc/2]).
 -export([sec_idx/1]).
--export([index_op/6]).
+-export([index_op/7]).
 -export([merge_idx_ops/2]).
 -export([dispatch_index_ops/4]).
 -export([invalidate_cache/4]).
@@ -460,37 +460,53 @@ index_ops_for_cell(
 %% cell's new HLC, so the index cell's LWW-over-presence fold converges
 %% regardless of arrival order.
 index_ops_for_one(
-    #{index_name := IName, spec := Spec, sec_shard_count := SCount},
+    #{index_name := IName, spec := Spec, sec_shard_count := SCount} = Desc,
     Bucket,
     Key,
     OldValue,
     NewValue,
     Hlc
 ) ->
+    RealmFolded = maps:get(realm_folded, Desc, false),
     OldTerms = lists:usort(bondy_oplog_index_spec:terms(Spec, OldValue)),
     NewTerms = lists:usort(bondy_oplog_index_spec:terms(Spec, NewValue)),
     SecBucket = bondy_oplog_index_key:bucket(Bucket, IName),
     Cols = bondy_oplog_index_spec:project(Spec, NewValue),
     Removed = OldTerms -- NewTerms,
     [
-        index_op(IName, SecBucket, SCount, T, Key, {put, Cols, Hlc})
+        index_op(IName, SecBucket, SCount, T, Key, {put, Cols, Hlc}, RealmFolded)
      || T <- NewTerms
     ] ++
         [
-            index_op(IName, SecBucket, SCount, T, Key, {remove, Hlc})
+            index_op(IName, SecBucket, SCount, T, Key, {remove, Hlc}, RealmFolded)
          || T <- Removed
         ].
 
 %% @private
-index_op(IName, SecBucket, SCount, Term, PrimaryKey, EventDelta) ->
+index_op(IName, SecBucket, SCount, Term, PrimaryKey, EventDelta, RealmFolded) ->
     SecShard = bondy_oplog_index_key:shard(SecBucket, Term, SCount),
-    SecKey = bondy_oplog_index_key:encode(Term, PrimaryKey),
+    SecKey = index_seckey(Term, PrimaryKey, RealmFolded),
     Op =
         case EventDelta of
             {put, Cols, Hlc} -> {put, SecBucket, SecKey, Cols, Hlc};
             {remove, Hlc} -> {remove, SecBucket, SecKey, Hlc}
         end,
     {IName, SecShard, Op}.
+
+%% @private
+%% Compose the secondary key. A scalar term keeps the term-first layout
+%% `«enc(Term), 0, PrimaryKey»` (a realm, if the topology folds one, stays inside
+%% `PrimaryKey` and is scoped on the read side by `index_eq_bounds/4`). A composite
+%% (list) term on a realm-folding topology (G-1) is recomposed realm-FIRST —
+%% `«Realm, 0, enc(Tuple), 0, BareKey»` — so a prefix/range scan over the tuple
+%% stays inside one realm. The realm is split out of the G-1 folded `PrimaryKey`
+%% `«Realm, 0, BareKey»` (realm URIs are NUL-free, so the first `0x00` delimits it).
+index_seckey(Term, PrimaryKey, true) when is_list(Term) ->
+    [Realm, BareKey] = binary:split(PrimaryKey, <<0>>),
+    <<Realm/binary, 0,
+        (bondy_oplog_index_key:encode_term(Term))/binary, 0, BareKey/binary>>;
+index_seckey(Term, PrimaryKey, _RealmFolded) ->
+    bondy_oplog_index_key:encode(Term, PrimaryKey).
 
 %% @private
 %% Group the cell's `{IndexName, SecShard, Op}` triples into

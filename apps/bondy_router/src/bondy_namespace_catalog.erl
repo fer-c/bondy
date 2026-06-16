@@ -39,7 +39,7 @@ Not-yet-migrated tables stay on `plum_db` and are not opened — unless
 `bondy_router.oplog_catalog_enabled` (`oplog.catalog`) is set, which provisions
 **all** declared core tables too (for validating a future domain's provisioning
 before its cut-over). So a default node opens exactly the migrated tables
-(currently `api_gateway`, `bondy_bridge_relay`, `bondy_ticket`,
+(currently `bondy_realm`, `api_gateway`, `bondy_bridge_relay`, `bondy_ticket`,
 `bondy_oauth_token`, `security_users`, `security_groups`,
 `security_user_grants`, `security_group_grants` and `security_sources`)
 and serves every other read from `plum_db`.
@@ -98,7 +98,10 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
     %% `true` once the domain reads/writes bondy_db (always provisioned).
     migrated => boolean(),
     %% `true` to wire the table's appliers to publish change events.
-    publish => boolean()
+    publish => boolean(),
+    %% Declared secondary indexes (substrate-maintained reverse access
+    %% paths), passed verbatim to `bondy_db:open_table/3`.
+    indexes => [bondy_oplog_index_spec:spec()]
 }.
 
 -export_type([table_spec/0]).
@@ -148,22 +151,34 @@ Returns the declarative specs for all twelve tables (both DBs), mirroring the
 tables() ->
     [
         %% core — durable (leveled, shared_shards)
-        #{name => ?PLUM_DB_REALM_TAB,        db => core, durability => durable, shard_by => realm, fold => lww},
+        %% bondy_realm — ninth domain cut over to bondy_db (§11.4). Unlike the
+        %% per-realm tables this is a GLOBAL registry: every realm shares one
+        %% band (the empty binary) keyed by its Uri, so `shard_by => key`
+        %% (NOT realm — a constant band under realm-sharding would put every
+        %% realm on one shard) spreads realms across shards while a single
+        %% `bondy_db:list/2` over the band scatter-scans them all. Storage-only
+        %% (no `publish`): local lifecycle is inline in bondy_realm, the remote
+        %% delete→close is deferred to oplog.aae.
+        #{name => ?PLUM_DB_REALM_TAB,        db => core, durability => durable, shard_by => key,   fold => lww, migrated => true},
         %% security_users — fifth domain cut over to bondy_db (§11.4): always
         %% provisioned, storage-only (no `publish`). Its local lifecycle
         %% side-effects fire inline in bondy_rbac_user; the remote on_merge
         %% session-close is deferred to the oplog.aae phase (a publish/reactor
         %% seam then).
-        #{name => ?PLUM_DB_USER_TAB,         db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        #{name => ?PLUM_DB_USER_TAB,         db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, indexes => user_indexes()},
         %% security_groups — sixth domain cut over to bondy_db (§11.4): always
         %% provisioned, storage-only (no `publish`). Local lifecycle events fire
         %% inline in bondy_rbac_group; on_merge was a no-op.
         #{name => ?PLUM_DB_GROUP_TAB,        db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
-        %% security_group_members — net-new split table (no plum_db prefix), a
-        %% reverse membership index. Membership currently lives on the user side
-        %% (`user.groups`), so this stays DORMANT (not `migrated`) until the
-        %% oplog.aae phase — its `aw` fold (observed-remove, design §3 table 5b)
-        %% only matters under concurrent multi-node member edits.
+        %% security_group_members — net-new split table (no plum_db prefix).
+        %% The reverse membership READ path ("which users are in group G") is
+        %% NOT this table: it is the substrate-maintained `by_group` secondary
+        %% index on `security_users` (see `user_indexes/0`), which rides on the
+        %% authoritative lww `user.groups`. This table stays DORMANT (not
+        %% `migrated`) for the oplog.aae phase, where it becomes the *add-wins*
+        %% forward membership relation (the `user.groups` → aw_map split, design
+        %% §3 table 5b / D-R1) — its `aw` fold (observed-remove) only matters
+        %% under concurrent multi-node member edits, which need AAE (off today).
         #{name => security_group_members,    db => core, durability => durable, shard_by => realm, fold => aw},
         %% security_{group,user}_grants — seventh domain cut over to bondy_db
         %% (§11.4): always provisioned, storage-only (no `publish` — grants carry
@@ -171,14 +186,21 @@ tables() ->
         %% as `lww` per the CRDT-fork resolution: mv only differs from lww under
         %% concurrent multi-node grant edits, which need AAE (currently off), so
         %% honouring mv is deferred to the oplog.aae phase (same deferral as the
-        %% dropped ticket resolver). Compound `{Rolename, Resource}` keys are
-        %% `term_to_binary`-encoded by `bondy_rbac`.
-        #{name => ?PLUM_DB_GROUP_GRANT_TAB,  db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
-        #{name => ?PLUM_DB_USER_GRANT_TAB,   db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        %% dropped ticket resolver). The compound `{Rolename, Resource}` key is an
+        %% order-preserving composite (`bondy_rbac:encode_key/1`) so the forward
+        %% "grants for role" query is a bounded role-band range scan; the
+        %% `by_resource` index (piece #2) provides the equality reverse lookup
+        %% "grants on resource R" (see `grant_indexes/0`).
+        #{name => ?PLUM_DB_GROUP_GRANT_TAB,  db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, indexes => grant_indexes()},
+        #{name => ?PLUM_DB_USER_GRANT_TAB,   db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, indexes => grant_indexes()},
         %% security_sources — eighth domain cut over to bondy_db (§11.4):
         %% storage-only, same lww-defer as grants (declared mv → cut lww;
-        %% honouring mv deferred to oplog.aae). Compound `{Username, AMask,
-        %% Authmethod}` keys are `term_to_binary`-encoded by `bondy_rbac_source`.
+        %% honouring mv deferred to oplog.aae). The compound `{Username, AMask,
+        %% Authmethod}` key is an order-preserving composite
+        %% (`bondy_rbac_source:encode_key/1`) so the forward "sources for user"
+        %% match (on the auth path) is a bounded username-band range scan. The
+        %% reverse by-mask lookup is deferred (the stored `cidr` differs from the
+        %% key's anchor-mask, and CIDR matching is containment, not equality).
         #{name => ?PLUM_DB_SOURCE_TAB,       db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
         %% api_gateway — first domain cut over to bondy_db (§11.4): always
         %% provisioned, and publishes change events so the cowboy-dispatch
@@ -498,15 +520,53 @@ stop_sup(Sup) when is_pid(Sup) ->
 
 %% @private
 %% Maps a table spec to its `bondy_db:open_table/3` opts: the fold→CRDT wiring
-%% (see `fold_opts/1`) plus `publish` for tables with a change reactor.
-%% `shard_by` is NOT passed — `open_table` does not yet honour realm-sharding
-%% (§11.4).
+%% (see `fold_opts/1`), `publish` for tables with a change reactor, and any
+%% declared secondary `indexes`. `shard_by` is NOT passed — `open_table` does
+%% not yet honour realm-sharding (§11.4).
 table_opts(#{fold := Class} = Spec) ->
-    Opts = fold_opts(Class),
-    case maps:get(publish, Spec, false) of
-        true -> Opts#{publish => true};
-        false -> Opts
+    Opts0 = fold_opts(Class),
+    Opts1 =
+        case maps:get(publish, Spec, false) of
+            true -> Opts0#{publish => true};
+            false -> Opts0
+        end,
+    case maps:get(indexes, Spec, []) of
+        [] -> Opts1;
+        Indexes -> Opts1#{indexes => Indexes}
     end.
+
+%% @private
+%% The `security_users` secondary indexes.
+%%
+%% `by_group` is the **reverse membership access path** — the `member`
+%% relation's reverse direction (design §2.3 / D-R6). A multi-valued index
+%% over the user record's `groups` list yields one entry per (group, user),
+%% so "which users are in group G" is a bounded `bondy_db:index_get/5`
+%% instead of the O(all-users) realm scan group deletion used to require.
+%%
+%% Terms are stored verbatim (`normalize => none`): `user.groups` is already
+%% casefolded by `bondy_data_validators:groupnames/1` at write, and the query
+%% side casefolds identically via `bondy_rbac_group:normalise_name/1`, so the
+%% query term matches the stored term exactly. The substrate maintains the
+%% index on every user write and removes every entry on delete; the forward
+%% direction stays the authoritative lww `user.groups`.
+user_indexes() ->
+    [#{name => by_group, extract => [groups]}].
+
+
+%% @private
+%% The equality reverse index for grants (piece #2): "which roles have a grant
+%% on resource R". The grant cell value is the fact map
+%% `#{resource => Resource, permissions => [_]}` (reshaped from the bare
+%% permissions list precisely so the resource column is reachable from the
+%% value), and `normalize => canonical` maps the structured resource
+%% (`any | {Uri, Strategy}`) to its deterministic binary so the lookup term
+%% matches byte-for-byte. The reverse read (`bondy_rbac:grants_on_resource/2`)
+%% decodes each hit's primary key to recover the role. Both grant tables share
+%% the same `by_resource` name; co-located/per-table index scoping keeps them
+%% distinct.
+grant_indexes() ->
+    [#{name => by_resource, extract => [resource], normalize => canonical}].
 
 
 %% @private

@@ -50,6 +50,7 @@ all() ->
         externalize_grant_formats,
         group_deletion_cascades_grants,
         grant_to_any_resource,
+        reverse_grants_on_resource,
         security_disabled_allows_all
     ].
 
@@ -1487,6 +1488,101 @@ grant_to_any_resource(_) ->
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"totally.different">>, C2)
     ).
+
+%% =============================================================================
+%% REVERSE GRANTS — "who can act on resource R" (piece #2 by_resource index)
+%% =============================================================================
+
+reverse_grants_on_resource(_) ->
+    Uri = <<"com.test.reverse_grants">>,
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [#{name => <<"g_alpha">>}, #{name => <<"g_beta">>}],
+        users => [#{username => <<"u_solo">>}],
+        grants => [
+            %% Two groups AND one user, all granted on the SAME resource.
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.shared.api">>,
+                match => <<"exact">>,
+                roles => [<<"g_alpha">>, <<"g_beta">>, <<"u_solo">>]
+            },
+            %% A different resource, granted to one group only.
+            #{
+                permissions => [<<"wamp.publish">>],
+                uri => <<"com.other.api">>,
+                match => <<"exact">>,
+                roles => [<<"g_alpha">>]
+            }
+        ]
+    }),
+    ok = flush_grant_indexes(),
+
+    %% Discover the stored (normalised) resource shapes from a forward grant, so
+    %% the reverse query term matches byte-for-byte regardless of normalisation.
+    AllGrants = bondy_rbac:grants(Uri, #{}),
+    Shared = stored_resource(AllGrants, <<"com.shared.api">>),
+    Other = stored_resource(AllGrants, <<"com.other.api">>),
+
+    %% Reverse: every role (2 groups + 1 user, across BOTH grant tables) granted
+    %% on the shared resource.
+    ?assertEqual(
+        lists:sort([<<"g_alpha">>, <<"g_beta">>, <<"u_solo">>]),
+        reverse_roles(Uri, Shared)
+    ),
+    %% Reverse on the other resource returns only the one group granted there.
+    ?assertEqual([<<"g_alpha">>], reverse_roles(Uri, Other)),
+    %% A resource nobody was granted on returns empty.
+    ?assertEqual(
+        [], bondy_rbac:grants_on_resource(Uri, {<<"com.nobody">>, <<"exact">>})
+    ),
+
+    %% Realm isolation: the SAME resource granted in a different realm must not
+    %% leak into this realm's reverse query (piece #1 realm-scoping).
+    Uri2 = <<"com.test.reverse_grants_other">>,
+    _ = bondy_realm:create(#{
+        uri => Uri2,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [#{name => <<"g_intruder">>}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.shared.api">>,
+                match => <<"exact">>,
+                roles => [<<"g_intruder">>]
+            }
+        ]
+    }),
+    ok = flush_grant_indexes(),
+    ?assertEqual(
+        lists:sort([<<"g_alpha">>, <<"g_beta">>, <<"u_solo">>]),
+        reverse_roles(Uri, Shared)
+    ),
+    ?assertEqual([<<"g_intruder">>], reverse_roles(Uri2, Shared)).
+
+%% The stored, normalised resource for a grant whose URI is `WantUri`.
+stored_resource(Grants, WantUri) ->
+    hd([
+        Res
+     || {{_Role, {U, _S} = Res}, _Perms} <- Grants, U == WantUri
+    ]).
+
+reverse_roles(Uri, Resource) ->
+    lists:sort([
+        Role
+     || {{Role, _Res}, _Perms} <- bondy_rbac:grants_on_resource(Uri, Resource)
+    ]).
+
+%% The by_resource index is asynchronous; flush both grant tables' writers so the
+%% reverse read is deterministic (read-your-writes).
+flush_grant_indexes() ->
+    UserTab = bondy_namespace_catalog:table(security_user_grants),
+    GroupTab = bondy_namespace_catalog:table(security_group_grants),
+    ok = bondy_db:await_index(UserTab, by_resource),
+    ok = bondy_db:await_index(GroupTab, by_resource).
 
 %% =============================================================================
 %% SECURITY DISABLED

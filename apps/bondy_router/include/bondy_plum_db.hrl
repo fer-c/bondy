@@ -60,13 +60,13 @@
     {?PLUM_DB_REALM_TAB, #{
         type => ram_disk,
         shard_by => prefix,
-        callbacks => #{
-            will_merge => {bondy_realm, will_merge},
-            on_merge => {bondy_realm, on_merge},
-            on_update => {bondy_realm, on_update},
-            on_delete => {bondy_realm, on_delete},
-            on_erase => {bondy_realm, on_erase}
-        }
+        %% Cut over to bondy_db (design §11.4): realms are no longer written to
+        %% plum_db, so the prefix callbacks are gone. The local lifecycle
+        %% notifications fire inline in bondy_realm (on_create/on_update/
+        %% on_delete); the remote on_merge (close sessions on a peer's delete)
+        %% is deferred to the oplog.aae phase. The LOCAL plum_db callbacks were
+        %% already no-ops.
+        callbacks => #{}
     }},
     {?PLUM_DB_USER_TAB, #{
         type => ram_disk,

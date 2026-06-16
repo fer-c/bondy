@@ -113,6 +113,8 @@ no-op.
     | reserved_name
     | already_exists.
 -type list_opts() :: #{limit => pos_integer()}.
+%% Note: the group list contract returns a bare list (the anonymous group always
+%% heads it), so `Limit` truncates rather than yielding a resumable cursor.
 
 -export_type([t/0]).
 -export_type([external/0]).
@@ -129,6 +131,7 @@ no-op.
 -export([list/1]).
 -export([list/2]).
 -export([lookup/2]).
+-export([members/3]).
 -export([meta/1]).
 -export([name/1]).
 -export([new/1]).
@@ -314,12 +317,14 @@ remove(RealmUri, Name, _Opts) ->
         %% is added again, they don't pick up these grants
         ok = bondy_rbac:revoke_group(RealmUri, Name),
 
-        %% Delete the group out of any user or group's `groups` property.
-        %% This is very slow as we have to iterate over all the roles (users and
-        %% groups) removing and updating the record in the db.
-        %% By doing this we will be automatically upgradings those object
-        %% versions.
-        ok = bondy_rbac_user:remove_group(RealmUri, all, Name),
+        %% Delete the group out of any user's or group's `groups` property.
+        %% For USERS this drains the group's members via the `by_group`
+        %% reverse index (O(members-of-G)) instead of scanning every user in
+        %% the realm. For GROUPS (parent-of relationships) there is no reverse
+        %% index yet, so it still folds every group — acceptable since groups
+        %% are few; a `group_parent` reverse index is the identical follow-on.
+        %% Both updates bump the affected records' object versions.
+        ok = bondy_rbac_user:remove_group_from_members(RealmUri, Name),
         ok = remove_group(RealmUri, all, Name),
 
         %% Delete the group and fire the local delete side-effect (formerly
@@ -345,20 +350,27 @@ entirely.
 remove_all(RealmUri, Opts) ->
     Dirty = maps:get(dirty, Opts, false),
     Table = table(),
-    {ok, Rows} = bondy_db:list(Table, RealmUri),
-
-    _ = [
-        case Dirty of
-            true ->
-                %% Realm teardown: clear the cell and mirror plum_db's
-                %% per-delete on_delete event.
-                ok = bondy_db:apply(Table, RealmUri, Name, clear),
-                do_on_delete(RealmUri, Name);
-            false ->
-                remove(RealmUri, Name, Opts)
-        end
-     || {Name, V, _Hlc} <- Rows, is_map(V)
-    ],
+    %% Stream every group cell through a bounded keyset fold instead of
+    %% materialising the whole realm. Deleting behind a forward keyset cursor is
+    %% safe — cleared cells drop out of the next page.
+    {ok, ok} = bondy_relation:fold(
+        raw_relation(Table),
+        RealmUri,
+        fun({Name, _V}, ok) ->
+            _ =
+                case Dirty of
+                    true ->
+                        %% Realm teardown: clear the cell and mirror plum_db's
+                        %% per-delete on_delete event.
+                        ok = bondy_db:apply(Table, RealmUri, Name, clear),
+                        do_on_delete(RealmUri, Name);
+                    false ->
+                        remove(RealmUri, Name, Opts)
+                end,
+            ok
+        end,
+        ok
+    ),
     ok.
 
 -spec lookup(uri(), list() | binary()) -> t() | {error, not_found}.
@@ -404,21 +416,39 @@ list(RealmUri) ->
 list(RealmUri, Opts) ->
     %% TODO We SHOULD list the realm's prototype roups as well (amd potentially
     %% marking them with a flag)
-    {ok, Rows} = bondy_db:list(table(), RealmUri),
-
-    Groups = [
-        from_term({Name, V})
-     || {Name, V, _Hlc} <- Rows, is_map(V)
-    ],
-
-    All = [?ANONYMOUS | Groups],
-
+    %% The synthetic `?ANONYMOUS` group is not stored; it always heads the list.
+    Relation = relation(),
     case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
-            All;
+            %% Whole-realm listing — streamed through a bounded keyset fold so
+            %% it never materialises the raw cell set.
+            {ok, Acc} = bondy_relation:fold(
+                Relation, RealmUri, fun(Group, A) -> [Group | A] end, []
+            ),
+            [?ANONYMOUS | lists:reverse(Acc)];
         Limit ->
-            lists:sublist(All, Limit)
+            %% Bounded prefix: at most `Limit` rows incl. the leading anonymous
+            %% group (mirrors the prior `lists:sublist([?ANONYMOUS | All], _)`).
+            {ok, #{values := Groups}} =
+                bondy_relation:list(Relation, RealmUri, #{limit => Limit}),
+            lists:sublist([?ANONYMOUS | Groups], Limit)
     end.
+
+-doc """
+Lists the usernames of the members of group `Name` in realm `RealmUri`,
+paginated — the reverse direction of the `member` relation.
+
+Delegates to `bondy_rbac_user:list_members/3`, which reads the substrate
+`by_group` index (bounded, realm-scoped) rather than scanning the realm's
+users. `Opts` carries `limit` and `cursor`; returns `{Usernames,
+Continuation}` (`Continuation` is `undefined` at the end). The read is
+eventually-consistent with `user.groups`.
+""".
+-spec members(RealmUri :: uri(), Name :: name(), Opts :: map()) ->
+    {[bondy_rbac_user:username()], Continuation :: binary() | undefined}.
+
+members(RealmUri, Name, Opts) ->
+    bondy_rbac_user:list_members(RealmUri, Name, Opts).
 
 -doc "Returns the external representation of the Group.".
 -spec to_external(Group :: t()) -> external().
@@ -520,6 +550,35 @@ table() ->
         undefined -> error(security_groups_table_unavailable);
         Table -> Table
     end.
+
+%% @private
+%% The `security_groups` table as a paginatable relation of group records.
+relation() ->
+    bondy_relation:new(?PLUM_DB_GROUP_TAB, #{
+        table => table(),
+        decode => fun decode_group_row/1
+    }).
+
+%% @private
+decode_group_row({Name, V, _Hlc}) when is_map(V) ->
+    {ok, from_term({Name, V})};
+decode_group_row(_) ->
+    skip.
+
+%% @private
+%% Every group cell as `{Name, RawValue}` — for whole-table maintenance
+%% (`remove_all/2`) that works from the storage key.
+raw_relation(Table) ->
+    bondy_relation:new(?PLUM_DB_GROUP_TAB, #{
+        table => Table,
+        decode => fun decode_raw_row/1
+    }).
+
+%% @private
+decode_raw_row({Name, V, _Hlc}) when is_map(V) ->
+    {ok, {Name, V}};
+decode_raw_row(_) ->
+    skip.
 
 %% @private
 %% Reads a cell, returning the bare value or `undefined` when the cell is absent
@@ -660,11 +719,14 @@ type_and_version(Group) ->
 ) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
-    {ok, Rows} = bondy_db:list(table(), RealmUri),
-    _ = [
-        update_groups(RealmUri, from_term({Name, V}), Groupnames, Fun)
-     || {Name, V, _Hlc} <- Rows, is_map(V)
-    ],
+    %% Bounded keyset fold over every group record — replaces a full-realm
+    %% materialise.
+    {ok, ok} = bondy_relation:fold(
+        relation(),
+        RealmUri,
+        fun(Group, ok) -> update_groups(RealmUri, Group, Groupnames, Fun) end,
+        ok
+    ),
     ok;
 update_groups(RealmUri, Groups, Groupnames, Fun) when is_list(Groups) ->
     _ = [update_groups(RealmUri, Group, Groupnames, Fun) || Group <- Groups],

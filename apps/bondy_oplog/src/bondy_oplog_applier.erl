@@ -2299,18 +2299,19 @@ index_puts_for_cell({_NS, SecIndexes}, Id, Kernel, Bucket, Key, State, Hlc) ->
 
 %% @private
 index_puts_for_one(
-    #{index_name := IName, spec := Spec, sec_shard_count := SCount},
+    #{index_name := IName, spec := Spec, sec_shard_count := SCount} = Desc,
     Bucket,
     Key,
     Value,
     Hlc
 ) ->
+    RealmFolded = maps:get(realm_folded, Desc, false),
     Terms = lists:usort(bondy_oplog_index_spec:terms(Spec, Value)),
     SecBucket = bondy_oplog_index_key:bucket(Bucket, IName),
     Cols = bondy_oplog_index_spec:project(Spec, Value),
     [
         bondy_oplog_cell_apply:index_op(
-            IName, SecBucket, SCount, T, Key, {put, Cols, Hlc}
+            IName, SecBucket, SCount, T, Key, {put, Cols, Hlc}, RealmFolded
         )
      || T <- Terms
     ].
