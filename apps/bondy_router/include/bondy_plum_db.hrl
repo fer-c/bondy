@@ -71,13 +71,11 @@
     {?PLUM_DB_USER_TAB, #{
         type => ram_disk,
         shard_by => prefix,
-        callbacks => #{
-            will_merge => {bondy_rbac_user, will_merge},
-            on_merge => {bondy_rbac_user, on_merge},
-            on_update => {bondy_rbac_user, on_update},
-            on_delete => {bondy_rbac_user, on_delete},
-            on_erase => {bondy_rbac_user, on_erase}
-        }
+        %% Cut over to bondy_db (design §11.4): users are no longer written to
+        %% plum_db, so the prefix callbacks are gone. The local lifecycle
+        %% side-effects fire inline in bondy_rbac_user; the remote on_merge
+        %% side-effect is deferred to the oplog.aae phase.
+        callbacks => #{}
     }},
     {?PLUM_DB_GROUP_TAB, #{
         type => ram_disk,

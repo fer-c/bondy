@@ -168,8 +168,9 @@ provision_all() ->
 
 
 %% Default (flag off): only the migrated domains' tables (api_gateway,
-%% bondy_bridge_relay, bondy_ticket, bondy_oauth_token) are opened; the core DB
-%% still comes up to host them, but not-yet-migrated tables stay shut.
+%% bondy_bridge_relay, bondy_ticket, bondy_oauth_token, security_users) are
+%% opened; the core DB still comes up to host them, but not-yet-migrated tables
+%% stay shut.
 migrated_only() ->
     Tmp = make_tmpdir(),
     set_env(false, 1, Tmp),
@@ -184,6 +185,8 @@ migrated_only() ->
             ?CAT:table(bondy_ticket)),
         ?assertMatch(#{entity_type := bondy_oauth_token, db_name := core},
             ?CAT:table(bondy_oauth_token)),
+        ?assertMatch(#{entity_type := security_users, db_name := core},
+            ?CAT:table(security_users)),
         %% Not-yet-migrated core tables are NOT opened.
         ?assertEqual(undefined, ?CAT:table(bondy_realm)),
         ?assertEqual(undefined, ?CAT:table(security_user_grants)),

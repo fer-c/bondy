@@ -9,6 +9,23 @@ A user is a role that is able to log into a Bondy Realm.
 Users have attributes associated with themelves like username, credentials
 (password or authorized keys) and metadata determined by the client
 applications. Users can be assigned group memberships.
+
+## Storage
+
+Users are persisted in `bondy_db` (design §11.4 — cut over from plum_db). The
+durable `security_users` table is provisioned by `bondy_namespace_catalog`
+(`fold => lww`, `shard_by => realm`). Each user (and each alias index entry)
+is a cell keyed by its `Username` / `Alias` binary, addressed as
+`(Table, RealmUri, Key)` — the realm is the bucket, mirroring the old
+`{security_users, RealmUri}` plum_db prefix.
+
+The plum_db prefix callbacks are gone. Their **local** side-effects —
+revoking the user's tickets, closing local sessions and publishing the
+`{[bondy, user, added | updated | deleted], ...}` events — now fire **inline**
+at the write / delete chokepoints (`do_on_update/3`, `do_on_delete/2`). The
+**remote** `on_merge` side-effect (closing sessions when a peer's AAE merge
+shows a delete or credential change) has no equivalent yet: it is deferred to
+the `oplog.aae` phase, where it becomes a `bondy_db` publish/reactor seam.
 """.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -22,12 +39,6 @@ applications. Users can be assigned group memberships.
 -define(USER_TYPE, user).
 -define(IS_USER(X), ?USER_TYPE =:= map_get(type, X)).
 -define(VERSION, <<"1.1">>).
--define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_USER_TAB, RealmUri}).
-
-%% TODO resolver function to reconcile sso_realm_uri, meta, groups,
-%% password and authorized_keys. In the case of sso_realm_uri and groups
-%% checking whether they exist.
--define(FOLD_OPTS, [{resolver, lww}]).
 
 -define(VALIDATOR, begin
     ?OPTS_VALIDATOR
@@ -254,13 +265,6 @@ end#{
 -export([update/3]).
 -export([update/4]).
 -export([username/1]).
-
-%% PLUM_DB PREFIX CALLBACKS
--export([will_merge/3]).
--export([on_merge/3]).
--export([on_update/3]).
--export([on_delete/2]).
--export([on_erase/2]).
 
 %% =============================================================================
 %% API
@@ -563,10 +567,10 @@ remove(RealmUri, Username0, _Opts) when is_binary(Username0) ->
 
         User = fetch(RealmUri, Username),
         Aliases = maps:get(aliases, User, []),
-        PDBPrefix = ?PLUMDB_PREFIX(RealmUri),
+        Table = table(),
 
         %% We remove all aliases (if it has any)
-        _ = [plum_db:delete(PDBPrefix, Alias) || Alias <- Aliases],
+        _ = [bondy_db:apply(Table, RealmUri, Alias, clear) || Alias <- Aliases],
 
         %% We remove this user from sources
         ok = bondy_rbac_source:remove_all(RealmUri, Username),
@@ -575,8 +579,10 @@ remove(RealmUri, Username0, _Opts) when is_binary(Username0) ->
         %% is added again, it doesn't pick up these grants
         ok = bondy_rbac:revoke_user(RealmUri, Username),
 
-        %% We finally delete the user, on_delete/2 will be called by plum_db
-        ok = plum_db:delete(PDBPrefix, Username)
+        %% We finally delete the user and fire the local delete side-effects
+        %% (formerly plum_db's on_delete callback).
+        ok = bondy_db:apply(Table, RealmUri, Username, clear),
+        do_on_delete(RealmUri, Username)
     catch
         error:{no_such_user, _} = Reason ->
             {error, Reason};
@@ -599,19 +605,25 @@ entirely.
 
 remove_all(RealmUri, Opts) ->
     Dirty = maps:get(dirty, Opts, false),
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
-    FoldOpts = [{keys_only, true}, {remove_tombstones, true}],
+    Table = table(),
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
 
-    _ = plum_db:foreach(
-        fun
-            (Name) when Dirty == true ->
-                _ = plum_db:delete(Prefix, Name);
-            (Name) ->
-                _ = remove(RealmUri, Name, Opts)
-        end,
-        Prefix,
-        FoldOpts
-    ),
+    _ = [
+        case Dirty of
+            true ->
+                %% Realm teardown: clear every cell (users and alias indexes).
+                %% Mirror plum_db's per-delete on_delete for user records only;
+                %% alias index cells fire no lifecycle side-effects.
+                ok = bondy_db:apply(Table, RealmUri, Key, clear),
+                ?IS_USER(V) andalso do_on_delete(RealmUri, Key);
+            false ->
+                %% Route user records through remove/3 (which also clears their
+                %% aliases, sources and grants). Alias cells are skipped — they
+                %% are removed as part of their user's removal.
+                ?IS_USER(V) andalso remove(RealmUri, Key, Opts)
+        end
+     || {Key, V, _Hlc} <- Rows, is_map(V)
+    ],
     ok.
 
 -spec lookup(RealmUri :: uri(), Username :: username_int()) ->
@@ -622,9 +634,7 @@ lookup(RealmUri, Username0) ->
         anonymous ->
             {ok, ?ANONYMOUS};
         Username ->
-            Prefix = ?PLUMDB_PREFIX(RealmUri),
-
-            case plum_db:get(Prefix, Username) of
+            case do_get(RealmUri, Username) of
                 undefined ->
                     {error, not_found};
                 Val0 when ?IS_ALIAS(Val0) ->
@@ -669,35 +679,24 @@ list(RealmUri) ->
 
 -spec list(RealmUri :: uri(), Opts :: list_opts()) ->
     [t()]
-    | {[t()], plum_db:continuation()}.
+    | {[t()], Continuation :: term()}.
 
 list(RealmUri, Opts) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
+    {ok, Rows} = bondy_db:list(table(), RealmUri),
 
-    FoldOpts =
-        case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
-            undefined ->
-                ?FOLD_OPTS;
-            Limit ->
-                [{limit, Limit} | ?FOLD_OPTS]
-        end,
+    Users = [
+        from_term({Key, V})
+     || {Key, V, _Hlc} <- Rows, is_map(V), not (?IS_ALIAS(V))
+    ],
 
-    plum_db:fold(
-        fun
-            ({_, ?TOMBSTONE}, Acc) ->
-                %% Deleted, we ignore it
-                Acc;
-            ({_, #{type := ?ALIAS_TYPE}}, Acc) ->
-                %% An alias, we ignore it
-                Acc;
-            ({_, _} = Term, Acc) ->
-                %% Consider legacy storage formats
-                [from_term(Term) | Acc]
-        end,
-        [],
-        Prefix,
-        FoldOpts
-    ).
+    case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
+        undefined ->
+            Users;
+        Limit ->
+            %% bondy_db:list is not paginated; truncate and return a terminal
+            %% continuation to preserve the `{List, Continuation}` contract.
+            {lists:sublist(Users, Limit), undefined}
+    end.
 
 -spec change_password(
     RealmUri :: uri(),
@@ -889,7 +888,6 @@ remove_groups(RealmUri, Users, Groupnames) ->
 unknown(_, []) ->
     [];
 unknown(RealmUri, Usernames) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
     Set = ordsets:from_list(Usernames),
     ordsets:fold(
         fun
@@ -897,7 +895,7 @@ unknown(RealmUri, Usernames) ->
                 Acc;
             (Username0, Acc) when is_binary(Username0) ->
                 Username = normalise_username(Username0),
-                case plum_db:get(Prefix, Username) of
+                case do_get(RealmUri, Username) of
                     undefined -> [Username | Acc];
                     _ -> Acc
                 end
@@ -918,105 +916,63 @@ normalise_username(_) ->
     error(badarg).
 
 %% =============================================================================
-%% PLUM_DB PREFIX CALLBACKS
+%% PRIVATE: STORAGE
 %% =============================================================================
 
--doc "bondy_config".
-will_merge(_PKey, _New, _Old) ->
-    true.
+%% @private
+%% The published `security_users` table handle, or an error when the catalogue
+%% has not provisioned it yet.
+table() ->
+    case bondy_namespace_catalog:table(?PLUM_DB_USER_TAB) of
+        undefined -> error(security_users_table_unavailable);
+        Table -> Table
+    end.
 
-on_merge({?PLUMDB_PREFIX(RealmUri), _}, New, undefined = Old) ->
-    ?LOG_DEBUG(#{
-        description => "on_merge",
-        realm_uri => RealmUri,
-        new => New,
-        old => Old
-    }),
+%% @private
+%% Reads a cell, returning the bare value or `undefined` when the cell is absent
+%% or cleared — mirroring the old `plum_db:get/2` contract.
+do_get(RealmUri, Key) ->
+    case bondy_db:read(table(), RealmUri, Key) of
+        {ok, {Value, _Hlc}} -> Value;
+        {error, not_found} -> undefined
+    end.
+
+%% =============================================================================
+%% PRIVATE: LIFECYCLE SIDE-EFFECTS
+%% =============================================================================
+%% These were the plum_db `on_update` / `on_delete` prefix callbacks: plum_db
+%% fired them after every LOCAL write/delete. With bondy_db they are invoked
+%% inline from the write / delete chokepoints (`store/3`, `remove/3`,
+%% `remove_all/2`). The REMOTE `on_merge` side-effect — closing local sessions
+%% when a peer's AAE merge shows a delete or credential change — is deferred to
+%% the `oplog.aae` phase, where it becomes a `bondy_db` publish/reactor seam.
+
+%% @private
+-spec do_on_update(uri(), username_int(), IsCreate :: boolean()) -> ok.
+
+do_on_update(RealmUri, Username, true) ->
+    bondy_event_manager:notify({[bondy, user, added], RealmUri, Username}),
     ok;
-on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
-    ?LOG_DEBUG(#{
-        description => "on_merge",
-        new => New,
-        old => Old
-    }),
-    %% We need to determine if the user was deleted or its credentials updated
-    %% in which case we need to close all local sessions.
-    %% Tickets and tokens have been revoked by the peer node.
-    %% We do it async so that we return immediately to avoid blocking the
-    %% plum_db process.
-    Fun = fun() ->
-        case plum_db_object:value(plum_db_object:resolve(New, lww)) of
-            ?TOMBSTONE ->
-                %% The user was deleted
-                Reason = ?BONDY_USER_DELETED,
-                close_sessions(RealmUri, Username, Reason);
-            NewVal ->
-                OldVal = plum_db_object:value(plum_db_object:resolve(Old, lww)),
-                case have_credentials_changed(NewVal, OldVal) of
-                    true ->
-                        %% Credentials were updated
-                        Reason = ?BONDY_USER_CREDENTIALS_CHANGED,
-                        close_sessions(RealmUri, Username, Reason);
-                    false ->
-                        ok
-                end
-        end
-    end,
 
-    case bondy_router_worker:cast(Fun) of
-        ok ->
-            ok;
-        {error, overload} ->
-            ?LOG_NOTICE(#{
-                description =>
-                    "Dropping plum_db:on_merge/2 task due to load shedding: "
-                    "router pool at capacity",
-                pool => router_pool,
-                reason => overload
-            })
-    end.
-
--doc "A local update".
-on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
-    IsCreate =
-        Old == undefined orelse
-            ?TOMBSTONE ==
-                plum_db_object:value(plum_db_object:resolve(Old, lww)),
-
-    case IsCreate of
-        true ->
-            bondy_event_manager:notify(
-                {[bondy, user, added], RealmUri, Username}
-            );
-        false ->
-            %% 1. We need to revoke all auth tokens/tickets
-            _ = revoke_tickets(RealmUri, Username),
-            %% 2. TODO revoke all OAUTH2 Tokens
-            %% 3. We need to close all sessions in this node if the user changed
-            %% its credentials.
-            %% However we need to keep the calling session alive if the session
-            %% authid was the same user. So we cannot do it here as we do not
-            %% have the session_id (this function invoked by the plum_db server
-            %% process so no bondy metadata present). We do it on the update
-            %% operation.
-            %% 4. Finally we publish the event
-            bondy_event_manager:notify(
-                {[bondy, user, updated], RealmUri, Username}
-            )
-    end.
-
--doc "A local delete".
-on_delete({?PLUMDB_PREFIX(RealmUri), Username}, _Old) ->
-    %% 1. We need to revoke all auth tokens/tickets
+do_on_update(RealmUri, Username, false) ->
+    %% 1. Revoke all auth tickets (OAUTH2 tokens: TODO).
     _ = revoke_tickets(RealmUri, Username),
-    %% 2. TODO revoke all OAUTH2 Tokens
-    %% 3. Close all sessions in this node.
-    ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
-    %% 4. Finally we publish the event
-    bondy_event_manager:notify({[bondy, user, deleted], RealmUri, Username}).
+    %% 2. Closing sessions on a credential change is handled by
+    %%    on_credentials_change/2 — it has the calling session to exclude.
+    %% 3. Publish the event.
+    bondy_event_manager:notify({[bondy, user, updated], RealmUri, Username}),
+    ok.
 
--doc "A local erase".
-on_erase(_PKey, _Old) ->
+%% @private
+-spec do_on_delete(uri(), username_int()) -> ok.
+
+do_on_delete(RealmUri, Username) ->
+    %% 1. Revoke all auth tickets (OAUTH2 tokens: TODO).
+    _ = revoke_tickets(RealmUri, Username),
+    %% 2. Close all local sessions.
+    ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
+    %% 3. Publish the event.
+    bondy_event_manager:notify({[bondy, user, deleted], RealmUri, Username}),
     ok.
 
 %% =============================================================================
@@ -1205,20 +1161,12 @@ update_credentials(RealmUri, Username, Data) ->
 ) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
-    plum_db:foreach(
-        fun
-            ({_, ?TOMBSTONE}) ->
-                %% Deleted, we ignore it
-                ok;
-            ({_, #{type := ?ALIAS_TYPE}}) ->
-                %% An alias, we ignore it
-                ok;
-            ({_, _} = Term) ->
-                ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun)
-        end,
-        ?PLUMDB_PREFIX(RealmUri),
-        ?FOLD_OPTS
-    );
+    {ok, Rows} = bondy_db:list(table(), RealmUri),
+    _ = [
+        update_groups(RealmUri, from_term({Key, V}), Groupnames, Fun)
+     || {Key, V, _Hlc} <- Rows, is_map(V), not (?IS_ALIAS(V))
+    ],
+    ok;
 update_groups(RealmUri, Users, Groupnames, Fun) when is_list(Users) ->
     _ = [update_groups(RealmUri, User, Groupnames, Fun) || User <- Users],
     ok;
@@ -1234,23 +1182,19 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
     update_groups(RealmUri, fetch(RealmUri, Username), Groupnames, Fun).
 
 %% @private
-store(RealmUri, #{username := Username} = User, #{rebase := true} = Opts) ->
-    ActorId = maps:get(actor_id, Opts, undefined),
-    Object = bondy_utils:rebase_object(User, ActorId),
-
-    case plum_db:dirty_put(?PLUMDB_PREFIX(RealmUri), Username, Object, []) of
-        ok ->
-            {ok, User};
-        Error ->
-            Error
-    end;
+store(RealmUri, #{username := Username} = User, #{rebase := true}) ->
+    %% Dirty/rebase write: like plum_db:dirty_put it writes WITHOUT firing the
+    %% lifecycle side-effects. The rebase (plum_db dvvset lineage) collapses to
+    %% a plain set — a fresh bondy_db write already dominates via its HLC.
+    ok = bondy_db:apply(table(), RealmUri, Username, {set, User}),
+    {ok, User};
 store(RealmUri, #{username := Username} = User, _) ->
-    case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
-        ok ->
-            {ok, User};
-        Error ->
-            Error
-    end.
+    %% Capture the previous value to tell a create from an update, the way
+    %% plum_db passed `Old` to the on_update callback.
+    Old = do_get(RealmUri, Username),
+    ok = bondy_db:apply(table(), RealmUri, Username, {set, User}),
+    ok = do_on_update(RealmUri, Username, Old == undefined),
+    {ok, User}.
 
 %% @private
 password_opts(_, #{password_opts := Opts}) when is_map(Opts) ->
@@ -1313,16 +1257,9 @@ maybe_throw({error, Reason}) ->
 maybe_throw(Term) ->
     Term.
 
-% %% @private
-% exists_check(RealmUri, Username) ->
-%     case plum_db:get(?PLUMDB_PREFIX(RealmUri), Username) of
-%         undefined -> throw({no_such_user, Username});
-%         _ -> ok
-%     end.
-
 %% @private
 not_exists_check(RealmUri, Username) ->
-    case plum_db:get(?PLUMDB_PREFIX(RealmUri), Username) of
+    case do_get(RealmUri, Username) of
         undefined -> ok;
         _ -> throw(already_exists)
     end.
@@ -1389,14 +1326,15 @@ do_add_alias(RealmUri, User0, Alias0) ->
 do_remove_alias(RealmUri, User0, Alias0) ->
     try
         Alias = validate_alias(Alias0),
+        Table = table(),
         Aliases0 = sets:from_list(maps:get(aliases, User0, [])),
         case sets:del_element(Alias, Aliases0) of
             Aliases0 ->
                 %% Delete anyway
-                _ = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Alias),
+                _ = bondy_db:apply(Table, RealmUri, Alias, clear),
                 ok;
             Aliases ->
-                _ = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Alias),
+                _ = bondy_db:apply(Table, RealmUri, Alias, clear),
                 User = User0#{aliases => sets:to_list(Aliases)},
                 _ = store(RealmUri, User, #{}),
                 ok
@@ -1407,28 +1345,21 @@ do_remove_alias(RealmUri, User0, Alias0) ->
     end.
 
 %% @private
+%% The alias index entry is a separate cell keyed by the alias. Writing it does
+%% NOT fire user lifecycle side-effects (it is not a user record). plum_db's
+%% modifier-fn read-modify-write becomes an explicit read + conditional set; the
+%% multi-sibling guard is unreachable under lww (a read yields a single value).
 store_alias(RealmUri, Alias, AliasEntry) ->
-    Modifier = fun
-        (undefined) ->
-            AliasEntry;
-        ([?TOMBSTONE]) ->
-            AliasEntry;
-        ([Val]) when Val == AliasEntry ->
-            AliasEntry;
-        ([_]) ->
-            %% This is a user whose username == Alias or an alias.
-            throw(already_exists);
-        ([_ | _]) ->
-            %% We found multiple values, we just ignore
-            %% TODO what if the last one is a tombstone?
+    Table = table(),
+    case bondy_db:read(Table, RealmUri, Alias) of
+        {error, not_found} ->
+            bondy_db:apply(Table, RealmUri, Alias, {set, AliasEntry});
+        {ok, {Val, _Hlc}} when Val == AliasEntry ->
+            %% Already there, idempotent re-store.
+            bondy_db:apply(Table, RealmUri, Alias, {set, AliasEntry});
+        {ok, {_Other, _Hlc}} ->
+            %% A user whose username == Alias, or a different alias.
             throw(already_exists)
-    end,
-
-    case plum_db:put(?PLUMDB_PREFIX(RealmUri), Alias, Modifier) of
-        ok ->
-            ok;
-        {error, Reason} ->
-            throw(Reason)
     end.
 
 %% @private
@@ -1456,7 +1387,9 @@ type_and_version(Type, Map) ->
 on_credentials_change(RealmUri, User) ->
     Username = maps:get(username, User),
 
-    %% on_update/3 will be called by plum_db
+    %% The `{[bondy, user, updated], ...}` event fires from do_on_update/3 at the
+    %% store chokepoint; here we publish the credentials-specific event and close
+    %% the affected sessions (excluding the caller's own).
     bondy_event_manager:notify(
         {[bondy, user, credentials, updated], RealmUri, Username}
     ),

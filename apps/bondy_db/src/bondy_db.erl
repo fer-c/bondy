@@ -730,7 +730,9 @@ apply(
     is_binary(Realm), is_binary(Key)
 ->
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
-    InstanceId = instance_id_for(Table, Bucket, Key),
+    %% G-1: fold the realm into the storage key (see cell_key/3).
+    SKey = cell_key(Topology, Realm, Key),
+    InstanceId = instance_id_for(Table, Bucket, SKey),
     %% Write→readable latency sampling. The gate is a free `persistent_term`
     %% read; when enabled we time the whole synchronous write (append +
     %% `await_apply`, plus the tier_2 context read) — that span is exactly
@@ -738,10 +740,10 @@ apply(
     %% writes are sampled; telemetry never alters the result.
     case bondy_oplog_latency:enabled() of
         false ->
-            do_apply(Table, InstanceId, Bucket, Key, Event);
+            do_apply(Table, InstanceId, Bucket, SKey, Event);
         true ->
             T0 = erlang:monotonic_time(microsecond),
-            Result = do_apply(Table, InstanceId, Bucket, Key, Event),
+            Result = do_apply(Table, InstanceId, Bucket, SKey, Event),
             case Result of
                 ok ->
                     bondy_oplog_latency:record(
@@ -1093,7 +1095,9 @@ read(
     is_binary(Realm), is_binary(Key)
 ->
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
-    case bondy_oplog_core:read(NS, ?INDEX, Bucket, Key) of
+    %% G-1: fold the realm into the storage key (see cell_key/3).
+    SKey = cell_key(Topology, Realm, Key),
+    case bondy_oplog_core:read(NS, ?INDEX, Bucket, SKey) of
         {Value, Hlc} when Value =/= undefined ->
             {ok, {Value, Hlc}};
         undefined ->
@@ -1147,9 +1151,18 @@ range(
     is_map(Opts)
 ->
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
-    Shard = maps:get(shard, Opts, erlang:phash2({Bucket, Low}, ShardCount)),
+    %% G-1: fold the realm into the bounds (no-op for realm-in-bucket
+    %% topologies, so their shard formula `phash2({Bucket, Low})` is preserved).
+    Lo = cell_key(Topology, Realm, Low),
+    Hi = fold_high(Topology, Realm, High),
+    Shard = maps:get(shard, Opts, erlang:phash2({Bucket, Lo}, ShardCount)),
     AdapterOpts = (maps:without([shard], Opts))#{shard => Shard},
-    bondy_oplog_core:range(NS, ?INDEX, Bucket, {Low, High}, AdapterOpts).
+    case bondy_oplog_core:range(NS, ?INDEX, Bucket, {Lo, Hi}, AdapterOpts) of
+        {ok, Rows} ->
+            {ok, [{uncell_key(Topology, Realm, K), V, Hlc} || {K, V, Hlc} <- Rows]};
+        {error, _} = Err ->
+            Err
+    end.
 
 -doc """
 Enumerates **every** cell in `Realm` across all shards of `Table`.
@@ -1164,9 +1177,23 @@ value is the fold's empty value if its policy requires).
 -spec list(Table :: table(), Realm :: realm()) ->
     {ok, [row()]} | {error, term()}.
 
-list(#{namespace := NS} = Table, Realm) when is_binary(Realm) ->
+list(#{namespace := NS, db_topology := Topology} = Table, Realm) when
+    is_binary(Realm)
+->
     Bucket = primary_bucket(Table, Realm),
-    bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {<<>>, infinity}, #{}).
+    %% G-1: under a realm-folding topology scope the scatter-scan to the realm's
+    %% key band and recover the caller's keys; otherwise the Bucket already
+    %% isolates the realm and keys are passed through verbatim.
+    {Lo, Hi} = realm_scan_range(Topology, Realm),
+    case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, Hi}, #{}) of
+        {ok, Rows} ->
+            {ok, [
+                {uncell_key(Topology, Realm, K), V, Hlc}
+             || {K, V, Hlc} <- Rows
+            ]};
+        {error, _} = Err ->
+            Err
+    end.
 
 -doc """
 Equality lookup against secondary index `IndexName`: the primary keys
@@ -1213,6 +1240,7 @@ index_get(Table, Realm, IndexName, Term, Opts) when
 ->
     with_index(Table, IndexName, fun(Spec, SecShardCount) ->
         NS = maps:get(namespace, Table),
+        Topology = maps:get(db_topology, Table),
         SecBucket = index_bucket(Table, Realm, IndexName),
         Norm = bondy_oplog_index_spec:normalize_term(Spec, Term),
         MaxLag = maps:get(max_lag, Opts, bondy_oplog_index_spec:max_lag(Spec)),
@@ -1222,7 +1250,10 @@ index_get(Table, Realm, IndexName, Term, Opts) when
             ok ->
                 {Low, High} = bondy_oplog_index_key:equality_bounds(Norm),
                 RangeOpts = (index_range_opts(Opts))#{shard => SecShard},
-                read_index(NS, IndexName, SecBucket, Low, High, RangeOpts);
+                read_index(
+                    Topology, Realm, NS, IndexName, SecBucket, Low, High,
+                    RangeOpts
+                );
             {stale, Lag} ->
                 stale_or_fallback(
                     Opts,
@@ -1266,6 +1297,7 @@ index_range(Table, Realm, IndexName, LoTerm, HiTerm, Opts) when
 ->
     with_index(Table, IndexName, fun(Spec, SecShardCount) ->
         NS = maps:get(namespace, Table),
+        Topology = maps:get(db_topology, Table),
         SecBucket = index_bucket(Table, Realm, IndexName),
         Lo = bondy_oplog_index_spec:normalize_term(Spec, LoTerm),
         Hi = bondy_oplog_index_spec:normalize_term(Spec, HiTerm),
@@ -1282,7 +1314,7 @@ index_range(Table, Realm, IndexName, LoTerm, HiTerm, Opts) when
                         index_range_opts(Opts)
                     )
                 of
-                    {ok, Rows} -> {ok, index_rows(Rows)};
+                    {ok, Rows} -> {ok, index_rows(Topology, Realm, Rows)};
                     {error, _} = Err -> Err
                 end;
             {stale, Lag} ->
@@ -2542,11 +2574,11 @@ primary_bucket(
     Topology:bucket_for(ET, Realm, TableState).
 
 %% @private
-read_index(NS, IndexName, SecBucket, Low, High, RangeOpts) ->
+read_index(Topology, Realm, NS, IndexName, SecBucket, Low, High, RangeOpts) ->
     case
         bondy_oplog_core:range(NS, IndexName, SecBucket, {Low, High}, RangeOpts)
     of
-        {ok, Rows} -> {ok, index_rows(Rows)};
+        {ok, Rows} -> {ok, index_rows(Topology, Realm, Rows)};
         {error, _} = Err -> Err
     end.
 
@@ -2555,10 +2587,17 @@ read_index(NS, IndexName, SecBucket, Low, High, RangeOpts) ->
 %% `(Term, PrimaryKey)` composite and `Columns` is the index entry's
 %% `to_value/1` (the denormalised columns binary, `<<>>` for pointer-only).
 %% Recover the primary key from the composite and decode the columns.
-index_rows(Rows) ->
+%%
+%% `PrimaryKey` is the cell's storage key, which a realm-folding topology
+%% (G-1) has NUL-prefixed with the realm — undo that so callers get the key
+%% they wrote (and can feed back to `read/3`). NOTE: the secondary index
+%% bucket is still realm-agnostic, so cross-realm entries sharing a term are
+%% co-located; realm separation of the index itself is deferred (no production
+%% table uses a secondary index yet).
+index_rows(Topology, Realm, Rows) ->
     [
         {
-            bondy_oplog_index_key:decode_pk(SecKey),
+            uncell_key(Topology, Realm, bondy_oplog_index_key:decode_pk(SecKey)),
             bondy_oplog_index_spec:decode_projection(Columns)
         }
      || {SecKey, Columns, _Hlc} <- Rows
@@ -2572,6 +2611,62 @@ index_rows(Rows) ->
 instance_id_for(#{instance_ids := Ids, shard_count := SC}, Bucket, Key) ->
     Shard = erlang:phash2({Bucket, Key}, SC),
     maps:get(Shard, Ids).
+
+%% @private
+%% Realm separation (G-1). The topology does pure shard placement and never
+%% sees realms — see `bondy_db_topology:route/2`: "realm separation is done
+%% above the topology, by the facade folding Realm into the cell key". Only
+%% `shared_shards` needs this: its Bucket is just the EntityType, so two realms
+%% with the same Key would otherwise collide on one cell. The other topologies
+%% (`per_entity`, `memory`, `single_bookie`) put the realm in the Bucket, so
+%% their cells are already realm-separated and their Key is passed through
+%% verbatim (keeping their shard formula `phash2({Bucket, Key})` unchanged).
+%%
+%% A NUL separator isolates the realm prefix for realm-scoped range scans
+%% (`list/2`): realm URIs are NUL-free text, so `[<<Realm,0>>, <<Realm,1>>)`
+%% captures exactly that realm's keys, and the original key is recovered by
+%% stripping the known `byte_size(Realm) + 1` prefix (the key's own bytes,
+%% which MAY contain NULs, are preserved verbatim after the separator).
+-define(FOLDS_REALM(Topology), Topology =:= bondy_db_topology_shared_shards).
+
+cell_key(Topology, Realm, Key) when is_binary(Realm), is_binary(Key) ->
+    case ?FOLDS_REALM(Topology) of
+        true -> <<Realm/binary, 0, Key/binary>>;
+        false -> Key
+    end.
+
+%% @private
+%% Recover the caller's key from a (possibly folded) storage key.
+uncell_key(Topology, Realm, Stored) when is_binary(Realm), is_binary(Stored) ->
+    case ?FOLDS_REALM(Topology) of
+        true ->
+            Skip = byte_size(Realm) + 1,
+            <<_:Skip/binary, Key/binary>> = Stored,
+            Key;
+        false ->
+            Stored
+    end.
+
+%% @private
+%% The `[Lo, Hi)` storage-key range covering exactly `Realm`'s cells. Under a
+%% realm-folding topology this is the realm's NUL-prefixed key band; otherwise
+%% the Bucket already isolates the realm, so it is the whole bucket.
+realm_scan_range(Topology, Realm) when is_binary(Realm) ->
+    case ?FOLDS_REALM(Topology) of
+        true -> {<<Realm/binary, 0>>, <<Realm/binary, 1>>};
+        false -> {<<>>, infinity}
+    end.
+
+%% @private
+%% Fold a single-shard range's upper bound. `infinity` becomes the realm's
+%% upper bound under a folding topology so the scan stays within `Realm`.
+fold_high(Topology, Realm, infinity) ->
+    case ?FOLDS_REALM(Topology) of
+        true -> {_, Hi} = realm_scan_range(Topology, Realm), Hi;
+        false -> infinity
+    end;
+fold_high(Topology, Realm, High) when is_binary(High) ->
+    cell_key(Topology, Realm, High).
 
 %% @private
 encode_instance_id(DbName, EntityType, Shard) ->
