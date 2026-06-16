@@ -91,7 +91,7 @@ cache_emits_hits_on_cross_batch_reread() ->
         write_lww(T, K, <<"v2">>),
         %% This read drains v2's batch; computing v2's frame reads K's
         %% OldValue, which is now a cache hit (cross-batch).
-        ?assertMatch({ok, <<"v2">>, _}, bondy_db:read(T, ?REALM, K))
+        ?assertMatch({ok, {<<"v2">>, _}}, bondy_db:read(T, ?REALM, K))
     end),
     close_db(Db, Sup, Dir),
     ?assert(Hits >= 1),
@@ -106,7 +106,7 @@ cache_off_emits_no_events() ->
         write_lww(T, K, <<"v1">>),
         _ = bondy_db:read(T, ?REALM, K),
         write_lww(T, K, <<"v2">>),
-        ?assertMatch({ok, <<"v2">>, _}, bondy_db:read(T, ?REALM, K))
+        ?assertMatch({ok, {<<"v2">>, _}}, bondy_db:read(T, ?REALM, K))
     end),
     close_db(Db, Sup, Dir),
     ?assertEqual(0, Hits),
@@ -293,10 +293,10 @@ write_lww(T, K, V) ->
     H = bondy_db:tick(T),
     ok = bondy_db:apply(T, ?REALM, K, {set, H, V}).
 
-read_value({ok, V, _H}) -> V;
+read_value({ok, {V, _H}}) -> V;
 read_value(Other) -> Other.
 
-counter_value({ok, V, _H}) -> V;
+counter_value({ok, {V, _H}}) -> V;
 counter_value(Other) -> Other.
 
 %% Open a memory-topology DB whose per-shard appliers carry the A3 flag.

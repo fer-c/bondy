@@ -169,7 +169,7 @@ instance_of(Table) ->
     #{0 := InstanceId} = maps:get(instance_ids, Table),
     InstanceId.
 
-val({ok, V, _Hlc}) -> V.
+val({ok, {V, _Hlc}}) -> V.
 
 wait_live(Id, N) ->
     wait_until(fun() -> live_size(Id) >= N end, 5000).

@@ -196,11 +196,11 @@ replay(InstanceId) ->
     bondy_oplog_applier:replay_cell_events_sync(Pid).
 
 read_mv(Table) ->
-    {ok, V, _Hlc} = bondy_db:read(Table, <<"r">>, <<"k">>),
+    {ok, {V, _Hlc}} = bondy_db:read(Table, <<"r">>, <<"k">>),
     V.
 
 read_aw(Table) ->
-    {ok, V, _Hlc} = bondy_db:read(Table, <<"r">>, <<"k">>),
+    {ok, {V, _Hlc}} = bondy_db:read(Table, <<"r">>, <<"k">>),
     V.
 
 name(Base, Suffix) ->

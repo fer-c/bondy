@@ -44,26 +44,35 @@ undefined
 - `{cleared, H}` — cleared at HLC `H`. Not terminal: a later-HLC `set`
   resurrects the register.
 
-`register_value()` is an opaque binary supplied by the application.
+`register_value()` is **any term** supplied by the application (serialised
+via `term_to_binary/1` in the state encoding); the caller never has to encode
+it by hand.
 
 ## Operations
 
 ```
-{set, hlc(), register_value()}
+{set, register_value()}   %% HLC stamped from the event key
+| clear                   %% HLC stamped from the event key
+| {set, hlc(), register_value()}   %% explicit HLC (power users / replay)
 | {clear, hlc()}
 ```
+
+The short forms (`{set, V}`, `clear`) take the write HLC from the event key the
+substrate already stamps, so the application never threads an HLC. The explicit
+forms remain for callers that supply their own HLC (e.g. deterministic tests or
+event replay).
 
 ## Conflict resolution
 
 Higher HLC wins regardless of operation type. At equal HLC: two `set`s
-resolve to the lexicographically larger payload; `set` vs `clear`
-resolves to `cleared`. Deterministic on every replica.
+resolve to the larger value by Erlang term order; `set` vs `clear` resolves to
+`cleared`. Deterministic on every replica.
 
 ## Encoding
 
 ```
 undefined    -> <<0>>
-{set, V, H}  -> <<1, H:64/big-unsigned, VSize:32/big-unsigned, V/binary>>
+{set, V, H}  -> <<1, H:64/big-unsigned, (term_to_binary(V))/binary>>
 {cleared, H} -> <<2, H:64/big-unsigned>>
 ```
 """).
@@ -84,13 +93,15 @@ undefined    -> <<0>>
 %% bondy_oplog_crdt_commutative
 -export([apply_op/3]).
 
--type register_value() :: binary().
+-type register_value() :: term().
 -type state() ::
     undefined
     | {set, register_value(), bondy_oplog_hlc:hlc()}
     | {cleared, bondy_oplog_hlc:hlc()}.
 -type op() ::
-    {set, bondy_oplog_hlc:hlc(), register_value()}
+    {set, register_value()}
+    | clear
+    | {set, bondy_oplog_hlc:hlc(), register_value()}
     | {clear, bondy_oplog_hlc:hlc()}.
 
 -export_type([state/0, op/0]).
@@ -125,22 +136,30 @@ query(value, State) ->
 
 -doc """
 Apply one LWW operation in key order. Higher HLC wins; ties resolve
-deterministically. `Key` (the event dot) is unused — LWW carries its own
-HLC in the operation.
+deterministically.
+
+The short operation forms (`{set, V}`, `clear`) take the write HLC from the
+event `Key` (the dot the substrate stamps on append/replay); the explicit forms
+(`{set, H, V}`, `{clear, H}`) carry their own HLC. Both normalise to the same
+explicit clauses below, so resolution is identical.
 """.
 -spec apply_op(state(), op(), bondy_oplog_event:event_key()) -> state().
 
-apply_op(undefined, {set, H, V}, _Key) when is_binary(V) ->
+%% Short forms — stamp the write HLC from the event key, then resolve.
+apply_op(State, {set, V}, Key) ->
+    apply_op(State, {set, bondy_oplog_event:key_hlc(Key), V}, Key);
+apply_op(State, clear, Key) ->
+    apply_op(State, {clear, bondy_oplog_event:key_hlc(Key)}, Key);
+%% Explicit forms.
+apply_op(undefined, {set, H, V}, _Key) ->
     {set, V, H};
 apply_op(undefined, {clear, H}, _Key) ->
     {cleared, H};
 %% set vs current set
-apply_op({set, _OldV, OldH}, {set, H, V}, _Key) when H > OldH, is_binary(V) ->
+apply_op({set, _OldV, OldH}, {set, H, V}, _Key) when H > OldH ->
     {set, V, H};
-apply_op({set, OldV, OldH} = S, {set, H, V}, _Key) when
-    H == OldH, is_binary(V)
-->
-    %% Tie at same HLC — deterministic resolution on the payload.
+apply_op({set, OldV, OldH} = S, {set, H, V}, _Key) when H == OldH ->
+    %% Tie at same HLC — deterministic resolution on Erlang term order.
     case V > OldV of
         true -> {set, V, OldH};
         false -> S
@@ -158,7 +177,7 @@ apply_op({set, _, _} = S, {clear, _}, _Key) ->
     %% Older clear; rejected.
     S;
 %% cleared vs incoming set
-apply_op({cleared, OldH}, {set, H, V}, _Key) when H > OldH, is_binary(V) ->
+apply_op({cleared, OldH}, {set, H, V}, _Key) when H > OldH ->
     %% Later-HLC set resurrects the register (LWW: latest wins).
     {set, V, H};
 apply_op({cleared, OldH} = S, {set, H, _}, _Key) when H =< OldH ->
@@ -204,9 +223,10 @@ order_independent() ->
 
 encode_state(undefined) ->
     <<0>>;
-encode_state({set, V, H}) when is_binary(V), is_integer(H) ->
-    VSize = byte_size(V),
-    <<1, H:64/big-unsigned, VSize:32/big-unsigned, V/binary>>;
+encode_state({set, V, H}) when is_integer(H) ->
+    %% V is an arbitrary term; term_to_binary/1 occupies the tail (no length
+    %% prefix needed), so decode reads it back with binary_to_term/1.
+    <<1, H:64/big-unsigned, (term_to_binary(V))/binary>>;
 encode_state({cleared, H}) when is_integer(H) ->
     <<2, H:64/big-unsigned>>.
 
@@ -214,7 +234,7 @@ encode_state({cleared, H}) when is_integer(H) ->
 
 decode_state(<<0>>) ->
     undefined;
-decode_state(<<1, H:64/big-unsigned, VSize:32/big-unsigned, V:VSize/binary>>) ->
-    {set, V, H};
+decode_state(<<1, H:64/big-unsigned, VBin/binary>>) ->
+    {set, binary_to_term(VBin), H};
 decode_state(<<2, H:64/big-unsigned>>) ->
     {cleared, H}.

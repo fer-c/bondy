@@ -114,8 +114,8 @@ concurrent_replicas_converge() ->
     ok = replay(Ia),
     ok = replay(Ib),
     %% Both replicas now see both concurrent siblings.
-    {ok, Va, _} = bondy_db:read(Ta, <<"r">>, <<"k">>),
-    {ok, Vb, _} = bondy_db:read(Tb, <<"r">>, <<"k">>),
+    {ok, {Va, _}} = bondy_db:read(Ta, <<"r">>, <<"k">>),
+    {ok, {Vb, _}} = bondy_db:read(Tb, <<"r">>, <<"k">>),
     ?assertEqual([<<"va">>, <<"vb">>], Va),
     ?assertEqual([<<"va">>, <<"vb">>], Vb),
     ?assertEqual(bondy_oplog:root_hash(Ia), bondy_oplog:root_hash(Ib)),
@@ -139,7 +139,7 @@ survives_compaction() ->
     ),
     bondy_oplog_peer_state:sync(),
     {ok, {compacted, _, _}} = bondy_oplog:compact(I),
-    {ok, V, _} = bondy_db:read(T, <<"r">>, <<"k">>),
+    {ok, {V, _}} = bondy_db:read(T, <<"r">>, <<"k">>),
     ?assertEqual([<<"v2">>], V),
     bondy_oplog_peer_state:forget_peer({peer, mvreg_dummy}),
     ok = bondy_db:close(Db).
@@ -170,5 +170,5 @@ replay(InstanceId) ->
     bondy_oplog_applier:replay_cell_events_sync(Pid).
 
 %% Collapse the read HLC (timing-dependent) to a fixed atom for assertions.
-normalise({ok, V, _Hlc}) -> {ok, V, read_hlc};
+normalise({ok, {V, _Hlc}}) -> {ok, V, read_hlc};
 normalise(Other) -> Other.

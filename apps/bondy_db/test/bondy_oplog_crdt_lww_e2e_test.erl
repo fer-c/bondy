@@ -82,13 +82,13 @@ pub_apply_read(Db) ->
     {ok, T} = bondy_db:open_table(Db, accounts, #{}),
     H1 = bondy_db:tick(T),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H1, <<"v1">>}),
-    ?assertEqual({ok, <<"v1">>, H1}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
+    ?assertEqual({ok, {<<"v1">>, H1}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     %% A later set wins; an earlier one is absorbed — LWW on the crdt kernel.
     H2 = bondy_db:tick(T),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H2, <<"v2">>}),
-    ?assertEqual({ok, <<"v2">>, H2}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
+    ?assertEqual({ok, {<<"v2">>, H2}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H1, <<"stale">>}),
-    ?assertEqual({ok, <<"v2">>, H2}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
+    ?assertEqual({ok, {<<"v2">>, H2}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     ok = bondy_db:close_table(T).
 
 %% The read-overlay path (step 3b): a CRDT shard registered with the

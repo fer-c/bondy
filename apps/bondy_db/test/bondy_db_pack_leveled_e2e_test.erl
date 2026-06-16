@@ -133,7 +133,7 @@ put_read_round_trip({_Topo, Db, _Sup, _LDir, _PDir}) ->
     H = bondy_db:tick(T),
     V = <<"alice@example.com">>,
     ok = bondy_db:apply(T, Realm, Key, {set, H, V}),
-    ?assertEqual({ok, V, H}, bondy_db:read(T, Realm, Key)),
+    ?assertEqual({ok, {V, H}}, bondy_db:read(T, Realm, Key)),
     ok = bondy_db:close_table(T).
 
 oldstate_cache_default_on_for_leveled({_Topo, Db, _Sup, _LDir, _PDir}) ->
@@ -190,7 +190,7 @@ multi_shard_fanout({Topology, Db, _Sup, _LDir, _PDir}) ->
     ),
     lists:foreach(
         fun({K, V, H}) ->
-            ?assertEqual({ok, V, H}, bondy_db:read(T, Realm, K))
+            ?assertEqual({ok, {V, H}}, bondy_db:read(T, Realm, K))
         end,
         Writes
     ),
@@ -237,7 +237,7 @@ concurrent_writers({_Topo, Db, _Sup, _LDir, _PDir}) ->
     ?assertEqual(Writers * PerWriter, length(All)),
     lists:foreach(
         fun({K, V, H}) ->
-            ?assertEqual({ok, V, H}, bondy_db:read(T, Realm, K))
+            ?assertEqual({ok, {V, H}}, bondy_db:read(T, Realm, K))
         end,
         All
     ),
@@ -295,7 +295,7 @@ mst_state_persists_across_close_reopen({Topology, Db, _Sup, LDir, PDir}) ->
         lists:foreach(
             fun({K, V, H}) ->
                 ?assertEqual(
-                    {ok, V, H},
+                    {ok, {V, H}},
                     bondy_db:read(T1, Realm, K)
                 )
             end,
@@ -346,7 +346,7 @@ head_path_telemetry_reports_native({Topology, Db, _Sup, _LDir, _PDir}) ->
         undefined
     ),
     try
-        ?assertEqual({ok, V, H}, bondy_db:read(T, Realm, Key)),
+        ?assertEqual({ok, {V, H}}, bondy_db:read(T, Realm, Key)),
         Meta =
             receive
                 {read_event, _, M} -> M
@@ -372,7 +372,7 @@ wait_for_overlay_drain(T, Realm, Key, 0) ->
     ok;
 wait_for_overlay_drain(T, Realm, Key, N) ->
     case bondy_db:read(T, Realm, Key) of
-        {ok, _, _} ->
+        {ok, {_, _}} ->
             ok;
         _ ->
             timer:sleep(100),
@@ -397,7 +397,7 @@ counter_inc_round_trip({_Topo, Db, _Sup, _LDir, _PDir}) ->
         fun(D) -> ok = bondy_db:counter_inc(T, Realm, Key, D) end,
         Deltas
     ),
-    ?assertMatch({ok, Expected, _Hlc}, bondy_db:read(T, Realm, Key)),
+    ?assertMatch({ok, {Expected, _Hlc}}, bondy_db:read(T, Realm, Key)),
     ok = bondy_db:close_table(T).
 
 %% Evict the (NS, Bucket, Key) entry from every shard's value cache.

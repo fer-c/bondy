@@ -168,7 +168,7 @@ graceful_tail_restart_trusts(Dirs) ->
     flush_index(T0, by_value),
     write(T0, <<"u3">>, <<"active">>),
     %% u3 is durable in the primary, still buffered in the index writer.
-    ?assertMatch({ok, _, _}, bondy_db:read(T0, ?R, <<"u3">>)),
+    ?assertMatch({ok, {_, _}}, bondy_db:read(T0, ?R, <<"u3">>)),
     close(T0, Db0, Sup0),
 
     Ctr = counters:new(1, []),
@@ -214,7 +214,7 @@ crash_tail_restart_rebuilds(Dirs) ->
     flush_index(T0, by_value),
     write(T0, <<"u3">>, <<"active">>),
     %% u3 is durable in the primary now...
-    ?assertMatch({ok, _, _}, bondy_db:read(T0, ?R, <<"u3">>)),
+    ?assertMatch({ok, {_, _}}, bondy_db:read(T0, ?R, <<"u3">>)),
     %% ...but its index op is lost from the writer's buffer, then we crash
     %% (no close ⇒ no flush-on-close ⇒ no clean-shutdown flag).
     reset_index(T0, by_value),
@@ -228,7 +228,7 @@ crash_tail_restart_rebuilds(Dirs) ->
         %% No clean flag ⇒ the shard is NOT trusted ⇒ it rebuilds.
         ?assert(counters:get(Ctr, 1) >= 1),
         %% u3 survived in the primary and the rebuild re-derived it.
-        ?assertMatch({ok, _, _}, bondy_db:read(T1, ?R, <<"u3">>)),
+        ?assertMatch({ok, {_, _}}, bondy_db:read(T1, ?R, <<"u3">>)),
         ?assertEqual(
             {ok, [{<<"u1">>, #{}}, {<<"u2">>, #{}}, {<<"u3">>, #{}}]},
             bondy_db:index_get(T1, ?R, by_value, <<"active">>, #{})

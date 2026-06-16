@@ -112,14 +112,14 @@ apply_then_read({Db, _Sup, _Dir}) ->
     H = bondy_db:tick(T),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H, <<"v1">>}),
     ?assertEqual(
-        {ok, <<"v1">>, H},
+        {ok, {<<"v1">>, H}},
         bondy_db:read(T, <<"r1">>, <<"alice">>)
     ),
     ok = bondy_db:close_table(T).
 
 read_missing({Db, _Sup, _Dir}) ->
     {ok, T} = bondy_db:open_table(Db, users, #{}),
-    ?assertEqual(not_found, bondy_db:read(T, <<"r1">>, <<"nobody">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(T, <<"r1">>, <<"nobody">>)),
     ok = bondy_db:close_table(T).
 
 later_hlc_wins({Db, _Sup, _Dir}) ->
@@ -130,7 +130,7 @@ later_hlc_wins({Db, _Sup, _Dir}) ->
     ?assert(H2 > H1),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H2, <<"second">>}),
     ?assertEqual(
-        {ok, <<"second">>, H2},
+        {ok, {<<"second">>, H2}},
         bondy_db:read(T, <<"r1">>, <<"alice">>)
     ),
     ok = bondy_db:close_table(T).
@@ -146,7 +146,7 @@ earlier_hlc_is_rejected({Db, _Sup, _Dir}) ->
     H1 = H2 - 1,
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H1, <<"older">>}),
     ?assertEqual(
-        {ok, <<"newer">>, H2},
+        {ok, {<<"newer">>, H2}},
         bondy_db:read(T, <<"r1">>, <<"alice">>)
     ),
     ok = bondy_db:close_table(T).
@@ -160,7 +160,7 @@ clear_then_read({Db, _Sup, _Dir}) ->
     %% lww_register's `to_value({cleared, _}) -> undefined`, so the
     %% read collapses to `not_found`.
     ?assertEqual(
-        not_found,
+        {error, not_found},
         bondy_db:read(T, <<"r1">>, <<"alice">>)
     ),
     ok = bondy_db:close_table(T).
@@ -175,7 +175,7 @@ clear_then_resurrect({Db, _Sup, _Dir}) ->
     H3 = bondy_db:tick(T),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H3, <<"v2">>}),
     ?assertEqual(
-        {ok, <<"v2">>, H3},
+        {ok, {<<"v2">>, H3}},
         bondy_db:read(T, <<"r1">>, <<"alice">>)
     ),
     ok = bondy_db:close_table(T).
@@ -187,14 +187,14 @@ realm_isolation({Db, _Sup, _Dir}) ->
     H2 = bondy_db:tick(T),
     ok = bondy_db:apply(T, <<"r2">>, <<"alice">>, {set, H2, <<"v2">>}),
     ?assertEqual(
-        {ok, <<"v1">>, H1},
+        {ok, {<<"v1">>, H1}},
         bondy_db:read(T, <<"r1">>, <<"alice">>)
     ),
     ?assertEqual(
-        {ok, <<"v2">>, H2},
+        {ok, {<<"v2">>, H2}},
         bondy_db:read(T, <<"r2">>, <<"alice">>)
     ),
-    ?assertEqual(not_found, bondy_db:read(T, <<"r3">>, <<"alice">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(T, <<"r3">>, <<"alice">>)),
     ok = bondy_db:close_table(T).
 
 range_returns_states({Db, _Sup, _Dir}) ->
@@ -347,12 +347,12 @@ ets_owner_survives_caller_death() ->
     %% raised (dead projection/cache tid) or returned a read error (the
     %% registry row was gone).
     ?assertMatch(
-        {ok, <<"v1">>, _}, bondy_db:read(Table, <<"r1">>, <<"alice">>)
+        {ok, {<<"v1">>, _}}, bondy_db:read(Table, <<"r1">>, <<"alice">>)
     ),
     H2 = bondy_db:tick(Table),
     ok = bondy_db:apply(Table, <<"r1">>, <<"alice">>, {set, H2, <<"v2">>}),
     ?assertEqual(
-        {ok, <<"v2">>, H2}, bondy_db:read(Table, <<"r1">>, <<"alice">>)
+        {ok, {<<"v2">>, H2}}, bondy_db:read(Table, <<"r1">>, <<"alice">>)
     ),
     %% Teardown through the normal facade path — every delete is routed
     %% through the owner (cache + registry + projection). The owner is
@@ -386,11 +386,11 @@ ets_backend_e2e({Db, _Sup, _Dir}) ->
     ?assertEqual(bondy_db_topology_memory, maps:get(db_topology, T)),
     H1 = bondy_db:tick(T),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H1, <<"v1">>}),
-    ?assertEqual({ok, <<"v1">>, H1}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
+    ?assertEqual({ok, {<<"v1">>, H1}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     H2 = bondy_db:tick(T),
     ?assert(H2 > H1),
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H2, <<"v2">>}),
-    ?assertEqual({ok, <<"v2">>, H2}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
+    ?assertEqual({ok, {<<"v2">>, H2}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     %% Single-shard range over the shard `alice` lives in (the facade
     %% does not scatter-merge; mirror `range_returns_states`).
     Shard = erlang:phash2({<<"r1">>, <<"alice">>}, 4),
@@ -422,14 +422,14 @@ intra_db_mixing({Db, _Sup, _Dir}) ->
     He = bondy_db:tick(Ephemeral),
     ok = bondy_db:apply(Ephemeral, <<"r1">>, <<"sess">>, {set, He, <<"conn">>}),
     ?assertEqual(
-        {ok, <<"balance">>, Hd}, bondy_db:read(Durable, <<"r1">>, <<"acct">>)
+        {ok, {<<"balance">>, Hd}}, bondy_db:read(Durable, <<"r1">>, <<"acct">>)
     ),
     ?assertEqual(
-        {ok, <<"conn">>, He}, bondy_db:read(Ephemeral, <<"r1">>, <<"sess">>)
+        {ok, {<<"conn">>, He}}, bondy_db:read(Ephemeral, <<"r1">>, <<"sess">>)
     ),
     %% Distinct namespaces — neither table sees the other's cells.
-    ?assertEqual(not_found, bondy_db:read(Durable, <<"r1">>, <<"sess">>)),
-    ?assertEqual(not_found, bondy_db:read(Ephemeral, <<"r1">>, <<"acct">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(Durable, <<"r1">>, <<"sess">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(Ephemeral, <<"r1">>, <<"acct">>)),
     ok = bondy_db:close_table(Durable),
     ok = bondy_db:close_table(Ephemeral).
 

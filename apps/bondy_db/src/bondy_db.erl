@@ -102,9 +102,15 @@ registered with `overlay = disabled`. Read-your-writes is provided by
     fold_module => g_set
 }),
 
-H = bondy_db:tick(Users),
-ok = bondy_db:apply(Users, <<"r1">>, <<"alice">>, {set, H, <<"value">>}),
-{ok, {set, <<"value">>, H}, H} = bondy_db:read(Users, <<"r1">>, <<"alice">>),
+%% Values are domain terms — the substrate serialises them; the write HLC is
+%% stamped for you. A read returns the decoded value with its HLC.
+ok = bondy_db:apply(Users, <<"r1">>, <<"alice">>, {set, #{name => <<"Alice">>}}),
+{ok, {#{name := <<"Alice">>}, _Hlc}} =
+    bondy_db:read(Users, <<"r1">>, <<"alice">>),
+
+%% A cleared (or never-written) cell:
+ok = bondy_db:apply(Users, <<"r1">>, <<"alice">>, clear),
+{error, not_found} = bondy_db:read(Users, <<"r1">>, <<"alice">>),
 
 ok = bondy_db:close_table(Users),
 ok = bondy_db:close_table(Tags),
@@ -130,14 +136,17 @@ it).
 -export([probe_write/1]).
 -export([read/3]).
 -export([range/5]).
+-export([list/2]).
 -export([index_get/5]).
 -export([index_range/6]).
 -export([rebuild_index/2]).
 -export([rebuild_indexes/1]).
 -export([index_lag/2]).
 -export([info/1]).
+-export([namespace/1]).
+-export([publish_event/1]).
 
--export_type([db/0, table/0, realm/0]).
+-export_type([db/0, table/0, realm/0, entry/0, row/0]).
 
 -ifdef(TEST).
 %% Exposed so the fused-writer rollout can pin the `fused ⇒ ephemeral`
@@ -167,6 +176,13 @@ it).
 -define(PRIMARY_SCAN_LIMIT, 1000000).
 
 -type realm() :: binary().
+
+%% A point read's result: the cell's decoded value paired with the HLC at
+%% which it was last written.
+-type entry() :: {Value :: term(), Hlc :: bondy_oplog_hlc:hlc()}.
+
+%% A range / list row: a key with its decoded value and write HLC.
+-type row() :: {Key :: binary(), Value :: term(), Hlc :: bondy_oplog_hlc:hlc()}.
 
 -type db() :: #{
     name := atom(),
@@ -427,7 +443,13 @@ open_table_provision(
     %% for behaviour yet (the durable pipeline is untouched).
     Fused = maps:get(fused, Merged, false),
     ok = assert_fused_requires_ephemeral(Fused, Backend),
-    OplogOpts = OplogOpts0#{fused => Fused},
+    OplogOpts1 = OplogOpts0#{fused => Fused},
+    %% Opt-in change-notification (`publish => true`): wire every shard's
+    %% applier to publish each verified apply (local OR AE-replicated) to the
+    %% table namespace via `bondy_oplog_core:publish/4`, so a reactor can
+    %% `subscribe(NS, _)` and react (e.g. the API Gateway cowboy-dispatch
+    %% rebuild). Off by default — only tables with a reactor pay the cost.
+    OplogOpts = maybe_enable_publish(OplogOpts1, NS, Merged),
     %% Native operation-based CRDT for the cell projection. An explicit
     %% `crdt_module` wins; otherwise the `fold_module` is mapped to its
     %% native op-based twin via
@@ -1033,33 +1055,30 @@ map_update(Table, Realm, Key, Edit) when
     end.
 
 -doc """
-Read the decoded fold state for `(Realm, Key)` from `Table`.
+Read the decoded value for `(Realm, Key)` from `Table`.
 
 Routes through `bondy_oplog_core:read/4`, which hits the per-shard cache
 on the fast path and falls back to the projection + cache-populate on
-miss. The fold-decoded state is returned together with the cell's
-recorded HLC.
+miss. The fold-decoded value is returned together with the cell's
+recorded HLC as an `t:entry/0`.
 
 Returns:
 
-- `{ok, State, Hlc}` — the cell's current fold state and HLC. `State`
-  shape is fold-specific; the caller pattern-matches per their CRDT.
-- `not_found` — no cell exists for `(Realm, Key)`.
+- `{ok, {Value, Hlc}}` — the cell's current value and the HLC at which it
+  was last written. `Value` is the fold's decoded value: a term for a
+  register, a sibling list `[term()]` for a multi-value register, a map for
+  an `aw_map`, etc. The caller works with domain terms — no manual
+  `binary_to_term/1`.
+- `{error, not_found}` — no live cell exists for `(Realm, Key)` (never
+  written, or cleared).
 - `{error, _}` — adapter or substrate failure.
-
-A cell whose state is the fold's `initial_value/0` is **NOT** filtered
-out — the facade returns whatever the substrate gives it. If a CRDT's
-"empty" state should be invisible to callers, that policy lives above
-this facade.
 """.
 -spec read(
     Table :: table(),
     Realm :: realm(),
     Key :: binary()
 ) ->
-    {ok, Value :: term(), Hlc :: bondy_oplog_hlc:hlc()}
-    | not_found
-    | {error, term()}.
+    {ok, entry()} | {error, not_found} | {error, term()}.
 
 read(
     #{
@@ -1076,9 +1095,9 @@ read(
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
     case bondy_oplog_core:read(NS, ?INDEX, Bucket, Key) of
         {Value, Hlc} when Value =/= undefined ->
-            {ok, Value, Hlc};
+            {ok, {Value, Hlc}};
         undefined ->
-            not_found;
+            {error, not_found};
         {error, _} = Err ->
             Err
     end.
@@ -1096,18 +1115,18 @@ with the per-shard overlay (currently always empty at this layer).
 Realm is folded into both bounds so the substrate scan stays inside
 the realm's prefix.
 
-Returns `{ok, [{Key, State, Hlc}]}` — one row per cell present in the
-range, in ascending key order. `State` is the fold's decoded state.
+Returns `{ok, [Row]}` — one `t:row/0` (`{Key, Value, Hlc}`) per cell
+present in the range, in ascending key order. `Value` is the fold's
+decoded value (a domain term, never raw bytes).
 """.
 -spec range(
     Table :: table(),
     Realm :: realm(),
     Low :: binary(),
-    High :: binary(),
-    Opts :: map()
+    High :: binary() | infinity,
+    Opts :: bondy_oplog_core:range_opts()
 ) ->
-    {ok, [{Key :: binary(), State :: term(), Hlc :: bondy_oplog_hlc:hlc()}]}
-    | {error, term()}.
+    {ok, [row()]} | {error, term()}.
 
 range(
     #{
@@ -1124,13 +1143,30 @@ range(
 ) when
     is_binary(Realm),
     is_binary(Low),
-    is_binary(High),
+    (is_binary(High) orelse High =:= infinity),
     is_map(Opts)
 ->
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
     Shard = maps:get(shard, Opts, erlang:phash2({Bucket, Low}, ShardCount)),
     AdapterOpts = (maps:without([shard], Opts))#{shard => Shard},
     bondy_oplog_core:range(NS, ?INDEX, Bucket, {Low, High}, AdapterOpts).
+
+-doc """
+Enumerates **every** cell in `Realm` across all shards of `Table`.
+
+Unlike `range/5` (single-shard), this scatters a full scan across every
+shard and merges the results in ascending key order. Use it for the
+small, list-all tables (e.g. the API Gateway specs) — it is O(table),
+not a point read. Returns `{ok, [Row]}` of `t:row/0` (`{Key, Value, Hlc}`);
+`Value` is the fold-decoded value (a caller filters retracted cells whose
+value is the fold's empty value if its policy requires).
+""".
+-spec list(Table :: table(), Realm :: realm()) ->
+    {ok, [row()]} | {error, term()}.
+
+list(#{namespace := NS} = Table, Realm) when is_binary(Realm) ->
+    Bucket = primary_bucket(Table, Realm),
+    bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {<<>>, infinity}, #{}).
 
 -doc """
 Equality lookup against secondary index `IndexName`: the primary keys
@@ -1368,6 +1404,33 @@ info(
             maps:get(indexes, Table, #{})
         )
     }.
+
+-doc """
+The oplog namespace of `Table` — the atom a reactor passes to
+`bondy_oplog_core:subscribe/2` to receive this table's change events (when the
+table was opened with `publish => true`).
+""".
+-spec namespace(Table :: table()) -> atom().
+
+namespace(#{namespace := NS}) ->
+    NS.
+
+-doc """
+The `publish_fun` used by a `publish => true` table: derives the
+`{Key, FoldOp}` pair forwarded to `bondy_oplog_core` subscribers from a verified
+`cell_apply` event. Non-`cell_apply` events are skipped. Exported so the applier
+can hold a named fun (stable across instance restarts) rather than a closure.
+""".
+-spec publish_event(Event :: bondy_oplog_event:t()) ->
+    {Key :: binary(), Op :: term()} | skip.
+
+publish_event(Event) ->
+    case bondy_oplog_event:op(Event) of
+        {cell_apply, _Bucket, Key, FoldOp} ->
+            {Key, FoldOp};
+        _ ->
+            skip
+    end.
 
 %% =============================================================================
 %% PRIVATE
@@ -1697,6 +1760,26 @@ default_oldstate_cache_opt(OplogOpts, Backend) ->
             OplogOpts#{
                 applier => Applier#{oldstate_cache => Backend =:= leveled}
             }
+    end.
+
+%% @private
+%% When `publish => true`, wire the applier's publish keys into the shard
+%% instance opts (under `applier`, where `start_shard_instance` preserves
+%% caller applier tuning). All shards publish to the same table namespace `NS`,
+%% so a reactor subscribes once. A named fun (not a closure) survives instance
+%% restarts.
+maybe_enable_publish(OplogOpts, NS, Merged) ->
+    case maps:get(publish, Merged, false) of
+        true ->
+            Applier = maps:get(applier, OplogOpts, #{}),
+            OplogOpts#{
+                applier => Applier#{
+                    publish_ns => NS,
+                    publish_fun => fun ?MODULE:publish_event/1
+                }
+            };
+        false ->
+            OplogOpts
     end.
 
 %% @private

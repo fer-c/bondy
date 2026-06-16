@@ -81,7 +81,7 @@ no_spurious_siblings() ->
     ),
 
     %% The live cell collapsed to the last write.
-    {ok, V, _} = bondy_db:read(T, R, K),
+    {ok, {V, _}} = bondy_db:read(T, R, K),
     ?assertEqual(
         #{<<"status">> => [<<"active">>], <<"name">> => [<<"n8">>]}, V
     ),
@@ -125,7 +125,7 @@ preserves_concurrent_siblings() ->
     ok = replay(Ib),
 
     %% The converged cell on A holds both color siblings.
-    {ok, Va, _} = bondy_db:read(Ta, R, K),
+    {ok, {Va, _}} = bondy_db:read(Ta, R, K),
     ?assertEqual(
         #{
             <<"status">> => [<<"active">>],

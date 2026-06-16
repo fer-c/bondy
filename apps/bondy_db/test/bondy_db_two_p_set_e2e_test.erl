@@ -48,7 +48,7 @@ add_read(Db) ->
     {ok, T} = bondy_db:open_table(Db, t_add, #{}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"x">>}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"y">>}),
-    {ok, V, _Hlc} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V, _Hlc}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"x">>, <<"y">>], lists:sort(V)),
     ok = bondy_db:close_table(T).
 
@@ -57,11 +57,11 @@ remove_permanent(Db) ->
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"x">>}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"y">>}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {rmv, <<"x">>}),
-    {ok, V1, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V1, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"y">>], V1),
     %% Re-adding a removed element must NOT bring it back — the defining
     %% 2P-Set property, verified through the real projection round-trip.
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"x">>}),
-    {ok, V2, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V2, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"y">>], V2),
     ok = bondy_db:close_table(T).

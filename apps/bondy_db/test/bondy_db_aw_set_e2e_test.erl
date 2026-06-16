@@ -45,15 +45,15 @@ add_rmv_readd(Db) ->
     {ok, T} = bondy_db:open_table(Db, t_set, #{}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"x">>}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"y">>}),
-    {ok, V0, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V0, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"x">>, <<"y">>], lists:sort(V0)),
     %% Remove observes x's dot (the applier stamped the cell's context) and
     %% drops it.
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {rmv, <<"x">>}),
-    {ok, V1, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V1, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"y">>], V1),
     %% A later add brings x back — the add-wins difference from a 2P-Set.
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"x">>}),
-    {ok, V2, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V2, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"x">>, <<"y">>], lists:sort(V2)),
     ok = bondy_db:close_table(T).

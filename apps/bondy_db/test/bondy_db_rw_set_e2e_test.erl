@@ -46,15 +46,15 @@ add_rmv_readd(Db) ->
     {ok, T} = bondy_db:open_table(Db, t_set, #{}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"x">>}),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"y">>}),
-    {ok, V0, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V0, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"x">>, <<"y">>], lists:sort(V0)),
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {rmv, <<"x">>}),
-    {ok, V1, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V1, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"y">>], V1),
     %% A later add observed the remove (the applier stamped the cell's
     %% context), so it dominates the remove frontier and the element
     %% returns.
     ok = bondy_db:apply(T, <<"r1">>, <<"s">>, {add, <<"x">>}),
-    {ok, V2, _} = bondy_db:read(T, <<"r1">>, <<"s">>),
+    {ok, {V2, _}} = bondy_db:read(T, <<"r1">>, <<"s">>),
     ?assertEqual([<<"x">>, <<"y">>], lists:sort(V2)),
     ok = bondy_db:close_table(T).

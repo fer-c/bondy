@@ -52,7 +52,7 @@ fused_drain_installs_single_write() ->
         %% Gate on live_size advancing — that is the proof the drain ran and
         %% the MST install happened, independent of the overlay-served read.
         ok = wait_until(fun() -> live_size(Id) >= 1 end, 5000),
-        ?assertEqual({ok, V, H}, bondy_db:read(T, Realm, K)),
+        ?assertEqual({ok, {V, H}}, bondy_db:read(T, Realm, K)),
         ok = bondy_db:close_table(T)
     end).
 
@@ -76,7 +76,7 @@ fused_drain_installs_batch() ->
         ok = wait_until(fun() -> live_size(Id) >= N end, 5000),
         lists:foreach(
             fun({K, V, H}) ->
-                ?assertEqual({ok, V, H}, bondy_db:read(T, Realm, K))
+                ?assertEqual({ok, {V, H}}, bondy_db:read(T, Realm, K))
             end,
             Writes
         ),

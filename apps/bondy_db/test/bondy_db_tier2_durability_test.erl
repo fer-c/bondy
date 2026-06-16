@@ -192,8 +192,8 @@ stop_everything() ->
     ],
     ok.
 
-%% Strip the read HLC; tier_2 reads return `{ok, Value, Hlc}`.
-value({ok, V, _Hlc}) -> {ok, V};
+%% Strip the read HLC; tier_2 reads return `{ok, {Value, Hlc}}`.
+value({ok, {V, _Hlc}}) -> {ok, V};
 value(Other) -> Other.
 
 %% =============================================================================

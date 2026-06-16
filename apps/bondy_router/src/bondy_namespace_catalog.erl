@@ -30,18 +30,28 @@ at this stage — `bondy_db:open_table/3` does not yet honour realm-sharding
 (that write-path lands with §11.4 realms); it is recorded so the cut-over can
 consume it.
 
+## Per-domain provisioning
+
+The migration cuts over one domain at a time (design §11.4). A table spec
+carries `migrated => true` once its domain reads/writes `bondy_db` instead of
+`plum_db`; those tables are **always** provisioned at boot (they are required).
+Not-yet-migrated tables stay on `plum_db` and are not opened — unless
+`bondy_router.oplog_catalog_enabled` (`oplog.catalog`) is set, which provisions
+**all** declared core tables too (for validating a future domain's provisioning
+before its cut-over). So a default node opens exactly the migrated tables
+(currently `api_gateway`) and serves every other read from `plum_db`.
+
 ## Lifecycle
 
 This module is a `gen_server` (a child of `bondy_sup`). Because `bondy_db`
 keeps leveled supervisors on-demand and **owned by the `open/2` caller**, the
 catalogue process owns the `core` DB's `bondy_db_leveled_sup` for its lifetime:
 
-- `init/1` — **gated** behind `bondy_router.oplog_catalog_enabled` (off by
-  default). When enabled it starts the leveled sup, opens the durable `core`
-  tables (empty), and publishes the DB / table handles via `persistent_term`
-  for lock-free access. When disabled (or on open failure) it starts idle —
-  nothing reads from `bondy_db` until the per-domain cut-over, so a default
-  node continues to serve every read from `plum_db`.
+- `init/1` — opens the durable `core` DB plus the tables to provision (migrated,
+  plus all core tables when `oplog.catalog` is set), and publishes the DB /
+  table handles via `persistent_term` for lock-free access. With nothing to
+  open (no migrated tables and the flag off) it starts idle. On open failure it
+  logs loudly and starts idle (it never bricks boot).
 - `terminate/2` — closes each open table, the DB, and the leveled sup.
 
 Accessors (`core_db/0`, `table/1`, `is_open/0`, `info/0`) read `persistent_term`
@@ -67,7 +77,6 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 
 
 -record(state, {
-    enabled                 ::  boolean(),
     db                      ::  bondy_db:db() | undefined,
     leveled_sup             ::  pid() | undefined,
     dir                     ::  file:filename_all() | undefined
@@ -82,7 +91,11 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
     db := db_name(),
     durability := durable | ephemeral,
     shard_by := shard_strategy(),
-    fold := fold_class()
+    fold := fold_class(),
+    %% `true` once the domain reads/writes bondy_db (always provisioned).
+    migrated => boolean(),
+    %% `true` to wire the table's appliers to publish change events.
+    publish => boolean()
 }.
 
 -export_type([table_spec/0]).
@@ -92,10 +105,10 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 %% API
 -export([core_db/0]).
 -export([core_db_spec/0]).
--export([enabled/0]).
 -export([fold_opts/1]).
 -export([info/0]).
 -export([is_open/0]).
+-export([provision_all/0]).
 -export([registry_db_spec/0]).
 -export([start_link/0]).
 -export([table/1]).
@@ -143,7 +156,10 @@ tables() ->
         #{name => ?PLUM_DB_GROUP_GRANT_TAB,  db => core, durability => durable, shard_by => realm, fold => mv},
         #{name => ?PLUM_DB_USER_GRANT_TAB,   db => core, durability => durable, shard_by => realm, fold => mv},
         #{name => ?PLUM_DB_SOURCE_TAB,       db => core, durability => durable, shard_by => realm, fold => mv},
-        #{name => api_gateway,               db => core, durability => durable, shard_by => realm, fold => lww},
+        %% api_gateway — first domain cut over to bondy_db (§11.4): always
+        %% provisioned, and publishes change events so the cowboy-dispatch
+        %% reactor rebuilds on local + AE-replicated spec writes.
+        #{name => api_gateway,               db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, publish => true},
         %% ticket / oauth_token shard by key — creation + point lookup are
         %% prioritised over listing / range (mirrors the plum_db rationale).
         #{name => ?PLUM_DB_TICKET_TAB,       db => core, durability => durable, shard_by => key,   fold => lww},
@@ -251,22 +267,25 @@ is_open() ->
     core_db() =/= undefined.
 
 
--doc "Whether catalogue provisioning is enabled (design gate, off by default).".
--spec enabled() -> boolean().
+-doc """
+Whether the `oplog.catalog` flag is set, i.e. whether ALL declared core tables
+are provisioned (not just the migrated ones). Off by default.
+""".
+-spec provision_all() -> boolean().
 
-enabled() ->
+provision_all() ->
     application:get_env(bondy_router, oplog_catalog_enabled, false) =:= true.
 
 
 -doc """
-A summary of the catalogue: the gate state, the `core` DB info and each core
-table's `bondy_db:info/1` (or `not_open`).
+A summary of the catalogue: the `provision_all` flag, the `core` DB info and
+each core table's `bondy_db:info/1` (or `not_open`).
 """.
 -spec info() -> map().
 
 info() ->
     #{
-        enabled => enabled(),
+        provision_all => provision_all(),
         core => case core_db() of
             undefined -> not_open;
             Db -> bondy_db:info(Db)
@@ -289,23 +308,20 @@ init([]) ->
     %% Trap exits so terminate/2 runs on supervised shutdown (to close the DB)
     %% and so a leveled-sup crash surfaces as an EXIT message we can act on.
     process_flag(trap_exit, true),
-    case enabled() of
-        false ->
+    case specs_to_open() of
+        [] ->
+            %% No migrated domains and the `oplog.catalog` flag off — nothing
+            %% to provision; every read still flows through plum_db.
             ?LOG_NOTICE(#{
                 description =>
-                    "bondy_db namespace catalogue disabled; core tables not "
-                    "provisioned (reads continue via plum_db)"
+                    "bondy_db namespace catalogue idle; no core tables to "
+                    "provision (reads continue via plum_db)"
             }),
-            {ok, #state{enabled = false}};
-        true ->
-            case do_open_core() of
+            {ok, #state{}};
+        Specs ->
+            case do_open_core(Specs) of
                 {ok, Db, Sup, Dir} ->
-                    {ok, #state{
-                        enabled = true,
-                        db = Db,
-                        leveled_sup = Sup,
-                        dir = Dir
-                    }};
+                    {ok, #state{db = Db, leveled_sup = Sup, dir = Dir}};
                 {error, Reason} ->
                     %% Don't brick the node over a migration feature — log
                     %% loudly and start idle (is_open/0 stays false).
@@ -315,7 +331,7 @@ init([]) ->
                             "catalogue starting idle",
                         reason => Reason
                     }),
-                    {ok, #state{enabled = true}}
+                    {ok, #state{}}
             end
     end.
 
@@ -353,7 +369,18 @@ terminate(_Reason, #state{db = Db, leveled_sup = Sup}) ->
 
 
 %% @private
-do_open_core() ->
+%% The core table specs to provision at boot: the migrated ones always, plus
+%% every core table when the `oplog.catalog` flag is set.
+specs_to_open() ->
+    Core = [S || #{db := core} = S <- tables()],
+    case provision_all() of
+        true -> Core;
+        false -> [S || S <- Core, maps:get(migrated, S, false)]
+    end.
+
+
+%% @private
+do_open_core(Specs) ->
     Spec = core_db_spec(),
     ShardCount = maps:get(shard_count, Spec),
     Dir = core_dir(),
@@ -370,13 +397,13 @@ do_open_core() ->
             case bondy_db:open(core, DbOpts) of
                 {ok, Db} ->
                     ok = put_db(core, Db),
-                    CoreSpecs = [S || #{db := core} = S <- tables()],
-                    case open_tables(Db, CoreSpecs) of
+                    case open_tables(Db, Specs) of
                         ok ->
                             ?LOG_NOTICE(#{
                                 description =>
                                     "bondy_db core tables provisioned",
-                                count => length(CoreSpecs),
+                                count => length(Specs),
+                                tables => [maps:get(name, S) || S <- Specs],
                                 shard_count => ShardCount,
                                 dir => Dir
                             }),
@@ -438,11 +465,16 @@ stop_sup(Sup) when is_pid(Sup) ->
 
 
 %% @private
-%% Maps a table spec to its `bondy_db:open_table/3` opts (see `fold_opts/1`).
+%% Maps a table spec to its `bondy_db:open_table/3` opts: the fold→CRDT wiring
+%% (see `fold_opts/1`) plus `publish` for tables with a change reactor.
 %% `shard_by` is NOT passed — `open_table` does not yet honour realm-sharding
 %% (§11.4).
-table_opts(#{fold := Class}) ->
-    fold_opts(Class).
+table_opts(#{fold := Class} = Spec) ->
+    Opts = fold_opts(Class),
+    case maps:get(publish, Spec, false) of
+        true -> Opts#{publish => true};
+        false -> Opts
+    end.
 
 
 %% @private

@@ -56,6 +56,6 @@ stamps_evolving_context(Db) ->
     %% → apply_op records {op2, 1}.
     ok = bondy_db:apply(T, <<"r">>, <<"k">>, op2),
     %% to_value is the in-order list of recorded (Op, Context) pairs.
-    {ok, Value, _Hlc} = bondy_db:read(T, <<"r">>, <<"k">>),
+    {ok, {Value, _Hlc}} = bondy_db:read(T, <<"r">>, <<"k">>),
     ?assertEqual([{op1, 0}, {op2, 1}], Value),
     ok = bondy_db:close_table(T).

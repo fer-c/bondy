@@ -107,17 +107,20 @@ lifecycle_test_() ->
         fun() -> {ok, _} = application:ensure_all_started(bondy_db), ok end,
         fun(_) -> ok end,
         [
-            {timeout, 60, {"provisioning", fun provisioning/0}},
-            {timeout, 30, {"disabled is a no-op", fun disabled/0}}
+            {timeout, 60,
+                {"provision_all opens every core table", fun provision_all/0}},
+            {timeout, 60,
+                {"default provisions only migrated tables",
+                    fun migrated_only/0}}
         ]}.
 
 
-provisioning() ->
+provision_all() ->
     Tmp = make_tmpdir(),
     set_env(true, 1, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     try
-        %% Core DB + all ten core tables provisioned and published.
+        %% Core DB + all eleven core tables provisioned and published.
         ?assert(?CAT:is_open()),
         ?assertMatch(#{name := core}, ?CAT:core_db()),
         ?assertMatch(#{kind := db, name := core}, bondy_db:info(?CAT:core_db())),
@@ -151,7 +154,7 @@ provisioning() ->
         ),
         %% info/0 summary.
         Info = ?CAT:info(),
-        ?assertMatch(#{enabled := true, core := #{kind := db}}, Info),
+        ?assertMatch(#{provision_all := true, core := #{kind := db}}, Info),
         ?assertEqual(11, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),
@@ -164,16 +167,24 @@ provisioning() ->
     ?assertEqual(undefined, ?CAT:table(bondy_realm)).
 
 
-disabled() ->
-    application:set_env(bondy_router, oplog_catalog_enabled, false),
+%% Default (flag off): only the migrated domain's table (api_gateway) is opened;
+%% the core DB still comes up to host it, but not-yet-migrated tables stay shut.
+migrated_only() ->
+    Tmp = make_tmpdir(),
+    set_env(false, 1, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     try
-        ?assertEqual(false, ?CAT:is_open()),
-        ?assertEqual(undefined, ?CAT:core_db()),
-        ?assertMatch(#{enabled := false, core := not_open}, ?CAT:info())
+        ?assert(?CAT:is_open()),
+        ?assertMatch(#{entity_type := api_gateway, db_name := core},
+            ?CAT:table(api_gateway)),
+        %% Not-yet-migrated core tables are NOT opened.
+        ?assertEqual(undefined, ?CAT:table(bondy_realm)),
+        ?assertEqual(undefined, ?CAT:table(security_user_grants)),
+        ?assertMatch(#{provision_all := false, core := #{kind := db}}, ?CAT:info())
     after
         ok = stop_catalog(Pid),
-        application:unset_env(bondy_router, oplog_catalog_enabled)
+        reset_env(),
+        rmrf(Tmp)
     end.
 
 

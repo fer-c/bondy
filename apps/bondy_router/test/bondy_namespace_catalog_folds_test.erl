@@ -85,8 +85,8 @@ lww_concurrent_converges() ->
         ok = bondy_db:apply(Tb, <<"r">>, <<"k">>, {set, 200, <<"vb">>}),
         ok = sync_both(Ta, Tb),
         %% Both replicas agree on the single LWW winner (highest HLC).
-        ?assertEqual({ok, <<"vb">>, 200}, bondy_db:read(Ta, <<"r">>, <<"k">>)),
-        ?assertEqual({ok, <<"vb">>, 200}, bondy_db:read(Tb, <<"r">>, <<"k">>)),
+        ?assertEqual({ok, {<<"vb">>, 200}}, bondy_db:read(Ta, <<"r">>, <<"k">>)),
+        ?assertEqual({ok, {<<"vb">>, 200}}, bondy_db:read(Tb, <<"r">>, <<"k">>)),
         ?assertEqual(root(Ta), root(Tb))
     after
         ok = bondy_db:close(DbA),
@@ -99,12 +99,12 @@ lww_later_write_wins() ->
     {Db, T} = open_replica(lww_later, security_users, lww),
     try
         ok = bondy_db:apply(T, <<"r">>, <<"u">>, {set, 1, <<"v1">>}),
-        ?assertEqual({ok, <<"v1">>, 1}, bondy_db:read(T, <<"r">>, <<"u">>)),
+        ?assertEqual({ok, {<<"v1">>, 1}}, bondy_db:read(T, <<"r">>, <<"u">>)),
         ok = bondy_db:apply(T, <<"r">>, <<"u">>, {set, 3, <<"v3">>}),
-        ?assertEqual({ok, <<"v3">>, 3}, bondy_db:read(T, <<"r">>, <<"u">>)),
+        ?assertEqual({ok, {<<"v3">>, 3}}, bondy_db:read(T, <<"r">>, <<"u">>)),
         %% Stale write is absorbed — the cell stays at v3.
         ok = bondy_db:apply(T, <<"r">>, <<"u">>, {set, 2, <<"stale">>}),
-        ?assertEqual({ok, <<"v3">>, 3}, bondy_db:read(T, <<"r">>, <<"u">>))
+        ?assertEqual({ok, {<<"v3">>, 3}}, bondy_db:read(T, <<"r">>, <<"u">>))
     after
         ok = bondy_db:close(Db)
     end.
@@ -116,14 +116,14 @@ lww_clear_then_reset_reanimates() ->
     {Db, T} = open_replica(lww_reanimate, bondy_ticket, lww),
     try
         ok = bondy_db:apply(T, <<"r">>, <<"tok">>, {set, 1, <<"issued">>}),
-        ?assertEqual({ok, <<"issued">>, 1}, bondy_db:read(T, <<"r">>, <<"tok">>)),
+        ?assertEqual({ok, {<<"issued">>, 1}}, bondy_db:read(T, <<"r">>, <<"tok">>)),
         %% Revoke — the cell reads as absent.
         ok = bondy_db:apply(T, <<"r">>, <<"tok">>, {clear, 2}),
-        ?assertEqual(not_found, bondy_db:read(T, <<"r">>, <<"tok">>)),
+        ?assertEqual({error, not_found}, bondy_db:read(T, <<"r">>, <<"tok">>)),
         %% Re-issue — a later set resurrects the cell.
         ok = bondy_db:apply(T, <<"r">>, <<"tok">>, {set, 3, <<"reissued">>}),
         ?assertEqual(
-            {ok, <<"reissued">>, 3}, bondy_db:read(T, <<"r">>, <<"tok">>)
+            {ok, {<<"reissued">>, 3}}, bondy_db:read(T, <<"r">>, <<"tok">>)
         )
     after
         ok = bondy_db:close(Db)
@@ -266,5 +266,5 @@ replay(InstanceId) ->
     bondy_oplog_applier:replay_cell_events_sync(Pid).
 
 %% Collapse the timing-dependent read HLC for assertions.
-norm({ok, V, _Hlc}) -> {ok, V, read_hlc};
+norm({ok, {V, _Hlc}}) -> {ok, V, read_hlc};
 norm(Other) -> Other.

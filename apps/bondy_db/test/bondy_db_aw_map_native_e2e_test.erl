@@ -116,8 +116,8 @@ concurrent_replicas_converge() ->
     %% into the per-cell projection; force that barrier (prod casts async).
     ok = replay(Ia),
     ok = replay(Ib),
-    {ok, Va, _} = bondy_db:read(Ta, <<"r">>, <<"c">>),
-    {ok, Vb, _} = bondy_db:read(Tb, <<"r">>, <<"c">>),
+    {ok, {Va, _}} = bondy_db:read(Ta, <<"r">>, <<"c">>),
+    {ok, {Vb, _}} = bondy_db:read(Tb, <<"r">>, <<"c">>),
     ?assertEqual(#{<<"k">> => [<<"va">>, <<"vb">>]}, Va),
     ?assertEqual(#{<<"k">> => [<<"va">>, <<"vb">>]}, Vb),
     ?assertEqual(bondy_oplog:root_hash(Ia), bondy_oplog:root_hash(Ib)),
@@ -139,7 +139,7 @@ survives_compaction() ->
     ),
     bondy_oplog_peer_state:sync(),
     {ok, {compacted, _, _}} = bondy_oplog:compact(I),
-    {ok, V, _} = bondy_db:read(T, <<"r">>, <<"c">>),
+    {ok, {V, _}} = bondy_db:read(T, <<"r">>, <<"c">>),
     ?assertEqual(#{<<"k">> => [<<"v2">>]}, V),
     bondy_oplog_peer_state:forget_peer({peer, awmapn_dummy}),
     ok = bondy_db:close(Db).
@@ -167,5 +167,5 @@ replay(InstanceId) ->
     Pid = bondy_oplog_registry:applier_pid(InstanceId),
     bondy_oplog_applier:replay_cell_events_sync(Pid).
 
-normalise({ok, V, _Hlc}) -> {ok, V, read_hlc};
+normalise({ok, {V, _Hlc}}) -> {ok, V, read_hlc};
 normalise(Other) -> Other.

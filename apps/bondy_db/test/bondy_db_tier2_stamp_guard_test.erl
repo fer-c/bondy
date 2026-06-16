@@ -158,5 +158,5 @@ await_regression_event() ->
         no_telemetry
     end.
 
-norm({ok, V, _Hlc}) -> {ok, V, read_hlc};
+norm({ok, {V, _Hlc}}) -> {ok, V, read_hlc};
 norm(Other) -> Other.

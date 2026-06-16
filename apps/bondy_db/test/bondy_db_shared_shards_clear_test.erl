@@ -120,7 +120,7 @@ primary_fan_out_smoke({Db, _Sup, _Dir}) ->
     ),
     lists:foreach(
         fun(K) ->
-            ?assertEqual({ok, <<K/binary, "-v">>, '_'}, mask_hlc(bondy_db:read(T, ?R, K)))
+            ?assertEqual({ok, {<<K/binary, "-v">>, '_'}}, mask_hlc(bondy_db:read(T, ?R, K)))
         end,
         Keys
     ),
@@ -284,7 +284,7 @@ flush_index(Table, IndexName) ->
 %% Misc helpers
 %% =============================================================================
 
-mask_hlc({ok, V, _H}) -> {ok, V, '_'};
+mask_hlc({ok, {V, _H}}) -> {ok, {V, '_'}};
 mask_hlc(Other) -> Other.
 
 make_tempdir() ->

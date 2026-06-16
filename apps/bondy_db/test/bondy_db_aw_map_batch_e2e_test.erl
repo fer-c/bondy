@@ -118,7 +118,7 @@ empty_batch_noop() ->
     {Db, _O} = open_db(awmapb_empty),
     {ok, T} = bondy_db:open_table(Db, items, #{}),
     ?assertEqual(ok, bondy_db:apply_batch(T, <<"r">>, <<"c">>, [])),
-    ?assertEqual(not_found, bondy_db:read(T, <<"r">>, <<"c">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(T, <<"r">>, <<"c">>)),
     ok = bondy_db:close(Db).
 
 %% A top-level edit key other than `put`/`rmv` is rejected before any write.
@@ -166,8 +166,8 @@ batch_converges_with_single() ->
     ok = replay(Ia),
     ok = replay(Ib),
     Expected = #{<<"k1">> => [<<"a1">>, <<"b1">>], <<"k2">> => [<<"a2">>]},
-    {ok, Va, _} = bondy_db:read(Ta, <<"r">>, <<"c">>),
-    {ok, Vb, _} = bondy_db:read(Tb, <<"r">>, <<"c">>),
+    {ok, {Va, _}} = bondy_db:read(Ta, <<"r">>, <<"c">>),
+    {ok, {Vb, _}} = bondy_db:read(Tb, <<"r">>, <<"c">>),
     ?assertEqual(Expected, Va),
     ?assertEqual(Expected, Vb),
     ?assertEqual(bondy_oplog:root_hash(Ia), bondy_oplog:root_hash(Ib)),
@@ -207,5 +207,5 @@ replay(InstanceId) ->
     Pid = bondy_oplog_registry:applier_pid(InstanceId),
     bondy_oplog_applier:replay_cell_events_sync(Pid).
 
-normalise({ok, V, _Hlc}) -> {ok, V, read_hlc};
+normalise({ok, {V, _Hlc}}) -> {ok, V, read_hlc};
 normalise(Other) -> Other.

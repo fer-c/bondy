@@ -42,7 +42,7 @@ info(Db) ->
 
 toggle(Db) ->
     {ok, T} = bondy_db:open_table(Db, t_flag, #{}),
-    ?assertEqual(not_found, bondy_db:read(T, <<"r1">>, <<"f">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(T, <<"r1">>, <<"f">>)),
     ok = bondy_db:apply(T, <<"r1">>, <<"f">>, enable),
     ?assertEqual(true, read_value(T, <<"f">>)),
     %% A disable observes the prior enable and clears the flag.
@@ -54,5 +54,5 @@ toggle(Db) ->
     ok = bondy_db:close_table(T).
 
 read_value(T, Key) ->
-    {ok, V, _Hlc} = bondy_db:read(T, <<"r1">>, Key),
+    {ok, {V, _Hlc}} = bondy_db:read(T, <<"r1">>, Key),
     V.

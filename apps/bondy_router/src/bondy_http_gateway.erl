@@ -9,9 +9,9 @@
 Manages Cowboy HTTP/HTTPS listeners and the API Gateway dispatch tables.
 
 This gen_server is responsible for the full lifecycle of the Bondy HTTP
-API Gateway: loading API specification documents, storing them in plum_db,
-compiling them into Cowboy dispatch tables, and starting/stopping/suspending
-the underlying Ranch/Cowboy listeners.
+API Gateway: loading API specification documents, storing them in the bondy_db
+`api_gateway` table, compiling them into Cowboy dispatch tables, and
+starting/stopping/suspending the underlying Ranch/Cowboy listeners.
 
 ## Listeners
 
@@ -30,31 +30,29 @@ via the corresponding public API functions.
 ## API specifications
 
 API specs are JSON documents parsed by `bondy_http_gateway_api_spec_parser`.
-They are stored in plum_db under the `{api_gateway, api_specs}` prefix so
-they are replicated across cluster nodes. When a spec is loaded:
+They are stored in the bondy_db `api_gateway` core table (design §11.4 — the
+first domain migrated off plum_db), keyed by spec id, with the **source JSON**
+carried as a `term_to_binary/1` payload in an `lww_register` cell. When a spec
+is loaded:
 
 1. The JSON document is validated and parsed
 2. The parsed spec is compiled into a Cowboy dispatch table
    (`cowboy_router:compile/1`) to verify correctness
-3. The **source JSON** (not the parsed form) is persisted in plum_db —
+3. The **source JSON** (not the parsed form) is persisted in bondy_db —
    parsed specs can contain `mops` proxy funs that become invalid after a
    code upgrade, so we always re-parse from source
 4. The dispatch tables are rebuilt for all active listeners
 
 ## Cluster replication
 
-The server subscribes to three plum_db event classes:
-
-- `exchange_started` — a new AAE exchange has begun with a peer node
-- `exchange_finished` — the exchange completed; the server rebuilds
-  dispatch tables from any specs updated during the exchange
-- `object_update` — an individual API spec was replicated from another
-  node; if the system is in `ready` state the dispatch tables are
-  rebuilt immediately, otherwise the update is buffered until the next
-  exchange completes
-
-This batching avoids redundant rebuilds during initial startup when many
-specs may arrive in quick succession.
+The `api_gateway` table is opened with `publish => true`, so its appliers
+publish every verified spec write — a local write OR one replicated from a
+peer via bondy_db's anti-entropy — to the table namespace. The server
+`bondy_oplog_core:subscribe/2`s to that namespace and, on any spec change,
+rebuilds this node's dispatch tables. Rebuilds are **debounced**
+(`?REBUILD_DEBOUNCE` ms) so a burst (boot config load, an AE sync) collapses
+into a single rebuild. Cross-node propagation requires bondy_db anti-entropy
+to be enabled (`oplog.aae`).
 
 ## WAMP subscriptions
 
@@ -93,16 +91,29 @@ Listeners are configured with two connection-count alarms:
 -include("bondy_uris.hrl").
 
 -define(DISPATCH_KEY(Name), {?MODULE, dispatch, Name}).
--define(PREFIX, {api_gateway, api_specs}).
+%% API specs live in the bondy_db `api_gateway` core table (design §11.4 — the
+%% first domain cut over from plum_db). The store is a flat, id-keyed keyspace
+%% (a spec's realm is a field in the value, not part of the key), so a single
+%% fixed bucket is used. The spec map is stored directly in an `lww_register`
+%% cell (the substrate serialises terms; no manual encoding); `clear` deletes
+%% (non-terminal, so a re-`load` reanimates). The catalogue
+%% (`bondy_namespace_catalog`) provisions the table.
+-define(BUCKET, <<>>).
 -define(HTTP, api_gateway_http).
 -define(HTTPS, api_gateway_https).
 -define(ADMIN_HTTP, admin_api_http).
 -define(ADMIN_HTTPS, admin_api_https).
+%% Debounce window (ms) for coalescing a burst of spec-change events (boot
+%% config load, an AE sync) into a single dispatch-table rebuild.
+-define(REBUILD_DEBOUNCE, 250).
 
 -record(state, {
     %% Use for WAMP subscriptions
     bondy_ref :: bondy_ref:t(),
-    exchange_ref :: {pid(), reference()} | undefined,
+    %% bondy_oplog_core change-event subscription for the api_gateway table.
+    oplog_sub :: reference() | undefined,
+    %% Pending debounce timer for a coalesced rebuild.
+    rebuild_timer :: reference() | undefined,
     updated_specs = [] :: list(),
     subscriptions = #{} :: #{id() => uri()}
 }).
@@ -224,7 +235,7 @@ resume_admin_listeners() ->
 Loads API specs from the configuration file into the metadata store.
 
 Reads the JSON file at `bondy.api_gateway.config_file`, parses each
-spec, validates it, and stores it in plum_db. Does **not** rebuild the
+spec, validates it, and stores it in bondy_db. Does **not** rebuild the
 Cowboy dispatch tables — call `rebuild_dispatch_tables/0` or `load/1`
 for that.
 """.
@@ -235,7 +246,7 @@ apply_config() ->
     gen_server:call(?MODULE, apply_config).
 
 -doc """
-Parses an API spec, stores it in plum_db, and rebuilds dispatch tables.
+Parses an API spec, stores it in bondy_db, and rebuilds dispatch tables.
 
 Accepts either a map (a single parsed JSON spec) or a list of maps.
 The spec is validated by compiling it through
@@ -264,7 +275,7 @@ dispatch_table(Listener) ->
 -doc """
 Rebuilds the Cowboy dispatch tables for all active public listeners.
 
-Loads every API spec from plum_db, re-parses them, compiles the
+Loads every API spec from bondy_db, re-parses them, compiles the
 dispatch table via `cowboy_router:compile/1`, and stores the result
 in `persistent_term` for each enabled listener (`api_gateway_http`,
 `api_gateway_https`).
@@ -288,10 +299,10 @@ parsed form.
 -spec lookup(binary()) -> map() | {error, not_found}.
 
 lookup(Id) ->
-    case plum_db:get(?PREFIX, Id) of
-        Spec when is_map(Spec) ->
+    case bondy_db:read(spec_table(), ?BUCKET, Id) of
+        {ok, {Spec, _Hlc}} ->
             Spec;
-        undefined ->
+        {error, not_found} ->
             {error, not_found}
     end.
 
@@ -299,18 +310,18 @@ lookup(Id) ->
 -spec list() -> [ParsedSpec :: map()].
 
 list() ->
-    [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
+    [Spec || {_Id, Spec} <- stored_specs()].
 
 -doc """
 Deletes the API specification identified by `Id` and rebuilds dispatch tables.
 
-The spec is removed from plum_db and the Cowboy dispatch tables are
+The spec is removed from bondy_db and the Cowboy dispatch tables are
 recompiled to reflect the removal.
 """.
 -spec delete(binary()) -> ok.
 
 delete(Id) when is_binary(Id) ->
-    plum_db:delete(?PREFIX, Id),
+    ok = bondy_db:apply(spec_table(), ?BUCKET, Id, clear),
     ok = rebuild_dispatch_tables(),
     ok.
 
@@ -363,64 +374,17 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
-    Ref = erlang:monitor(process, Pid),
-    {noreply, State#state{exchange_ref = {Pid, Ref}}};
 handle_info(
-    {plum_db_event, exchange_finished, {Pid, _Reason}},
-    #state{exchange_ref = {Pid, Ref}} = State0
+    {bondy_oplog_core_event, _NS, Key, _Hlc, _Op}, State0
 ) ->
-    true = erlang:demonitor(Ref, [flush]),
+    %% An API spec changed in bondy_db — a local write OR an AE-replicated
+    %% remote write. Debounce-batch so a burst (boot config load, an AE sync)
+    %% collapses into a single dispatch-table rebuild.
+    {noreply, note_spec_change(Key, State0)};
+handle_info(rebuild_specs, State0) ->
+    %% The debounce window elapsed — rebuild once for the whole batch.
     ok = handle_spec_updates(State0),
-    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-    {noreply, State1};
-handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
-    %% We are receiving the notification after we received a DOWN message
-    %% we do nothing
-    {noreply, State};
-handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
-    %% We've got a notification that an API Spec object has been updated
-    %% in the database via cluster replication, so we need to rebuild the
-    %% Cowboy dispatch tables.
-    ?LOG_INFO(#{
-        description => "API Specification remote update received",
-        key => Key
-    }),
-    Specs = [Key | State0#state.updated_specs],
-    State1 = State0#state{updated_specs = Specs},
-    Status = {bondy_config:get(status), plum_db_config:get(aae_enabled)},
-
-    case Status of
-        {ready, false} ->
-            %% We finished initialising and AAE is disabled so
-            %% we try to rebuild immediately
-            ok = handle_spec_updates(State1),
-            {noreply, State1#state{updated_specs = []}};
-        {ready, true} ->
-            %% We finished initialising and AAE is enabled so
-            %% we try to rebuild immediately even though we do not have causal
-            %% ordering not consistency guarantees.
-
-            %% TODO if/when we have casual ordering and reliable delivery of
-            %% Security and API Gateway config we can trigger the rebuild
-            %% immediately, provided an exchange has not been.
-
-            %% TODO if rebuild disaptch tables fails, we should retry later on
-            ok = handle_spec_updates(State1),
-            {noreply, State1#state{updated_specs = []}};
-        {_, false} ->
-            %% We are either initialising or shutting down
-            {noreply, State1};
-        {_, true} ->
-            %% We might be initialising (and have not yet performed an AAE).
-            %% Since Specs depend on other objects being present and we
-            %% also want to avoid rebuilding the dispatch table multiple times
-            %% during initialisation, we just set a flag on the state to
-            %% rebuild the dispatch tables once we received an
-            %% exchange_finished event, that is we rebuild dispatch tables only
-            %% after an AAE exchange
-            {noreply, State1}
-    end;
+    {noreply, State0#state{updated_specs = [], rebuild_timer = undefined}};
 handle_info({?BONDY_REQ, _, ?MASTER_REALM_URI, #event{} = Event}, State) ->
     %% We informally implement bondy_subscriber
     Id = Event#event.subscription_id,
@@ -433,18 +397,10 @@ handle_info({?BONDY_REQ, _, ?MASTER_REALM_URI, #event{} = Event}, State) ->
                 on_realm_deleted(Uri, State)
         end,
     {noreply, NewState};
-handle_info(
-    {'DOWN', Ref, process, Pid, _Reason},
-    #state{exchange_ref = {Pid, Ref}} = State0
-) ->
-    ok = handle_spec_updates(State0),
-    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-    {noreply, State1};
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
-        event => Info,
-        state_exchange_ref => State#state.exchange_ref
+        event => Info
     }),
     {noreply, State}.
 
@@ -469,21 +425,13 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 %% @private
-subscribe(State) ->
-    %% We subscribe to change notifications in plum_db_events, we are
-    %% interested in updates to API Specs coming from another node so that we
-    %% recompile them and generate this node's Cowboy dispatch tables
-    ok = plum_db_events:subscribe(exchange_started),
-    ok = plum_db_events:subscribe(exchange_finished),
-    MS = [
-        {
-            %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
-            {{?PREFIX, '_'}, '_', '_'},
-            [],
-            [true]
-        }
-    ],
-    ok = plum_db_events:subscribe(object_update, MS),
+subscribe(State0) ->
+    %% Subscribe to API Gateway spec change events from the bondy_db
+    %% `api_gateway` table (opened with `publish => true`). The applier
+    %% publishes every verified apply — a local write OR an AE-replicated
+    %% remote write — to the table namespace, so we rebuild this node's Cowboy
+    %% dispatch tables on any spec change cluster-wide.
+    State1 = subscribe_oplog(State0),
 
     %% We subscribe to WAMP events
     %% We will handle then in handle_cast/2
@@ -494,26 +442,84 @@ subscribe(State) ->
             match => <<"exact">>
         },
         ?BONDY_REALM_DELETED,
-        State#state.bondy_ref
+        State1#state.bondy_ref
     ),
-    Subs = maps:put(Id, ?BONDY_REALM_DELETED, State#state.subscriptions),
+    Subs = maps:put(Id, ?BONDY_REALM_DELETED, State1#state.subscriptions),
 
-    State#state{
+    State1#state{
         subscriptions = Subs
     }.
 
 %% @private
+subscribe_oplog(State) ->
+    case spec_table_opt() of
+        undefined ->
+            ?LOG_WARNING(#{
+                description =>
+                    "API Gateway bondy_db table is not available; the "
+                    "spec-change reactor is disabled (is the namespace "
+                    "catalogue running?)"
+            }),
+            State;
+        Table ->
+            {ok, Ref} = bondy_oplog_core:subscribe(
+                bondy_db:namespace(Table), all
+            ),
+            State#state{oplog_sub = Ref}
+    end.
+
+%% @private
 unsubscribe(State) ->
-    _ = plum_db_events:unsubscribe(exchange_started),
-    _ = plum_db_events:unsubscribe(exchange_finished),
-    _ = plum_db_events:unsubscribe(object_update),
+    _ =
+        case State#state.oplog_sub of
+            undefined -> ok;
+            Ref -> bondy_oplog_core:unsubscribe(Ref)
+        end,
 
     _ = [
         bondy_broker:unsubscribe(Id, ?MASTER_REALM_URI)
      || Id <- maps:keys(State#state.subscriptions)
     ],
 
-    State#state{subscriptions = #{}}.
+    State#state{subscriptions = #{}, oplog_sub = undefined}.
+
+%% @private
+%% The open bondy_db `api_gateway` table handle. Raises if the catalogue has
+%% not provisioned it — after the §11.4 cut-over the table is a hard dependency
+%% (the catalogue, a `bondy_sup` child, opens it before this gen_server starts).
+spec_table() ->
+    case spec_table_opt() of
+        undefined -> error(api_gateway_table_unavailable);
+        Table -> Table
+    end.
+
+%% @private
+spec_table_opt() ->
+    bondy_namespace_catalog:table(api_gateway).
+
+%% @private
+%% Every stored spec as `{Id, SpecMap}` (cleared / tombstoned cells excluded).
+stored_specs() ->
+    {ok, Cells} = bondy_db:list(spec_table(), ?BUCKET),
+    [{Id, Spec} || {Id, Spec, _Hlc} <- Cells, is_map(Spec)].
+
+%% @private
+%% Record a changed spec id and (re)arm the debounce timer for a coalesced
+%% rebuild. Repeated changes inside the window accumulate behind one timer.
+note_spec_change(Key, #state{updated_specs = Specs, rebuild_timer = Timer} = St) ->
+    Specs1 =
+        case lists:member(Key, Specs) of
+            true -> Specs;
+            false -> [Key | Specs]
+        end,
+    Timer1 =
+        case Timer of
+            undefined ->
+                erlang:send_after(?REBUILD_DEBOUNCE, self(), rebuild_specs);
+            _ ->
+                Timer
+        end,
+    St#state{updated_specs = Specs1, rebuild_timer = Timer1}.
 
 %% @private
 do_start_listeners(public) ->
@@ -695,7 +701,7 @@ functions.  In case we upgrade the code of the mops.erl module those funs
 will no longer be valid and will fail with a badfun exception.
 """.
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
-    plum_db:put(?PREFIX, Id, Spec).
+    bondy_db:apply(spec_table(), ?BUCKET, Id, {set, Spec}).
 
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
@@ -871,8 +877,7 @@ load_dispatch_tables() ->
                     []
             end
         end
-     || {K, [V]} <- plum_db:to_list(?PREFIX),
-        V =/= '$deleted'
+     || {K, V} <- stored_specs()
     ]),
 
     Result = bondy_http_gateway_api_spec_parser:dispatch_table(

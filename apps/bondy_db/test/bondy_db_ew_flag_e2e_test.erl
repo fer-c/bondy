@@ -43,7 +43,7 @@ info(Db) ->
 toggle(Db) ->
     {ok, T} = bondy_db:open_table(Db, t_flag, #{}),
     %% Fresh cell: absent reads as not_found (no enable yet).
-    ?assertEqual(not_found, bondy_db:read(T, <<"r1">>, <<"f">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(T, <<"r1">>, <<"f">>)),
     ok = bondy_db:apply(T, <<"r1">>, <<"f">>, enable),
     ?assertEqual(true, read_value(T, <<"f">>)),
     %% A disable observes the prior enable and clears the flag.
@@ -56,5 +56,5 @@ toggle(Db) ->
 
 %% Read the boolean value, ignoring the HLC.
 read_value(T, Key) ->
-    {ok, V, _Hlc} = bondy_db:read(T, <<"r1">>, Key),
+    {ok, {V, _Hlc}} = bondy_db:read(T, <<"r1">>, Key),
     V.

@@ -96,11 +96,12 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc Provisions the bondy_db `core` namespace-catalogue tables at boot (see
-%% `bondy_namespace_catalog`). Off by default — during the plum_db→bondy_db
-%% migration nothing reads from bondy_db, so a default node skips provisioning
-%% and continues to serve every read from plum_db. Enable to validate that the
-%% durable core tables provision and appear in `bondy_db:info`.
+%% @doc Provision ALL declared bondy_db `core` tables at boot, not just the ones
+%% whose domain has been migrated off plum_db (see `bondy_namespace_catalog`).
+%% Off by default: a default node provisions only the migrated tables (e.g.
+%% `api_gateway`) and serves every other read from plum_db. Enable to validate
+%% that a not-yet-migrated domain's table provisions and appears in
+%% `bondy_db:info` before its cut-over.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "oplog.catalog", "bondy_router.oplog_catalog_enabled", [
@@ -109,8 +110,8 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc The shard count for the bondy_db `core` durable database. Applied when
-%% the catalogue is provisioned (`oplog.catalog = on`).
+%% @doc The shard count for the bondy_db `core` durable database. Applied
+%% whenever the catalogue provisions the core DB.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "oplog.core.shard_count", "bondy_router.oplog_core_shard_count", [

@@ -252,7 +252,7 @@ key(I) ->
 val_for(I) ->
     list_to_binary("v" ++ integer_to_list(I)).
 
-val({ok, V, _Hlc}) -> V.
+val({ok, {V, _Hlc}}) -> V.
 
 wait_live(Id, N) ->
     wait_until(fun() -> live_size(Id) >= N end, 5000).

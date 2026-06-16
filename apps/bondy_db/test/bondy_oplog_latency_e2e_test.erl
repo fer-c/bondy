@@ -160,7 +160,7 @@ idle_probe_heartbeats() ->
 
     %% The probe lives in a reserved bucket: a normal user read of a key we
     %% never wrote returns not_found (no user-keyspace pollution).
-    ?assertEqual(not_found, bondy_db:read(T, <<"realm">>, <<"never">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(T, <<"realm">>, <<"never">>)),
     close_stop(Db, Id).
 
 %% probe_write must produce a type-correct, accepted op for each CRDT: a
@@ -174,7 +174,7 @@ probe_write_per_type() ->
     ?assertEqual(ok, bondy_db:probe_write(IdM)),
     ?assertEqual(ok, bondy_db:probe_write(IdM)),
     %% the reserved cell is invisible to a normal read of the user keyspace
-    ?assertEqual(not_found, bondy_db:read(Tm, <<"realm">>, <<"k">>)),
+    ?assertEqual({error, not_found}, bondy_db:read(Tm, <<"realm">>, <<"k">>)),
     close_stop(DbM, IdM),
 
     %% tier_0 lww (the default type) — probe op carries a fresh HLC
