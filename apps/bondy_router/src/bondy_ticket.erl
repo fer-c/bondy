@@ -140,10 +140,12 @@ WAMP permission required to call the procedures.
 % 2 mins
 -define(LEEWAY_SECS, 2 * 60).
 
-%% TODO review, using a dynamic prefix is a bad idea, turn this into
-%% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
-%% iteration using first prefixes
--define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_TICKET_TAB, Uri}).
+%% Tickets live in the bondy_db `bondy_ticket` core table (design §11.4 — cut
+%% over from plum_db), bucketed by the auth realm and keyed by the composed
+%% store key. The 3-tuple store key `{Authid, A, B}` is encoded to a binary with
+%% `term_to_binary/1`; it is NOT order-preserving, so `revoke_all/2` scans the
+%% realm and filters by the decoded `Authid` rather than a key-prefix range. The
+%% catalogue (`bondy_namespace_catalog`) provisions the table.
 
 -define(OPTS_VALIDATOR, #{
     expiry_time_secs => #{
@@ -366,16 +368,14 @@ verify(Ticket, Opts) ->
 ) -> {ok, Claims :: t()} | {error, no_found}.
 
 lookup(RealmUri, Authid, Scope) ->
-    Prefix = ?PLUM_DB_PREFIX(RealmUri),
     Key = lookup_key(Authid, Scope),
-    Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
 
-    case plum_db:get(Prefix, Key, Opts) of
-        undefined ->
+    case bondy_db:read(table(), RealmUri, encode_key(Key)) of
+        {error, not_found} ->
             {error, not_found};
-        Claims when is_map(Claims) ->
+        {ok, {Claims, _Hlc}} when is_map(Claims) ->
             {ok, Claims};
-        List when is_list(List) ->
+        {ok, {List, _Hlc}} when is_list(List) ->
             %% List :: [t()]
             LKey = list_key(Scope),
             case lists:keyfind(LKey, 1, List) of
@@ -417,9 +417,8 @@ revoke(Claims) when is_map(Claims) ->
 revoke(RealmUri, Authid, Scope) when
     is_binary(RealmUri), is_binary(Authid), is_map(Scope)
 ->
-    Prefix = ?PLUM_DB_PREFIX(RealmUri),
     Key = lookup_key(Authid, Scope),
-    plum_db:delete(Prefix, Key).
+    bondy_db:apply(table(), RealmUri, encode_key(Key), clear).
 
 -doc """
 Revokes all tickets issued to all users in realm `RealmUri`.
@@ -427,11 +426,10 @@ Revokes all tickets issued to all users in realm `RealmUri`.
 -spec revoke_all(RealmUri :: uri()) -> ok.
 
 revoke_all(RealmUri) when is_binary(RealmUri) ->
-    Prefix = ?PLUM_DB_PREFIX(RealmUri),
-    Fun = fun({Key, _}) -> plum_db:delete(Prefix, Key) end,
-    %% We cannot use keys_only as it will currently ignore remove_tombstones
-    Opts = [{remove_tombstones, true}, {resolver, lww}],
-    ok = plum_db:foreach(Fun, Prefix, Opts).
+    Table = table(),
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [bondy_db:apply(Table, RealmUri, Key, clear) || {Key, _V, _Hlc} <- Rows],
+    ok.
 
 -doc """
 Revokes all tickets issued to user with `Username` in realm `RealmUri`.
@@ -442,22 +440,18 @@ application.
     ok.
 
 revoke_all(RealmUri, Authid) ->
-    %% The tickets for a user are distributed across all the plum_db partitions
-    %% because we are sharding by key
-    Prefix = ?PLUM_DB_PREFIX(RealmUri),
-    Fun = fun
-        ({{Term, _, _} = Key, _}) when Term == Authid ->
-            plum_db:delete(Prefix, Key);
-        (_) ->
-            %% No longer the user's ticket
-            throw(break)
-    end,
-    Opts = [
-        {first, {Authid, '_', '_'}},
-        {remove_tombstones, true},
-        {resolver, lww}
+    %% The tickets for a user are distributed across all the shards because we
+    %% shard by key, and `term_to_binary/1` keys are not order-preserving — so
+    %% rather than a key-prefix range we scan the realm and filter by the
+    %% decoded Authid (the first element of the composed store key). Revocation
+    %% is a cold path, so the O(realm) scan is acceptable.
+    Table = table(),
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [
+        bondy_db:apply(Table, RealmUri, Key, clear)
+     || {Key, _V, _Hlc} <- Rows, is_authid_key(Key, Authid)
     ],
-    plum_db:foreach(Fun, Prefix, Opts).
+    ok.
 
 -doc """
 Revokes all tickets issued to user with `Username` in realm `RealmUri` matching
@@ -531,17 +525,16 @@ update_claims(AuthRealmUri, Authid, UpdateFun) when
         is_function(UpdateFun, 1)
 ->
     Scope = #{realm => all, client_id => all, device_id => all},
-    Prefix = ?PLUM_DB_PREFIX(AuthRealmUri),
-    Key = lookup_key(Authid, Scope),
-    Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
+    Table = table(),
+    EncKey = encode_key(lookup_key(Authid, Scope)),
 
-    case plum_db:get(Prefix, Key, Opts) of
-        undefined ->
+    case bondy_db:read(Table, AuthRealmUri, EncKey) of
+        {error, not_found} ->
             {error, not_found};
-        Claims when is_map(Claims) ->
+        {ok, {Claims, _Hlc}} when is_map(Claims) ->
             UpdatedClaims = UpdateFun(Claims),
-            ok = plum_db:put(Prefix, Key, UpdatedClaims);
-        _List ->
+            ok = bondy_db:apply(Table, AuthRealmUri, EncKey, {set, UpdatedClaims});
+        {ok, {_List, _Hlc}} ->
             %% For list-type entries (client-scoped), not supported for OIDC
             {error, not_found}
     end.
@@ -739,22 +732,25 @@ list_key(#{realm := Uri, device_id := Id}) ->
 
 %% @private
 store_ticket(AuthRealmUri, Authid, Claims) ->
-    Prefix = ?PLUM_DB_PREFIX(AuthRealmUri),
+    Table = table(),
     Scope = maps:get(scope, Claims),
-    Key = store_key(Authid, Scope),
+    EncKey = encode_key(store_key(Authid, Scope)),
 
     case maps:get(client_id, Scope) of
         all ->
             %% local | sso ticket scope type
             %% We just replace any existing ticket in this location
-            ok = plum_db:put(Prefix, Key, Claims);
+            ok = bondy_db:apply(Table, AuthRealmUri, EncKey, {set, Claims});
         _ ->
             %% client_local | client_sso scope type
             %% We have to update the value, so first we fetch it.
-            Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
-            Tickets0 = plum_db:get(Prefix, Key, Opts),
+            Tickets0 =
+                case bondy_db:read(Table, AuthRealmUri, EncKey) of
+                    {ok, {T, _Hlc}} -> T;
+                    {error, not_found} -> undefined
+                end,
             Tickets = update_tickets(Scope, Claims, Tickets0),
-            ok = plum_db:put(Prefix, Key, Tickets)
+            ok = bondy_db:apply(Table, AuthRealmUri, EncKey, {set, Tickets})
     end.
 
 %% @private
@@ -796,50 +792,33 @@ is_expired(#{expires_at := Exp}) ->
     Exp =< ?NOW + ?LEEWAY_SECS.
 
 %% @private
-ticket_resolver(?TOMBSTONE, ?TOMBSTONE) ->
-    ?TOMBSTONE;
-ticket_resolver(?TOMBSTONE, L) when is_list(L) ->
-    maybe_tombstone(remove_expired(L));
-ticket_resolver(L, ?TOMBSTONE) when is_list(L) ->
-    maybe_tombstone(remove_expired(L));
-ticket_resolver(L1, L2) when is_list(L1) andalso is_list(L2) ->
-    %% Lists are sorted already as we sort them every time we put
-    maybe_tombstone(
-        remove_expired(lists:umerge(L1, L2))
-    );
-ticket_resolver(?TOMBSTONE, T) when is_map(T) ->
-    case is_expired(T) of
-        true -> ?TOMBSTONE;
-        T -> T
-    end;
-ticket_resolver(T, ?TOMBSTONE) when is_map(T) ->
-    ticket_resolver(?TOMBSTONE, T);
-ticket_resolver(TA, TB) when
-    is_map(TA) andalso is_map(TB)
-->
-    case {is_expired(TA), is_expired(TB)} of
-        {true, true} ->
-            ?TOMBSTONE;
-        {false, true} ->
-            TA;
-        {true, false} ->
-            TB;
-        {false, false} ->
-            ExpA = maps:get(expires_at, TA),
-            ExpB = maps:get(expires_at, TB),
-            case ExpA >= ExpB of
-                true -> ExpA;
-                false -> ExpB
-            end
+%% The open bondy_db `bondy_ticket` table handle. Raises if the catalogue has
+%% not provisioned it — after the §11.4 cut-over the table is a hard dependency
+%% (the catalogue, a `bondy_sup` child, opens it at boot, well before any auth
+%% flow issues or revokes a ticket).
+table() ->
+    case bondy_namespace_catalog:table(?PLUM_DB_TICKET_TAB) of
+        undefined -> error(ticket_table_unavailable);
+        Table -> Table
     end.
 
 %% @private
-remove_expired(L) ->
-    %% TODO
-    L.
+%% The composed store key is a 3-tuple `{Authid, A, B}` of binaries; bondy_db
+%% keys are binaries, so encode deterministically (the same tuple → the same
+%% binary, so point lookups are stable).
+encode_key(Key) when is_tuple(Key) ->
+    term_to_binary(Key).
 
 %% @private
-maybe_tombstone([]) ->
-    ?TOMBSTONE;
-maybe_tombstone(L) ->
-    L.
+%% Decode a store key written by `encode_key/1`. `[safe]` is sufficient — the
+%% keys are tuples of binaries (no atoms / funs to construct).
+decode_key(Bin) when is_binary(Bin) ->
+    binary_to_term(Bin, [safe]).
+
+%% @private
+%% Whether an encoded store key belongs to `Authid` (its first tuple element).
+is_authid_key(EncKey, Authid) ->
+    case decode_key(EncKey) of
+        {Authid, _, _} -> true;
+        _ -> false
+    end.

@@ -39,8 +39,8 @@ Not-yet-migrated tables stay on `plum_db` and are not opened — unless
 `bondy_router.oplog_catalog_enabled` (`oplog.catalog`) is set, which provisions
 **all** declared core tables too (for validating a future domain's provisioning
 before its cut-over). So a default node opens exactly the migrated tables
-(currently `api_gateway` and `bondy_bridge_relay`) and serves every other read
-from `plum_db`.
+(currently `api_gateway`, `bondy_bridge_relay`, `bondy_ticket` and
+`bondy_oauth_token`) and serves every other read from `plum_db`.
 
 ## Lifecycle
 
@@ -163,8 +163,11 @@ tables() ->
         #{name => api_gateway,               db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, publish => true},
         %% ticket / oauth_token shard by key — creation + point lookup are
         %% prioritised over listing / range (mirrors the plum_db rationale).
-        #{name => ?PLUM_DB_TICKET_TAB,       db => core, durability => durable, shard_by => key,   fold => lww},
-        #{name => ?PLUM_DB_OAUTH_TOKEN_TAB,  db => core, durability => durable, shard_by => key,   fold => lww},
+        %% Third/fourth domains cut over to bondy_db (§11.4): always provisioned,
+        %% storage-only (no `publish` — revocation is inline, design D-3; nothing
+        %% subscribes to ticket/token changes).
+        #{name => ?PLUM_DB_TICKET_TAB,       db => core, durability => durable, shard_by => key,   fold => lww, migrated => true},
+        #{name => ?PLUM_DB_OAUTH_TOKEN_TAB,  db => core, durability => durable, shard_by => key,   fold => lww, migrated => true},
         %% bridge_relay — second domain cut over to bondy_db (§11.4): always
         %% provisioned. Storage-only (no `publish`): bridge config has no
         %% change reactor — `bondy_bridge_relay_manager` reads it once at boot

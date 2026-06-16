@@ -8,9 +8,9 @@
 -moduledoc """
 
 ## Storage
-Tokens are stored in PlumDB under prefix `{bondy_oauth_token, RealmUri}` where `RealmUri` is the authentication realm i.e. either the Realm this user is connecting to or its associated SSO realm. The key is the sha256 hash of the user's username i.e. `authid`.
+Tokens are stored in the bondy_db `bondy_oauth_token` core table (design §11.4 — cut over from plum_db), bucketed by the authentication realm `RealmUri` (either the realm this user is connecting to or its associated SSO realm). The key is the sha256 hash of the user's username (`authid`); the value is the user's `bondy_oauth_token_set`, stored directly as a term in an `lww_register` cell (`clear` deletes). The catalogue (`bondy_namespace_catalog`) provisions the table.
 
-Tokens are sharded by key and globally replicated to cluster peers.
+Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (`oplog.aae`); until then storage is node-local.
 
 """.
 
@@ -45,10 +45,6 @@ Tokens are sharded by key and globally replicated to cluster peers.
 -define(REFRESH_TOKEN_TTL, bondy_config:get([oauth2, refresh_token_duration])).
 -define(REFRESH_TOKEN_LEN, bondy_config:get([oauth2, refresh_token_length])).
 -define(MAX_TOKENS, bondy_config:get([oauth2, max_tokens_per_user])).
--define(DB_PREFIX(Uri), {?PLUM_DB_OAUTH_TOKEN_TAB, Uri}).
-%% -define(DB_GET_OPTS, [{resolver, lww}, {allow_put, true}, {remove_tomstones, true}]).
--define(DB_PUT_OPTS, [{resolver, lww}]).
--define(DB_FOLD_OPTS, [{resolver, lww}]).
 
 -define(OPTS_VALIDATOR, #{
     expiry_time_secs => #{
@@ -372,12 +368,13 @@ revoke_all(RealmUri) when is_binary(RealmUri) ->
     try
         case get_authrealm_uri(RealmUri) of
             {ok, AuthRealmUri} ->
-                Prefix = ?DB_PREFIX(AuthRealmUri),
-                Fun = fun({Key, _Set}) -> plum_db:delete(Prefix, Key) end,
-                %% We cannot use keys_only as it will currently ignore
-                %% remove_tombstones
-                Opts = [{remove_tombstones, true}, {resolver, lww}],
-                plum_db:foreach(Fun, Prefix, Opts);
+                Table = table(),
+                {ok, Rows} = bondy_db:list(Table, AuthRealmUri),
+                _ = [
+                    bondy_db:apply(Table, AuthRealmUri, Key, clear)
+                 || {Key, _Set, _Hlc} <- Rows
+                ],
+                ok;
             {error, _} ->
                 ok
         end
@@ -400,9 +397,8 @@ revoke_all(RealmUri, AuthId) ->
     try
         case get_authrealm_uri(RealmUri) of
             {ok, AuthRealmUri} ->
-                Prefix = ?DB_PREFIX(AuthRealmUri),
                 Key = store_key(AuthId),
-                plum_db:delete(Prefix, Key);
+                bondy_db:apply(table(), AuthRealmUri, Key, clear);
             {error, _} ->
                 ok
         end
@@ -552,20 +548,36 @@ store_key(AuthId) ->
     base16:encode(crypto:hash(sha256, string:casefold(AuthId))).
 
 %% @private
+%% The open bondy_db `bondy_oauth_token` table handle. Raises if the catalogue
+%% has not provisioned it — after the §11.4 cut-over the table is a hard
+%% dependency (the catalogue, a `bondy_sup` child, opens it at boot, well before
+%% any auth flow issues or revokes a token).
+table() ->
+    case bondy_namespace_catalog:table(?PLUM_DB_OAUTH_TOKEN_TAB) of
+        undefined -> error(oauth_token_table_unavailable);
+        Table -> Table
+    end.
+
+%% @private
+%% The user's current token set, or a fresh empty one when absent / cleared.
+fetch_set(Table, RealmUri, Key) ->
+    case bondy_db:read(Table, RealmUri, Key) of
+        {ok, {Set, _Hlc}} -> Set;
+        {error, not_found} -> bondy_oauth_token_set:new()
+    end.
+
+%% @private
 add_to_set(#{type := ?MODULE} = T) ->
     #{type := ?MODULE, authrealm := AuthRealmUri, authid := AuthId} = T,
-    Prefix = ?DB_PREFIX(AuthRealmUri),
+    Table = table(),
     Key = store_key(AuthId),
 
     try
         %% We have to update the set, so first we fetch it.
-        Set0 = bondy_stdlib:lazy_or_else(
-            plum_db:get(Prefix, Key),
-            fun() -> bondy_oauth_token_set:new() end
-        ),
+        Set0 = fetch_set(Table, AuthRealmUri, Key),
         Set1 = bondy_oauth_token_set:add(Set0, T),
         {_Truncated, Set} = bondy_oauth_token_set:truncate(Set1, ?MAX_TOKENS),
-        ok = plum_db:put(Prefix, Key, Set, ?DB_PUT_OPTS)
+        ok = bondy_db:apply(Table, AuthRealmUri, Key, {set, Set})
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
@@ -582,12 +594,10 @@ add_to_set(#{type := ?MODULE} = T) ->
     {ok, {t(), bondy_oauth_token_set:t()}} | {error, any()}.
 
 find_in_set(RealmUri, #{key := Key, id := TokenId}) ->
-    Prefix = ?DB_PREFIX(RealmUri),
-
-    case plum_db:get(Prefix, Key) of
-        undefined ->
+    case bondy_db:read(table(), RealmUri, Key) of
+        {error, not_found} ->
             {error, not_found};
-        Set when is_map(Set) ->
+        {ok, {Set, _Hlc}} when is_map(Set) ->
             Result = bondy_oauth_token_set:find(Set, TokenId),
             resulto:map(Result, fun(Token) -> {Token, Set} end)
     end.
@@ -604,16 +614,15 @@ find_in_set(RealmUri, AuthId, Scope) ->
     {ok, {t(), bondy_oauth_token_set:t()}} | {error, any()}.
 
 find_in_set(RealmUri, AuthId, Scope, TokenId) ->
-    Prefix = ?DB_PREFIX(RealmUri),
     Key = store_key(AuthId),
 
-    case plum_db:get(Prefix, Key) of
-        undefined ->
+    case bondy_db:read(table(), RealmUri, Key) of
+        {error, not_found} ->
             {error, not_found};
-        Set when TokenId == undefined ->
+        {ok, {Set, _Hlc}} when TokenId == undefined ->
             Result = bondy_oauth_token_set:find(Set, Scope),
             resulto:map(Result, fun(Token) -> {Token, Set} end);
-        Set ->
+        {ok, {Set, _Hlc}} ->
             Result = bondy_oauth_token_set:find(Set, Scope, TokenId),
             resulto:map(Result, fun(Token) -> {Token, Set} end)
     end.
@@ -652,7 +661,6 @@ do_refresh(#{type := ?MODULE} = T0, Set0) ->
         authscope := Scope
     } = T0,
 
-    Prefix = ?DB_PREFIX(AuthRealmUri),
     Key = store_key(AuthId),
 
     try
@@ -672,7 +680,7 @@ do_refresh(#{type := ?MODULE} = T0, Set0) ->
         {_Removed, Set} = bondy_oauth_token_set:cleanup_and_truncate(
             Set2, ?MAX_TOKENS, Now
         ),
-        ok = plum_db:put(Prefix, Key, Set, ?DB_PUT_OPTS),
+        ok = bondy_db:apply(table(), AuthRealmUri, Key, {set, Set}),
         {ok, T}
     catch
         throw:not_found ->
@@ -699,7 +707,6 @@ do_revoke(#{type := ?MODULE} = T0, Set0) ->
         authscope := Scope
     } = T0,
 
-    Prefix = ?DB_PREFIX(AuthRealmUri),
     Key = store_key(AuthId),
 
     try
@@ -707,7 +714,7 @@ do_revoke(#{type := ?MODULE} = T0, Set0) ->
         {_Removed, Set} = bondy_oauth_token_set:cleanup_and_truncate(
             Set1, ?MAX_TOKENS, Now
         ),
-        ok = plum_db:put(Prefix, Key, Set, ?DB_PUT_OPTS),
+        ok = bondy_db:apply(table(), AuthRealmUri, Key, {set, Set}),
         ok
     catch
         throw:not_found ->
