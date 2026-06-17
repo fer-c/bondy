@@ -8,15 +8,25 @@
 When publishing an event a topic the Publisher can ask the Broker to
 retain the event being published as the most-recent event on this topic.
 
+Retained events are stored in `bondy_db` (the durable `core` DB, design §11.4 —
+cut over from plum_db), keyed by topic within a realm and matched via
+key-ordered `bondy_db:range_all/5` prefix / wildcard scans.
+
 **This is experimental and does not scale with high traffic at the
 moment.**
 """.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+%% For the `?EOT` end-of-table sentinel (and, historically, the prefix macros).
+%% Retiring this plum_db header is a later cleanup step (removal roadmap §d).
+-include("bondy_db_tables.hrl").
 
--define(DB_PREFIX(Realm), {retained_messages, Realm}).
+%% The bondy_db table name (declared in `bondy_namespace_catalog:tables/0`,
+%% durable `core` DB). Replaces the old plum_db `{retained_messages, Realm}`
+%% prefix; the realm is now the bondy_db shard/realm argument, not part of a
+%% prefix tuple.
+-define(TABLE, retained_messages).
 
 -record(bondy_retained_message, {
     valid_to :: pos_integer(),
@@ -39,8 +49,6 @@ moment.**
     opts :: list()
 }).
 
--define(RESOLVER, lww).
-
 -type t() :: #bondy_retained_message{}.
 -type eot() :: ?EOT.
 -type continuation() :: #bondy_retained_continuation{}.
@@ -48,10 +56,14 @@ moment.**
     eligible => [id()],
     exclude => [id()]
 }.
+%% The key_value options threaded through `match/5` and its continuation:
+%% `first` (the inclusive resume key) and `limit` (max messages per page).
+-type scan_opts() :: [{first, binary()} | {limit, pos_integer()}].
 -type evict_fun() :: fun((uri(), t()) -> ok).
 
 -export_type([t/0]).
 -export_type([match_opts/0]).
+-export_type([scan_opts/0]).
 -export_type([eot/0]).
 -export_type([continuation/0]).
 
@@ -75,14 +87,22 @@ moment.**
 -spec get(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 get(Realm, Topic) ->
-    Opts = [{resolver, ?RESOLVER}],
-    plum_db:get(?DB_PREFIX(Realm), Topic, Opts).
+    case bondy_db:read(table(), Realm, Topic) of
+        {ok, {Value, _Hlc}} -> Value;
+        {error, not_found} -> undefined
+    end.
 
 -spec take(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 take(Realm, Topic) ->
-    Opts = [{resolver, ?RESOLVER}],
-    plum_db:take(?DB_PREFIX(Realm), Topic, Opts).
+    Table = table(),
+    case bondy_db:read(Table, Realm, Topic) of
+        {ok, {Value, _Hlc}} ->
+            ok = bondy_db:apply(Table, Realm, Topic, clear),
+            Value;
+        {error, not_found} ->
+            undefined
+    end.
 
 -spec size(t()) -> integer().
 
@@ -119,82 +139,47 @@ match(Realm, Topic, SessionId, Strategy) ->
     Topic :: uri(),
     SessionId :: id(),
     Strategy :: binary(),
-    Opts :: plum_db:fold_opts()
+    Opts :: scan_opts()
 ) ->
     {[t()], continuation()} | eot().
 
 match(Realm, Topic, SessionId, <<"exact">>, _) ->
-    Result = get(Realm, Topic),
-    {Matches, _} = maybe_append(Result, SessionId, {[], 0}),
-    {Matches, ?EOT};
+    case get(Realm, Topic) of
+        #bondy_retained_message{} = Msg ->
+            case session_eligible(Msg, SessionId) of
+                true -> {[Msg], ?EOT};
+                false -> {[], ?EOT}
+            end;
+        undefined ->
+            {[], ?EOT}
+    end;
 match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
     Len = byte_size(Topic),
-    Opts = key_value:set(first, key_value:get(first, Opts0, Topic), Opts0),
-    Limit = key_value:get(limit, Opts, 100),
-
-    Fun = fun
-        ({{_, <<Prefix:Len/binary, _/binary>>}, Obj}, {_, Cnt} = Acc) when
-            Prefix =:= Topic andalso Cnt < Limit
-        ->
-            Result = plum_db_object:value(
-                plum_db_object:resolve(Obj, ?RESOLVER)
-            ),
-            maybe_append(Result, SessionId, Acc);
-        ({{_, <<Prefix:Len/binary, _/binary>> = Key}, _}, {List, _}) when
-            Prefix =:= Topic
-        ->
-            Cont = #bondy_retained_continuation{
-                realm = Realm,
-                topic = Topic,
-                session_id = SessionId,
-                strategy = Strategy,
-                opts = key_value:set(first, Key, Opts)
-            },
-            throw({break, {List, Cont}});
-        (_, {List, _}) ->
-            throw({break, {List, ?EOT}})
+    Lo = key_value:get(first, Opts0, Topic),
+    Limit = key_value:get(limit, Opts0, 100),
+    Opts = key_value:set(limit, Limit, Opts0),
+    %% Keys are byte-ordered: once a key no longer carries the Topic prefix,
+    %% no later key can either, so we stop with ?EOT.
+    Classify = fun
+        (<<Prefix:Len/binary, _/binary>>) when Prefix =:= Topic -> keep;
+        (_) -> done
     end,
-    case plum_db:fold_elements(Fun, {[], 0}, ?DB_PREFIX(Realm), Opts) of
-        {L, N} when is_integer(N) ->
-            {L, ?EOT};
-        Other ->
-            Other
-    end;
+    MkCont = mk_cont_fun(Realm, Topic, SessionId, Strategy, Opts),
+    scan(table(), Realm, Lo, Classify, SessionId, Limit, MkCont);
 match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
     {First, MatchFun} = wildcard_opts(Topic),
-    Opts = key_value:set(first, key_value:get(first, Opts0, First), Opts0),
-    Limit = key_value:get(limit, Opts, 100),
-
-    Fun = fun
-        ({{_, Key}, Obj}, {List, Cnt} = Acc) when Cnt < Limit ->
-            case MatchFun(Key) of
-                true ->
-                    Result = plum_db_object:value(
-                        plum_db_object:resolve(Obj, ?RESOLVER)
-                    ),
-                    maybe_append(Result, SessionId, Acc);
-                false ->
-                    Acc;
-                done ->
-                    throw({break, {List, ?EOT}})
-            end;
-        ({{_, Key}, _}, {List, _}) ->
-            Cont = #bondy_retained_continuation{
-                realm = Realm,
-                topic = Topic,
-                session_id = SessionId,
-                strategy = Strategy,
-                opts = key_value:set(first, Key, Opts)
-            },
-            throw({break, {List, Cont}})
+    Lo = key_value:get(first, Opts0, First),
+    Limit = key_value:get(limit, Opts0, 100),
+    Opts = key_value:set(limit, Limit, Opts0),
+    Classify = fun(Key) ->
+        case MatchFun(Key) of
+            true -> keep;
+            false -> skip;
+            done -> done
+        end
     end,
-
-    case plum_db:fold_elements(Fun, {[], 0}, ?DB_PREFIX(Realm), Opts) of
-        {L, N} when is_integer(N) ->
-            {L, ?EOT};
-        Other ->
-            Other
-    end.
+    MkCont = mk_cont_fun(Realm, Topic, SessionId, Strategy, Opts),
+    scan(table(), Realm, Lo, Classify, SessionId, Limit, MkCont).
 
 -spec put(
     Realm :: uri(),
@@ -216,33 +201,26 @@ put(Realm, Topic, Event, MatchOpts) ->
 
 put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     Retained = new(Event, MatchOpts, TTL),
-    %% We abuse the Modifier to get cheap access to the existing value if any
     Size = term_size(Retained),
-
-    Modifier = fun
-        (Value) when Value == undefined orelse Value == '$deleted' ->
-            bondy_retained_message_manager:incr_counters(Realm, 1, Size),
-            Retained;
-        (Values) ->
-            ok = bondy_retained_message_manager:decr_counters(
-                Realm, 1, term_size(Values)
-            ),
-            ok = bondy_retained_message_manager:incr_counters(
-                Realm, 1, Size
-            ),
-            Retained
-    end,
-
-    %% TODO This will never scale as plumdb (due to replication and
-    %% multi-versioning) cannot scale to high-frequency writes.
-    %% We should either implement a partial replication mechanism and sessions
-    %% will need to find the replicas for this topic in the cluster or we carry
-    %% on replicating the messages in all the cluster but using a monotonic
-    %% queue with windowing in front of the put, so that we throttle puts.
-    %% This would be in effect a resolution parameter i.e. how many samples per
-    %% minute do we want as resolution.
-
-    plum_db:put(?DB_PREFIX(Realm), Topic, Modifier).
+    Table = table(),
+    %% Counter delta: read the existing value (if any) so we can subtract its
+    %% size before adding the new one. plum_db did this inside a put-Modifier
+    %% closure; bondy_db has no modifier, so we read-then-apply. Single-node,
+    %% experimental feature — approximate counters under a concurrent
+    %% same-topic write race are acceptable (the trie / routing path is
+    %% unaffected). The remote-replication counter sync (the retired plum_db
+    %% `object_update` subscription) is deferred to the oplog.aae phase.
+    _ =
+        case bondy_db:read(Table, Realm, Topic) of
+            {ok, {#bondy_retained_message{} = Old, _Hlc}} ->
+                ok = bondy_retained_message_manager:decr_counters(
+                    Realm, 1, term_size(Old)
+                ),
+                bondy_retained_message_manager:incr_counters(Realm, 1, Size);
+            {error, not_found} ->
+                bondy_retained_message_manager:incr_counters(Realm, 1, Size)
+        end,
+    bondy_db:apply(Table, Realm, Topic, {set, Retained}).
 
 -spec to_event(Retained :: t(), SubscriptionId :: id()) -> wamp_event().
 
@@ -281,24 +259,27 @@ Evaluates function `Fun` for each entry passing `Realm` and `Entry` as arguments
 -spec evict_expired(uri() | '_', evict_fun() | undefined) -> non_neg_integer().
 
 evict_expired(Realm, EvictFun) when
-    is_binary(Realm) orelse
-        Realm == '_' andalso
-            is_function(EvictFun, 2)
+    is_binary(Realm) andalso
+        (EvictFun == undefined orelse is_function(EvictFun, 2))
 ->
-    Now = erlang:system_time(second),
-    Fun = fun({{FP, Key}, Obj}, Acc) ->
-        case plum_db_object:value(plum_db_object:resolve(Obj, ?RESOLVER)) of
-            #bondy_retained_message{valid_to = T} = Mssg when
-                T > 0 andalso T =< Now
-            ->
-                _ = plum_db:delete(FP, Key),
-                ok = maybe_eval(Realm, EvictFun, Mssg),
-                Acc + 1;
-            _ ->
-                Acc
-        end
-    end,
-    plum_db:fold_elements(Fun, 0, ?DB_PREFIX(Realm)).
+    do_evict_realm(table(), Realm, EvictFun);
+evict_expired('_', EvictFun) when
+    EvictFun == undefined orelse is_function(EvictFun, 2)
+->
+    %% bondy_db is realm-scoped, so "all realms" enumerates the realm registry
+    %% and evicts each (the plum_db `{'_', '_'}` whole-store fold has no direct
+    %% analogue). Same O(retained messages) cost as before.
+    Table = table(),
+    lists:foldl(
+        fun(Realm0, Acc) ->
+            case bondy_realm:uri(Realm0) of
+                undefined -> Acc;
+                Uri -> Acc + do_evict_realm(Table, Uri, EvictFun)
+            end
+        end,
+        0,
+        bondy_realm:list()
+    ).
 
 %% =============================================================================
 %% PRIVATE
@@ -379,19 +360,140 @@ subsumes(_, _) ->
     false.
 
 %% @private
-maybe_append(#bondy_retained_message{} = Event, SessionId, {List, Cnt} = Acc) ->
-    Opts = Event#bondy_retained_message.match_opts,
-    try
-        not is_expired(Event) orelse throw(break),
-        not is_excluded(SessionId, Opts) orelse throw(break),
-        is_eligible(SessionId, Opts) orelse throw(break),
-        {[Event | List], Cnt + 1}
-    catch
-        throw:break ->
-            Acc
-    end;
-maybe_append(_, _, Acc) ->
-    Acc.
+%% The bondy_db table handle for retained messages (durable `core` DB).
+table() ->
+    case bondy_namespace_catalog:table(?TABLE) of
+        undefined -> error(retained_messages_not_provisioned);
+        Table -> Table
+    end.
+
+%% @private
+%% Whether `Msg` should be delivered to session `SessionId`: not expired, not
+%% excluded and (if an `eligible` list is set) eligible. The old plum_db fold
+%% expressed this through `maybe_append/3`.
+session_eligible(#bondy_retained_message{match_opts = Opts} = Msg, SessionId) ->
+    not is_expired(Msg) andalso
+        not is_excluded(SessionId, Opts) andalso
+        is_eligible(SessionId, Opts).
+
+%% @private
+%% The continuation closure shared by the prefix / wildcard matchers: it pins
+%% the resume key into `opts` so `match/1` resumes the scan there (inclusive).
+mk_cont_fun(Realm, Topic, SessionId, Strategy, Opts) ->
+    fun(Key) ->
+        #bondy_retained_continuation{
+            realm = Realm,
+            topic = Topic,
+            session_id = SessionId,
+            strategy = Strategy,
+            opts = key_value:set(first, Key, Opts)
+        }
+    end.
+
+%% @private
+%% Chunked, key-ordered scan of a realm's retained messages from `Lo`
+%% (inclusive) to the end of the realm band, replacing the old plum_db
+%% `fold_elements/4` + `throw({break, _})` loop. `Classify(Key)` returns
+%% `keep | skip | done` (`done` = no later key can match, stop with ?EOT).
+%% Gathers up to `Limit` session-eligible messages; the first `keep` key seen
+%% once `Limit` are gathered becomes the (unprocessed) resume point via
+%% `MkCont/1`. Returns `{[t()], continuation() | eot()}`.
+scan(Table, Realm, Lo, Classify, SessionId, Limit, MkCont) ->
+    do_scan(Table, Realm, Lo, Classify, SessionId, Limit, MkCont, []).
+
+%% @private
+do_scan(Table, Realm, Lo, Classify, SessionId, Limit, MkCont, Acc) ->
+    %% Fetch at least Limit + 1 rows so a full page plus its successor (the
+    %% continuation key) usually arrives in one round-trip.
+    Chunk = erlang:max(Limit + 1, 64),
+    case bondy_db:range_all(Table, Realm, Lo, infinity, #{limit => Chunk}) of
+        {ok, []} ->
+            {lists:reverse(Acc), ?EOT};
+        {ok, Rows} ->
+            case scan_rows(Rows, Classify, SessionId, Limit, MkCont, Acc) of
+                {stop, Result} ->
+                    Result;
+                {more, Acc1} when length(Rows) < Chunk ->
+                    %% Short chunk ⇒ the realm band is exhausted.
+                    {lists:reverse(Acc1), ?EOT};
+                {more, Acc1} ->
+                    {LastKey, _, _} = lists:last(Rows),
+                    Lo1 = <<LastKey/binary, 0>>,
+                    do_scan(
+                        Table,
+                        Realm,
+                        Lo1,
+                        Classify,
+                        SessionId,
+                        Limit,
+                        MkCont,
+                        Acc1
+                    )
+            end;
+        {error, _} = Error ->
+            ?LOG_WARNING(#{
+                description => "Retained message scan failed",
+                realm_uri => Realm,
+                reason => Error
+            }),
+            {lists:reverse(Acc), ?EOT}
+    end.
+
+%% @private
+%% `Acc` holds accepted messages newest-first. Returns `{stop, Result}` (a
+%% `done` key or the page is full — `Result` is the final `{List, Cont}`) or
+%% `{more, Acc1}` (chunk exhausted, the caller advances the window).
+scan_rows([], _Classify, _SessionId, _Limit, _MkCont, Acc) ->
+    {more, Acc};
+scan_rows([{Key, Msg, _Hlc} | Rest], Classify, SessionId, Limit, MkCont, Acc) ->
+    case Classify(Key) of
+        done ->
+            {stop, {lists:reverse(Acc), ?EOT}};
+        skip ->
+            scan_rows(Rest, Classify, SessionId, Limit, MkCont, Acc);
+        keep when length(Acc) >= Limit ->
+            %% Page full; this matching-but-unprocessed key is the resume point.
+            {stop, {lists:reverse(Acc), MkCont(Key)}};
+        keep ->
+            Acc1 =
+                case session_eligible(Msg, SessionId) of
+                    true -> [Msg | Acc];
+                    false -> Acc
+                end,
+            scan_rows(Rest, Classify, SessionId, Limit, MkCont, Acc1)
+    end.
+
+%% @private
+%% Evict expired retained messages from a single realm, deleting each and
+%% evaluating `EvictFun` (e.g. the counter decrement). Returns the count.
+do_evict_realm(Table, Realm, EvictFun) ->
+    Now = erlang:system_time(second),
+    case bondy_db:list(Table, Realm) of
+        {ok, Rows} ->
+            lists:foldl(
+                fun
+                    (
+                        {Topic, #bondy_retained_message{valid_to = T} = Msg,
+                            _Hlc},
+                        Acc
+                    ) when T > 0 andalso T =< Now ->
+                        ok = bondy_db:apply(Table, Realm, Topic, clear),
+                        ok = maybe_eval(Realm, EvictFun, Msg),
+                        Acc + 1;
+                    (_, Acc) ->
+                        Acc
+                end,
+                0,
+                Rows
+            );
+        {error, _} = Error ->
+            ?LOG_WARNING(#{
+                description => "Retained message eviction scan failed",
+                realm_uri => Realm,
+                reason => Error
+            }),
+            0
+    end.
 
 %% @private
 is_eligible(SessionId, Opts) ->

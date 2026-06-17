@@ -31,7 +31,7 @@ the `oplog.aae` phase, where it becomes a `bondy_db` publish/reactor seam.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 
 -define(MAX_ALIASES, 5).
 -define(ALIAS_TYPE, alias).
@@ -241,6 +241,7 @@ end#{
 %% -export([is_authorized_key/2]).
 -export([change_password/3]).
 -export([change_password/4]).
+-export([close_sessions/3]).
 -export([disable/2]).
 -export([enable/2]).
 -export([exists/2]).
@@ -718,7 +719,9 @@ list(RealmUri, Opts) ->
         Limit ->
             %% Keyset page — `Cursor` resumes a prior page (the `Continuation`
             %% returned here), `undefined` is the first page.
-            Cursor = maps_utils:get_any([cursor, <<"cursor">>], Opts, undefined),
+            Cursor = maps_utils:get_any(
+                [cursor, <<"cursor">>], Opts, undefined
+            ),
             PageOpts0 = #{limit => Limit},
             PageOpts =
                 case Cursor of
@@ -1028,7 +1031,7 @@ normalise_username(_) ->
 %% The published `security_users` table handle, or an error when the catalogue
 %% has not provisioned it yet.
 table() ->
-    case bondy_namespace_catalog:table(?PLUM_DB_USER_TAB) of
+    case bondy_namespace_catalog:table(?BONDY_DB_USER_TAB) of
         undefined -> error(security_users_table_unavailable);
         Table -> Table
     end.
@@ -1038,7 +1041,7 @@ table() ->
 %% Alias-pointer cells co-located in the same table are rejected, so they never
 %% surface in a user listing or `update_groups` fold.
 relation() ->
-    bondy_relation:new(?PLUM_DB_USER_TAB, #{
+    bondy_relation:new(?BONDY_DB_USER_TAB, #{
         table => table(),
         decode => fun decode_user_row/1
     }).
@@ -1057,7 +1060,7 @@ decode_user_row(_) ->
 %% `{Key, RawValue}` — for whole-table maintenance (`remove_all/2`) that must
 %% visit and clear alias cells too.
 raw_relation(Table) ->
-    bondy_relation:new(?PLUM_DB_USER_TAB, #{
+    bondy_relation:new(?BONDY_DB_USER_TAB, #{
         table => Table,
         decode => fun decode_raw_row/1
     }).
@@ -1143,7 +1146,6 @@ do_get(RealmUri, Key) ->
 do_on_update(RealmUri, Username, true) ->
     bondy_event_manager:notify({[bondy, user, added], RealmUri, Username}),
     ok;
-
 do_on_update(RealmUri, Username, false) ->
     %% 1. Revoke all auth tickets (OAUTH2 tokens: TODO).
     _ = revoke_tickets(RealmUri, Username),
@@ -1602,7 +1604,16 @@ revoke_tickets(RealmUri, Username) ->
     Fun = fun() -> bondy_ticket:revoke_all(RealmUri, Username) end,
     bondy_router_worker:cast(Fun).
 
-%% @private
+-doc """
+Close all of this node's sessions for `Username` in realm `RealmUri` with the
+given WAMP close `Reason`. Used both by the local delete/credential-change
+chokepoints and by the cluster merge-side reactor (`bondy_aae_reactor`) when a
+peer's user delete arrives via anti-entropy.
+""".
+-spec close_sessions(
+    RealmUri :: uri(), Username :: binary(), Reason :: uri()
+) -> ok.
+
 close_sessions(RealmUri, Username, Reason) ->
     close_sessions(RealmUri, Username, Reason, #{}).
 

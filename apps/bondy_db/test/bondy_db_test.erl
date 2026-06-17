@@ -428,8 +428,12 @@ intra_db_mixing({Db, _Sup, _Dir}) ->
         {ok, {<<"conn">>, He}}, bondy_db:read(Ephemeral, <<"r1">>, <<"sess">>)
     ),
     %% Distinct namespaces — neither table sees the other's cells.
-    ?assertEqual({error, not_found}, bondy_db:read(Durable, <<"r1">>, <<"sess">>)),
-    ?assertEqual({error, not_found}, bondy_db:read(Ephemeral, <<"r1">>, <<"acct">>)),
+    ?assertEqual(
+        {error, not_found}, bondy_db:read(Durable, <<"r1">>, <<"sess">>)
+    ),
+    ?assertEqual(
+        {error, not_found}, bondy_db:read(Ephemeral, <<"r1">>, <<"acct">>)
+    ),
     ok = bondy_db:close_table(Durable),
     ok = bondy_db:close_table(Ephemeral).
 

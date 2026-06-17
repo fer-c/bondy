@@ -8,7 +8,7 @@
 -include_lib("stdlib/include/assert.hrl").
 
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
 -define(U1, <<"user_1">>).
@@ -352,7 +352,7 @@ migration(_) ->
     %% We store an older-version realm directly into the global realm band
     %% (the empty binary) so that fetch/1 exercises the legacy from_term
     %% migration path (design §11.4: realms now live in bondy_db).
-    Table = bondy_namespace_catalog:table(?PLUM_DB_REALM_TAB),
+    Table = bondy_namespace_catalog:table(?BONDY_DB_REALM_TAB),
     ok = bondy_db:apply(Table, <<>>, Uri, {set, Old}),
 
     %% We should now have a migrated realm

@@ -239,7 +239,9 @@ indices, where the columns are the answer.
 """.
 -spec decode_composite(binary(), pos_integer()) -> {[column()], binary()}.
 
-decode_composite(Bin, Arity) when is_binary(Bin), is_integer(Arity), Arity > 0 ->
+decode_composite(Bin, Arity) when
+    is_binary(Bin), is_integer(Arity), Arity > 0
+->
     {ColBins, PK} = take_columns(Bin, Arity, []),
     {[decode_col(C) || C <- ColBins], PK}.
 

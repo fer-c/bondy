@@ -11,7 +11,7 @@ map manipulation.
 """.
 
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -export([bin_to_pid/1]).
@@ -34,8 +34,6 @@ map manipulation.
 -export([maybe_slice/3]).
 -export([peername/2]).
 -export([pid_to_bin/1]).
--export([rebase_object/1]).
--export([rebase_object/2]).
 -export([session_id_to_uri_part/1]).
 -export([system_time_to_rfc3339/2]).
 -export([tc/3]).
@@ -309,20 +307,6 @@ get_ipaddr(IPOrHostname, Family) when is_binary(IPOrHostname) ->
     get_ipaddr(binary_to_list(IPOrHostname), Family);
 get_ipaddr(IPOrHostname, Family) when is_list(IPOrHostname) ->
     get_ipaddr(IPOrHostname, Family, continue).
-
--spec rebase_object(Value :: term()) -> plum_db_object:t().
-
-rebase_object(Value) ->
-    rebase_object(Value, undefined).
-
--spec rebase_object(Value :: term(), Actor :: term()) -> plum_db_object:t().
-
-rebase_object(Value, undefined) ->
-    rebase_object(Value, '$bondy');
-rebase_object(Value, Actor) ->
-    Timestamp = {0, 0, 0},
-    NewRecord = plum_db_dvvset:new({Value, Timestamp}),
-    {object, plum_db_dvvset:update(NewRecord, Actor)}.
 
 %% =============================================================================
 %%  PRIVATE

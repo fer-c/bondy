@@ -29,7 +29,7 @@ no-op.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 
 -define(VALIDATOR, #{
     <<"name">> => #{
@@ -546,7 +546,7 @@ normalise_name(_) ->
 %% The published `security_groups` table handle, or an error when the catalogue
 %% has not provisioned it yet.
 table() ->
-    case bondy_namespace_catalog:table(?PLUM_DB_GROUP_TAB) of
+    case bondy_namespace_catalog:table(?BONDY_DB_GROUP_TAB) of
         undefined -> error(security_groups_table_unavailable);
         Table -> Table
     end.
@@ -554,7 +554,7 @@ table() ->
 %% @private
 %% The `security_groups` table as a paginatable relation of group records.
 relation() ->
-    bondy_relation:new(?PLUM_DB_GROUP_TAB, #{
+    bondy_relation:new(?BONDY_DB_GROUP_TAB, #{
         table => table(),
         decode => fun decode_group_row/1
     }).
@@ -569,7 +569,7 @@ decode_group_row(_) ->
 %% Every group cell as `{Name, RawValue}` — for whole-table maintenance
 %% (`remove_all/2`) that works from the storage key.
 raw_relation(Table) ->
-    bondy_relation:new(?PLUM_DB_GROUP_TAB, #{
+    bondy_relation:new(?BONDY_DB_GROUP_TAB, #{
         table => Table,
         decode => fun decode_raw_row/1
     }).
@@ -599,7 +599,6 @@ do_get(RealmUri, Name) ->
 do_on_update(RealmUri, Name, true) ->
     bondy_event_manager:notify({[bondy, rbac, group, added], RealmUri, Name}),
     ok;
-
 do_on_update(RealmUri, Name, false) ->
     bondy_event_manager:notify({[bondy, rbac, group, updated], RealmUri, Name}),
     ok.

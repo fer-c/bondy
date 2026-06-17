@@ -9,7 +9,7 @@
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 -include("bondy_registry.hrl").
 
@@ -44,7 +44,6 @@ groups() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    plum_db_config:set(aae_enabled, false),
     Realm = bondy_realm:create(<<"com.foobar">>),
     RealmUri = bondy_realm:uri(Realm),
     ok = bondy_realm:disable_security(Realm),

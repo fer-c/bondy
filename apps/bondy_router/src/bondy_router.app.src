@@ -35,6 +35,10 @@
         backoff,
         oidcc,
         %% 3rd-party Utils
+        %% Process registry / worker pools (bondy_jobs_sup et al.). Previously
+        %% started transitively via plum_db; bondy_app no longer starts plum_db,
+        %% so bondy_router must declare it as a direct runtime dependency.
+        gproc,
         %% 3rd-party Instrumentation
         prometheus,
         telemetry,
@@ -54,7 +58,9 @@
         %% bondy implements bondy_connect_local's handler behaviour and
         %% registers it at boot (the in-VM WAMP transport for co-located clients)
         bondy_connect
-        %% plum_db and tuplespace are started manually by bondy_app
+        %% tuplespace, partisan and bondy_db are started manually by bondy_app
+        %% (partisan is `{partisan, load}` in the release; bondy_app owns
+        %% starting it, before bondy_db). plum_db is no longer started.
     ]},
     {env, []},
     {modules, []},

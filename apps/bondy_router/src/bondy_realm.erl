@@ -134,7 +134,7 @@ connected to any realm.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include_lib("jose/include/jose_jwk.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
 %% The realm table is a global registry: every realm shares this one bondy_db
@@ -1893,7 +1893,7 @@ do_lookup(Uri) ->
 %% The open bondy_db `bondy_realm` table handle. Raises if the catalogue has not
 %% provisioned it yet.
 table() ->
-    case bondy_namespace_catalog:table(?PLUM_DB_REALM_TAB) of
+    case bondy_namespace_catalog:table(?BONDY_DB_REALM_TAB) of
         undefined ->
             error(bondy_realm_table_unavailable);
         Table ->
@@ -2390,15 +2390,11 @@ from_term(Term) when
         info = element(13, Term)
     };
 from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
-    %% At the moment we will not get this one as it is store in a different
-    %% prefix
-    _PDBPrefix = {security, realms},
-    IsSecEnabled = bondy_stdlib:or_else(
-        plum_db:get({security_status, Uri}, enabled),
-        false
-    ),
-    is_boolean(IsSecEnabled) orelse throw(badarg),
-
+    %% Legacy 7-tuple realm format; effectively dead (current realms
+    %% deserialise via the record clause above). Security status used to be
+    %% read from the old plum_db `{security_status, Uri}` prefix, now retired —
+    %% the live flag is the `security_enabled` record field, defaulting to
+    %% `false` here.
     #realm{
         uri = Uri,
         description = Desc,
@@ -2408,7 +2404,7 @@ from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
         sso_realm_uri = undefined,
         allow_connections = true,
         authmethods = Authmethods,
-        security_enabled = IsSecEnabled,
+        security_enabled = false,
         password_opts = PassOpts,
         private_keys = PrivKeys,
         public_keys = PubKeys,

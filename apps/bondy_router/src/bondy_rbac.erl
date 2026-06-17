@@ -50,7 +50,7 @@ grant/revoke beyond the RBAC context epoch, which callers refresh on read.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
 -define(GRANT_REQ_VALIDATOR_V1, begin
@@ -543,7 +543,9 @@ grants_on_resource(RealmUri, Resource) ->
 %% primary keys; the forward fetch returns each grant's *fresh* permissions and
 %% drops any entry whose primary was cleared since the index was written.
 grants_on_resource(Table, RealmUri, Resource) ->
-    {ok, Rows} = bondy_db:index_get(Table, RealmUri, by_resource, Resource, #{}),
+    {ok, Rows} = bondy_db:index_get(
+        Table, RealmUri, by_resource, Resource, #{}
+    ),
     lists:filtermap(
         fun({EncKey, _Cols}) ->
             case bondy_db:read(Table, RealmUri, EncKey) of
@@ -1366,9 +1368,9 @@ group_grants(Grants) ->
 %% Resolves the open bondy_db grant table for a role type. Raises if the
 %% catalogue has not provisioned it yet.
 grant_table(user) ->
-    grant_table(?PLUM_DB_USER_GRANT_TAB);
+    grant_table(?BONDY_DB_USER_GRANT_TAB);
 grant_table(group) ->
-    grant_table(?PLUM_DB_GROUP_GRANT_TAB);
+    grant_table(?BONDY_DB_GROUP_GRANT_TAB);
 grant_table(EntityType) ->
     case bondy_namespace_catalog:table(EntityType) of
         undefined ->

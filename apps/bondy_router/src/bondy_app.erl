@@ -8,7 +8,7 @@
 The `application` behaviour implementation for the Bondy OTP application.
 
 Handles startup and shutdown: initialising configuration, starting
-dependencies (`tuplespace`, `plum_db`/Partisan), the supervision tree and the
+dependencies (`tuplespace`, Partisan, `bondy_db`), the supervision tree and the
 network listeners, and tearing them down gracefully on stop.
 """.
 -behaviour(application).
@@ -51,20 +51,18 @@ Application behaviour callback.
 """.
 start(_Type, Args) ->
     %% We initialise the Bondy config, we need to make this call before
-    %% starting tuplespace, partisan and plum_db. This is because we are
+    %% starting tuplespace, partisan and bondy_db. This is because we are
     %% modifying their application environments.
     ok = bondy_config:init(Args),
-
-    %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
-    %% until we are ready to do it
-    ok = suspend_pdb_aae(),
 
     %% Now that we have initialised the configuration we start the following
     %% dependencies
     {ok, _} = application:ensure_all_started(tuplespace, permanent),
 
-    %% We do not need to start partisan since plum_db will do it
-    {ok, _} = application:ensure_all_started(plum_db, permanent),
+    %% Start Partisan explicitly: bondy_router owns the cluster transport.
+    %% bondy_db is transport-agnostic (it works over disterl or Partisan via
+    %% its callbacks). Partisan was configured by bondy_config:init/1 above.
+    {ok, _} = application:ensure_all_started(partisan, permanent),
 
     %% When oplog anti-entropy is enabled (off by default) wire the sync
     %% scheduler to Partisan BEFORE the substrate starts, so it reads the
@@ -72,9 +70,9 @@ start(_Type, Args) ->
     ok = maybe_setup_oplog_replication(),
 
     %% Start the bondy_db storage substrate (pulls in bondy_oplog, bondy_mst and
-    %% leveled). Started here, after plum_db, because the substrate's cluster
-    %% replication uses Partisan, which plum_db brings up. Nothing reads from it
-    %% yet — tables are opened per-domain by the plum_db migration.
+    %% leveled). Partisan — its cluster transport — is already up, started
+    %% explicitly above by bondy_router. Nothing reads from it yet — tables are
+    %% opened per-domain by the migration.
     {ok, _} = application:ensure_all_started(bondy_db, permanent),
 
     %% Now that Partisan is up we can get our nodename
@@ -84,10 +82,6 @@ start(_Type, Args) ->
             router_vsn => vsn()
         }
     }),
-
-    %% We wait for plum_db partitions to be up, we need to do this before
-    %% we start the supervisor
-    ok = maybe_wait_for_pdb_partitions(),
 
     %% Finally we start the supervisor
     case bondy_sup:start_link() of
@@ -106,15 +100,6 @@ start(_Type, Args) ->
                 %% This is to enable certain operations during startup i.e.
                 %% liveness and readiness http probes.
                 ok ?= start_admin_listeners(),
-                %% We need to re-enable AAE (if it was enabled) so
-                %% that hashtrees are build
-                ok ?= restore_pdb_aae(),
-                %% We conditionally wait for hashtrees to be built
-                %% (this can be disabled via configuration)
-                ok ?= maybe_wait_for_pdb_hashtrees(),
-                %% We conditionally force a first AAE sync exchange
-                %% (this can be disabled via configuration)
-                ok ?= maybe_wait_for_pdb_aae_exchange(),
                 %% Finally we allow clients to connect
                 ok ?= start_public_listeners(),
                 {ok, _} = application:ensure_all_started(
@@ -177,89 +162,6 @@ stop(_State) ->
 %% @private
 setup_commons() ->
     ok.
-
-%% @private
-maybe_wait_for_pdb_partitions() ->
-    case wait_for_partitions() of
-        true ->
-            %% We block until all partitions are initialised
-            ?LOG_NOTICE(#{
-                description =>
-                    "Application master is waiting for plum_db partitions "
-                    "to be initialised"
-            }),
-            plum_db_startup_coordinator:wait_for_partitions();
-        false ->
-            ok
-    end.
-
-%% @private
-maybe_wait_for_pdb_hashtrees() ->
-    case wait_for_pdb_hashtrees() of
-        true ->
-            %% We block until all hashtrees are built
-            ?LOG_NOTICE(#{
-                description =>
-                    "Application master is waiting for "
-                    "plum_db hashtrees to be built"
-            }),
-            plum_db_startup_coordinator:wait_for_hashtrees();
-        false ->
-            ok
-    end,
-
-    %% We stop the coordinator as it is a transcient worker
-    plum_db_startup_coordinator:stop().
-
-%% @private
-maybe_wait_for_pdb_aae_exchange() ->
-    %% When plum_db is included in a principal application, the latter can
-    %% join the cluster before this phase and perform a first aae exchange
-    case wait_for_pdb_aae_exchange() of
-        true ->
-            MyNode = partisan:node(),
-            Members = partisan_plumtree_broadcast:broadcast_members(),
-
-            case lists:delete(MyNode, Members) of
-                [] ->
-                    %% We have not yet joined a cluster, so we finish
-                    ok;
-                Peers ->
-                    ?LOG_NOTICE(#{
-                        description =>
-                            "Application master is waiting for "
-                            "plum_db AAE to perform an exchange"
-                    }),
-                    %% We are in a cluster, we randomnly pick a peer and
-                    %% perform an AAE exchange
-                    [Peer | _] = lists_utils:shuffle(Peers),
-                    %% We block until the exchange finishes successfully
-                    %% or with error, we finish anyway
-                    _ = plum_db:sync_exchange(Peer),
-                    ok
-            end;
-        false ->
-            ok
-    end.
-
-%% @private
-wait_for_pdb_aae_exchange() ->
-    plum_db_config:get(aae_enabled) andalso
-        plum_db_config:get(wait_for_aae_exchange).
-
-%% @private
-wait_for_partitions() ->
-    %% Waiting for hashtrees implies waiting for partitions
-    plum_db_config:get(wait_for_partitions) orelse wait_for_pdb_hashtrees().
-
-%% @private
-wait_for_pdb_hashtrees() ->
-    %% If aae is disabled the hastrees will never get build
-    %% and we would block forever
-
-    (plum_db_config:get(aae_enabled) andalso
-        plum_db_config:get(wait_for_hashtrees)) orelse
-        wait_for_pdb_aae_exchange().
 
 %% @private
 configure_services() ->
@@ -356,9 +258,6 @@ setup_event_handlers() ->
     % _ = bondy_event_manager:add_watched_handler(
     %     bondy_event_logger, []
     % ),
-    % _ = plum_db_events:add_handler(
-    %     bondy_event_logger, []
-    % ),
 
     ok.
 
@@ -369,35 +268,6 @@ by `bondy_subsribers_sup`.
 """.
 setup_wamp_subscriptions() ->
     ok.
-
-%% @private
-suspend_pdb_aae() ->
-    case application:get_env(plum_db, aae_enabled, true) of
-        true ->
-            ok = application:set_env(plum_db, priv_aae_enabled, true),
-            ok = application:set_env(plum_db, aae_enabled, false),
-            ?LOG_NOTICE(#{
-                description =>
-                    "Temporarily disabled active anti-entropy (AAE) during initialisation"
-            }),
-            ok;
-        false ->
-            ok
-    end.
-
-%% @private
-restore_pdb_aae() ->
-    case application:get_env(plum_db, priv_aae_enabled, false) of
-        true ->
-            %% plum_db should have started so we call plum_db_config
-            ok = plum_db_config:set(aae_enabled, true),
-            ?LOG_NOTICE(#{
-                description => "Active anti-entropy (AAE) re-enabled"
-            }),
-            ok;
-        false ->
-            ok
-    end.
 
 %% @private
 %% Wires the bondy_oplog sync scheduler to the Partisan cluster when oplog

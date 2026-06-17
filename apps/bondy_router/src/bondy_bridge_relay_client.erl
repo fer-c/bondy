@@ -105,6 +105,11 @@ stateDiagram-v2
 -export([active/3]).
 -export([idle/3]).
 
+-ifdef(TEST).
+%% Exposed for testing the bondy_db merge side of the full sync.
+-export([handle_aae_data/2]).
+-endif.
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -1174,8 +1179,9 @@ session_id(RealmUri, #state{sessions_by_realm = Map}) ->
 
 %% @private
 -doc """
-A temporary POC of full sync, not elegant at all. This should be resolved at the
-plum_db layer and not here, but we are interested in having a POC ASAP.
+A temporary POC of full sync, not elegant at all. Requests the server's realm
+security model; the server replies with a stream of `{aae_data, _, {cell, ...}}'
+bondy_db cells that `handle_aae_data/2' merges locally.
 """.
 init_aae_sync(#{id := SessionId}, State) ->
     % Ref = make_ref(),
@@ -1188,12 +1194,27 @@ init_aae_sync(#{id := SessionId}, State) ->
             throw(Reason)
     end.
 
-handle_aae_data({PKey, RemoteObj}, _State) ->
-    %% We should be getting plum_db_object instances to be able to sync, for
-    %% now we do this
-    %% TODO this can return false if local is newer
-    _ = plum_db:merge({PKey, undefined}, RemoteObj),
-    ok.
+handle_aae_data({cell, TableName, Band, Key, Value, Hlc}, _State) ->
+    %% A bondy_db cell shipped by the server's full sync. Merge it into our own
+    %% bondy_db preserving the origin HLC, so the `lww_register` resolves
+    %% last-writer-wins: a value we have since edited with a newer HLC is kept
+    %% (the bridge does not blindly overwrite — same intent as the old
+    %% plum_db:merge, which also let a newer local value win).
+    case bondy_namespace_catalog:table(TableName) of
+        undefined ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Dropping bridge AAE cell for an "
+                    "unprovisioned table",
+                table => TableName,
+                realm_band => Band,
+                key => Key
+            }),
+            ok;
+        Table ->
+            _ = bondy_db:apply(Table, Band, Key, {set, Hlc, Value}),
+            ok
+    end.
 
 %% =============================================================================
 %% PRIVATE: PROXYING

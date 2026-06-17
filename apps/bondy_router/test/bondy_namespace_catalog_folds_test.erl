@@ -35,7 +35,6 @@
 -define(M, <<"member">>).
 -define(M2, <<"member-v2">>).
 
-
 %% =============================================================================
 %% Fixture
 %% =============================================================================
@@ -69,7 +68,6 @@ cleanup(_) ->
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     ok.
 
-
 %% =============================================================================
 %% lww — realm / user / group / gateway / ticket / token / bridge
 %% =============================================================================
@@ -85,8 +83,12 @@ lww_concurrent_converges() ->
         ok = bondy_db:apply(Tb, <<"r">>, <<"k">>, {set, 200, <<"vb">>}),
         ok = sync_both(Ta, Tb),
         %% Both replicas agree on the single LWW winner (highest HLC).
-        ?assertEqual({ok, {<<"vb">>, 200}}, bondy_db:read(Ta, <<"r">>, <<"k">>)),
-        ?assertEqual({ok, {<<"vb">>, 200}}, bondy_db:read(Tb, <<"r">>, <<"k">>)),
+        ?assertEqual(
+            {ok, {<<"vb">>, 200}}, bondy_db:read(Ta, <<"r">>, <<"k">>)
+        ),
+        ?assertEqual(
+            {ok, {<<"vb">>, 200}}, bondy_db:read(Tb, <<"r">>, <<"k">>)
+        ),
         ?assertEqual(root(Ta), root(Tb))
     after
         ok = bondy_db:close(DbA),
@@ -116,7 +118,9 @@ lww_clear_then_reset_reanimates() ->
     {Db, T} = open_replica(lww_reanimate, bondy_ticket, lww),
     try
         ok = bondy_db:apply(T, <<"r">>, <<"tok">>, {set, 1, <<"issued">>}),
-        ?assertEqual({ok, {<<"issued">>, 1}}, bondy_db:read(T, <<"r">>, <<"tok">>)),
+        ?assertEqual(
+            {ok, {<<"issued">>, 1}}, bondy_db:read(T, <<"r">>, <<"tok">>)
+        ),
         %% Revoke — the cell reads as absent.
         ok = bondy_db:apply(T, <<"r">>, <<"tok">>, {clear, 2}),
         ?assertEqual({error, not_found}, bondy_db:read(T, <<"r">>, <<"tok">>)),
@@ -128,7 +132,6 @@ lww_clear_then_reset_reanimates() ->
     after
         ok = bondy_db:close(Db)
     end.
-
 
 %% =============================================================================
 %% mv — grants / sources
@@ -142,8 +145,12 @@ mv_concurrent_grants_survive() ->
     {DbA, Ta} = open_replica(mv_grant_a, security_user_grants, mv),
     {DbB, Tb} = open_replica(mv_grant_b, security_user_grants, mv),
     try
-        ok = bondy_db:apply(Ta, <<"r">>, <<"alice/topic">>, {set, <<"perm_a">>}),
-        ok = bondy_db:apply(Tb, <<"r">>, <<"alice/topic">>, {set, <<"perm_b">>}),
+        ok = bondy_db:apply(
+            Ta, <<"r">>, <<"alice/topic">>, {set, <<"perm_a">>}
+        ),
+        ok = bondy_db:apply(
+            Tb, <<"r">>, <<"alice/topic">>, {set, <<"perm_b">>}
+        ),
         ok = sync_both(Ta, Tb),
         ?assertEqual(
             {ok, [<<"perm_a">>, <<"perm_b">>], read_hlc},
@@ -158,7 +165,6 @@ mv_concurrent_grants_survive() ->
         ok = bondy_db:close(DbA),
         ok = bondy_db:close(DbB)
     end.
-
 
 %% =============================================================================
 %% aw — group membership (the §3 split table)
@@ -222,7 +228,6 @@ aw_add_survives_nonobserving_remove() ->
         ok = bondy_db:close(DbA),
         ok = bondy_db:close(DbB)
     end.
-
 
 %% =============================================================================
 %% Helpers

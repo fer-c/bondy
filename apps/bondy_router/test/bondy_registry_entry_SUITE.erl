@@ -9,7 +9,7 @@
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
 -compile([nowarn_export_all, export_all]).

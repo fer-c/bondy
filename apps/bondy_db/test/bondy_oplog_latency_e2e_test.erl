@@ -160,7 +160,9 @@ idle_probe_heartbeats() ->
 
     %% The probe lives in a reserved bucket: a normal user read of a key we
     %% never wrote returns not_found (no user-keyspace pollution).
-    ?assertEqual({error, not_found}, bondy_db:read(T, <<"realm">>, <<"never">>)),
+    ?assertEqual(
+        {error, not_found}, bondy_db:read(T, <<"realm">>, <<"never">>)
+    ),
     close_stop(Db, Id).
 
 %% probe_write must produce a type-correct, accepted op for each CRDT: a

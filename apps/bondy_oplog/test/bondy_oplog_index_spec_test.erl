@@ -145,7 +145,9 @@ terms_integer_term_test() ->
 validate_canonical_normalize_test() ->
     ?assertEqual(
         ok,
-        ?MOD:validate(#{name => s, extract => [resource], normalize => canonical})
+        ?MOD:validate(#{
+            name => s, extract => [resource], normalize => canonical
+        })
     ).
 
 %% A structured leaf (an RBAC resource `{Uri, Strategy}`, the atom `any`) becomes
@@ -184,7 +186,9 @@ validate_collation_ok_test() ->
 
 validate_collation_conflicts_with_extract_test() ->
     Spec = #{name => x, extract => [a], collation => [[a], [b]]},
-    ?assertEqual({error, {conflicting_keys, [extract, collation]}}, ?MOD:validate(Spec)).
+    ?assertEqual(
+        {error, {conflicting_keys, [extract, collation]}}, ?MOD:validate(Spec)
+    ).
 
 validate_empty_collation_test() ->
     ?assertEqual(
@@ -220,8 +224,12 @@ terms_collation_missing_column_test() ->
 %% Per-column normalise applies to both stored and query terms.
 collation_normalize_test() ->
     Spec = #{name => pog, collation => [[p], [o]], normalize => downcase},
-    ?assertEqual([[<<"p">>, <<"o">>]], ?MOD:terms(Spec, #{p => <<"P">>, o => <<"O">>})),
-    ?assertEqual([<<"p">>, <<"o">>], ?MOD:normalize_term(Spec, [<<"P">>, <<"O">>])).
+    ?assertEqual(
+        [[<<"p">>, <<"o">>]], ?MOD:terms(Spec, #{p => <<"P">>, o => <<"O">>})
+    ),
+    ?assertEqual(
+        [<<"p">>, <<"o">>], ?MOD:normalize_term(Spec, [<<"P">>, <<"O">>])
+    ).
 
 %% =============================================================================
 %% project/2 + decode_projection/1

@@ -24,7 +24,7 @@ each key and filters. Storage-only (no change reactor).
 -include_lib("partisan/include/partisan_util.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
 -define(ASSIGNMENT_VALIDATOR, #{
@@ -458,7 +458,7 @@ type_and_version(Map) ->
 %% The open bondy_db `security_sources` table handle. Raises if the catalogue
 %% has not provisioned it yet.
 table() ->
-    case bondy_namespace_catalog:table(?PLUM_DB_SOURCE_TAB) of
+    case bondy_namespace_catalog:table(?BONDY_DB_SOURCE_TAB) of
         undefined ->
             error(security_sources_table_unavailable);
         Table ->

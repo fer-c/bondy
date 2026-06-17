@@ -81,8 +81,11 @@ do_handle_call(<<"bondy.ping">>, M, _Ctxt) ->
     %% Always authorized
     R = bondy_wamp_message:result(M#call.request_id, #{}, [~"pong"]),
     {reply, R};
+do_handle_call(<<"bondy.export.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_export_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_backup_api:handle_call(Proc, M, Ctxt);
+    %% Deprecated alias — dispatches to the same bondy_export_api handler.
+    bondy_export_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.cert_manager.", _/binary>> = Proc, M, Ctxt) ->
     bondy_cert_manager_wamp_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->

@@ -76,6 +76,7 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 -export([subscribe/2]).
 -export([unsubscribe/1]).
 -export([publish/4]).
+-export([publish_merge/4]).
 
 -export_type([bucket/0]).
 -export_type([read_opts/0]).
@@ -587,6 +588,17 @@ unsubscribe(SubRef) ->
 
 publish(NS, Key, Hlc, Op) ->
     bondy_oplog_core_dispatcher:publish(NS, Key, Hlc, Op).
+
+-doc """
+Publish a remote-merge event (the plum_db `on_merge` equivalent). Fired by the
+replay path when anti-entropy merges a peer's write into the local projection,
+so node-local reactors can react to peer-originated changes. See
+`bondy_oplog_core_dispatcher:publish_merge/4`.
+""".
+-spec publish_merge(atom(), term(), bondy_oplog_hlc:hlc(), term()) -> ok.
+
+publish_merge(NS, Key, Hlc, Op) ->
+    bondy_oplog_core_dispatcher:publish_merge(NS, Key, Hlc, Op).
 
 %% =============================================================================
 %% Read path

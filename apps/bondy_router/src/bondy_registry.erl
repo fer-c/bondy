@@ -11,13 +11,15 @@ An in-memory registry for PubSub subscriptions and Routed RPC registrations,
 providing pattern matching capabilities including support for WAMP's
 version 2.0 match policies (exact, prefix and wildcard).
 
-Entries are stored in plum_db (using an in-memory prefix). The registry
-also maintains in-memory indices as a materialised view: ETS bags for
-exact matching, and lock-free persistent ART tries
-(`m:bondy_registry_ptrie`) for prefix and wildcard matching.
+Entries are stored in the ephemeral `registry` bondy_db (an in-RAM, memory
+topology DB — no durable / on-disk backing, provisioned by
+`m:bondy_namespace_catalog`). The registry also maintains in-memory indices
+as a materialised view: ETS bags for exact matching, and lock-free persistent
+ART tries (`m:bondy_registry_ptrie`) for prefix and wildcard matching.
 
-This module also provides a singleton server that initialises the indices
-from the plum_db tables on startup.
+This module also provides a singleton server that rebuilds the indices from
+the bondy_db store on startup (a no-op on a fresh boot, since the ephemeral
+store does not survive a restart).
 
 The registry consists of this server and a pool of `bondy_registry_partition`
 workers; each partition owns its own slice of the indices.
@@ -26,10 +28,8 @@ workers; each partition owns its own slice of the indices.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_registry.hrl").
-
--define(MERGE_STATUS_TAB, bondy_registry_merge_status).
 
 -record(state, {
     timers = #{} :: #{node() => reference()},
@@ -78,13 +78,6 @@ workers; each partition owns its own slice of the indices.
 -export([find_matches/3]).
 -export([find_matches/4]).
 
-%% PLUM_DB PREFIX CALLBACKS
--export([will_merge/3]).
--export([on_merge/3]).
--export([on_update/3]).
--export([on_delete/2]).
--export([on_erase/2]).
-
 %% GEN_SERVER CALLBACKS
 -export([code_change/3]).
 -export([handle_call/3]).
@@ -100,14 +93,16 @@ workers; each partition owns its own slice of the indices.
 -doc """
 Starts the registry server.
 
-The server subscribes to plum_db broadcast and AAE events in order to keep the
-`bondy_registry_partition` stores up-to-date with PlumDB.
+The server monitors cluster node up / down events (to schedule pruning of a
+departed node's entries) and rebuilds the partitions' in-memory indices from
+the bondy_db store on startup.
 """.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 -doc """
-Initialises the indices in the partitions' stores from entries stored in PlumDB.
+Rebuilds the partitions' in-memory match indices from the entries in the
+bondy_db `registry` store.
 """.
 init_indices() ->
     gen_server:call(?MODULE, init_indices, timer:minutes(10)).
@@ -580,168 +575,18 @@ format_error(Reason, [{_M, _F, _As, Info} | _]) ->
     }.
 
 %% =============================================================================
-%% PLUM_DB PREFIX CALLBACKS
-%% =============================================================================
-
-will_merge(_PKey, _New, undefined) ->
-    %% [Case 1] If New is an entry rooted in this node we need to delete and
-    %% broadcast to the cluster members.
-    %% We handle this case in on_merge as we can simply read the entry from
-    %% plum_db and immediately delete (without the entry ever being added to
-    %% the indices) which sends a broadcast.
-    true;
-will_merge(_PKey, New, Old) ->
-    %% ?LOG_DEBUG(#{
-    %%     description => "Will merge called", new => New, old => Old
-    %% }),
-    NewResolved = maybe_resolve(New),
-    NewEntry = plum_db_object:value(NewResolved),
-    OldEntry = resolve_value(Old),
-
-    case {NewEntry, OldEntry} of
-        {?TOMBSTONE, ?TOMBSTONE} ->
-            true;
-        {?TOMBSTONE, OldEntry} ->
-            case bondy_registry_entry:is_local(OldEntry) of
-                true ->
-                    %% [Case 2]
-                    %% A peer node deleted an entry rooted in this node.
-                    %% The entry is still active as we still have it on plum_db.
-                    %% This MUST only occur when the other node was
-                    %% disconnected from us but we both remained operational
-                    %% i.e. a net split. In this situation the other node used
-                    %% bondy_registry_partition:dirty_delete/1 which adds a
-                    %% tombstone in a deterministic way (by using a static
-                    %% ActorID and the original timestamp). It also disables
-                    %% broadcast, so the fact that we are handling this here is
-                    %% due to an AAE exchange. We need override the delete and
-                    %% let all cluster members know the entry is still active.
-                    %% To do that we replace the delete with the old value
-                    %% while advancing the vector clock.
-                    %% plum_db will store this new value locally and broadcast
-                    %% the change to the cluster members.
-                    Ctxt = plum_db_object:context(New),
-                    [{{Partition, _}, _} | _] = Ctxt,
-                    ActorId = {Partition, partisan:node()},
-                    Modified = plum_db_object:modify(
-                        New, Ctxt, OldEntry, ActorId
-                    ),
-                    {true, Modified};
-                false ->
-                    %% [Case 3]
-                    %% We (A) need to first check if this was deleted by the
-                    %% owner (B) or not, and if not, check if we are still
-                    %% connected to the owner. If so we MUST ignore. This would
-                    %% be the case of node C deleting the entry (as itself got
-                    %% disconnected from B but not from us).
-                    %% Also we should ignore if merging is disabled.
-                    Peer = bondy_registry_entry:node(OldEntry),
-                    Status = bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled),
-
-                    case plum_db_object:context(NewResolved) of
-                        [{{_, ?PLUM_DB_REGISTRY_ACTOR}, _}] ->
-                            %% Not deleted by the owner, merge only if we are
-                            %% disconnected from the owner and merging is
-                            %% enabled
-                            not partisan:is_connected(Peer) andalso
-                                Status == enabled;
-                        _ ->
-                            %% Deleted by the owner. Merge and handle the
-                            %% delete in on_merge/3 if merging is enabled
-                            Status == enabled
-                    end
-            end;
-        {NewEntry, ?TOMBSTONE} ->
-            case bondy_registry_entry:is_local(NewEntry) of
-                true ->
-                    %% [Case 4]
-                    %% Another node is telling us we are missing an entry that
-                    %% is rooted here, this is an inconsistency issue produced
-                    %% by the eventual consistency model. Most probably this
-                    %% other node has not handled the nodedown signal properly.
-                    %% We need to mark it as deleted in plum_db so that the
-                    %% other nodes get the event and stop trying to re-surface
-                    %% it.
-                    %% The following will mark it as deleted and broadcast the
-                    %% change to all cluster members.
-                    Ctxt = plum_db_object:context(New),
-                    [{{Partition, _}, _} | _] = Ctxt,
-                    ActorId = {Partition, partisan:node()},
-                    Modified = plum_db_object:modify(
-                        New, Ctxt, ?TOMBSTONE, ActorId
-                    ),
-                    {true, Modified};
-                false ->
-                    %% [Case 5]
-                    %% An entry rooted in another node is being resurfaced.
-                    %% Most probably we were disconnected from this node and
-                    %% marked the entry as deleted but now we got a connection
-                    %% back to this node. However, we might not yet have a
-                    %% connection with that node but getting this via another
-                    %% node, so we need to check. If its not connected we
-                    %% return false, ignoring the merge (retaining our
-                    %% tombstone). If connected we check if merging is enabled (
-                    %% disabled during pruning).
-                    Peer = bondy_registry_entry:node(NewEntry),
-                    Status = bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled),
-
-                    partisan:is_connected(Peer) andalso Status == enabled
-            end;
-        {Val, Val} ->
-            %% This should not happen. It would be an issue in plum_db but just
-            %% in case we deal with it
-            false
-    end.
-
-on_merge({{_, RealmUri}, _} = PKey, New, Old) ->
-    %% This function needs to return immediately so we use the
-    %% router worker pool
-    Fun = fun() ->
-        Partition = pick_partition(RealmUri),
-        _ = do_on_merge(PKey, New, Old, Partition),
-        ok
-    end,
-
-    case bondy_router_worker:cast(Fun) of
-        ok ->
-            ok;
-        {error, overload} ->
-            Fun()
-    end.
-
--doc "A local update".
-on_update(_PKey, _New, _Old) ->
-    %% ?LOG_DEBUG(#{description => "On update called", new => New, old => Old}),
-    ok.
-
--doc "A local delete".
-on_delete(_PKey, _Old) ->
-    ok.
-
--doc "A local erase".
-on_erase(_PKey, _Old) ->
-    ok.
-
-%% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
 init([]) ->
-    %% Every time a node goes up/down we get an info message
+    %% Every time a node goes up/down we get an info message; on nodedown we
+    %% schedule a prune of that node's (remote) entries. With the registry on
+    %% bondy_db and AAE off there are no replicated remote entries yet, so the
+    %% prune is currently inert; it is the seam where the presence-FSM
+    %% SUSPEND/EVICT lands with oplog.aae (design D-7). The plum_db net-split
+    %% merge-veto machinery (`will_merge`/`on_merge` + the per-node merge-status
+    %% table) is retired with the cut over to bondy_db.
     ok = partisan:monitor_nodes(true),
-
-    %% We create a table allowing us to suspend merging data with a node
-    %% during a prune operation.
-    %% When a node gets disconnected we need to 'dirty_delete' its entries in
-    %% case the node never comes back e.g. pruning. During pruning we might get
-    %% entries from the disconnected node either because it re-connects sends
-    %% broadcasts or performs an AAE exchange or because a third node which is
-    %% still connected to it and to us is performing an AAE exchange (this
-    %% latter case means we cannot simply decide to postpone the reconnection
-    %% of the disconnected node e.g. via Partisan).
-    %% The apprach is for the will_merge/3 callback to use this table to check
-    %% the registry merge status for a node i.e. suspended | running.
-    ?MERGE_STATUS_TAB = bondy_table:new(?MERGE_STATUS_TAB, protected, true),
 
     State = #state{
         start_ts = erlang:system_time(millisecond)
@@ -775,9 +620,8 @@ handle_info({nodedown, Node} = Event, State) ->
     Tref = erlang:send_after(5000, self(), {prune, Node}),
     Timers = (State#state.timers)#{Node => Tref},
     {noreply, State#state{timers = Timers}};
-handle_info({prune_finished, Node} = Event, State) ->
+handle_info({prune_finished, _Node} = Event, State) ->
     ?LOG_DEBUG(#{event => Event}),
-    ok = bondy_table:put(Node, enabled, ?MERGE_STATUS_TAB),
     {noreply, State};
 handle_info({prune, Node} = Event, State) ->
     %% A connection with node has gone down
@@ -1186,103 +1030,6 @@ subscription_id(_, #{subscription_id := Val}) ->
 subscription_id(Uri, _) ->
     bondy_message_id:router(Uri).
 
-%% -----------------------------------------------------------------------------
-%% @private
-%% WARNING: This function must be only be called by do_on_merge/3 as it
-%% assumes it is executing in a registry partition process
-%% TODO: we should move this to the registry store
-%% -----------------------------------------------------------------------------
-do_on_merge(_PKey, New, undefined, Partition) ->
-    case resolve_value(New) of
-        ?TOMBSTONE ->
-            %% We got a delete for an entry we do not know anymore.
-            %% This could happen when we shutdown or crashed
-            %% (while the registry is using ram-only storage).
-            %% We assume the tombstone was created with
-            %% bondy_registry_partition:dirty_delete/1 and if this was an entry
-            %% rooted in this node the result would be the same as if it have
-            %% been done locally (idempotence).
-            ok;
-        NewEntry ->
-            case bondy_registry_entry:is_local(NewEntry) of
-                true ->
-                    %% [Case 1]
-                    %% Another node is telling us we are missing an entry that
-                    %% is rooted here, this is an inconsistency issue produced
-                    %% by the eventual consistency model. Most probably this
-                    %% other node has not handled the nodedown signal properly.
-                    %% We need to mark it as deleted in plum_db so that the
-                    %% other nodes get the event and stop trying to re-surface
-                    %% it.
-                    %% The following will mark it as deleted and broadcast the
-                    %% change to all cluster nodes.
-                    ok = bondy_registry_partition:remove(Partition, NewEntry);
-                false ->
-                    maybe_merge(NewEntry, Partition)
-            end
-    end;
-do_on_merge(_PKey, New, Old, Partition) ->
-    case {resolve_value(New), resolve_value(Old)} of
-        {?TOMBSTONE, ?TOMBSTONE} ->
-            ok;
-        {?TOMBSTONE, OldEntry} ->
-            case bondy_registry_entry:is_local(OldEntry) of
-                true ->
-                    %% [Case 2] We handled this on will_merge/3;
-                    %% We do not need to update the indices
-                    ok;
-                false ->
-                    bondy_registry_partition:remove(Partition, OldEntry)
-            end;
-        {NewEntry, _} ->
-            %% Case 4
-            case bondy_registry_entry:is_local(NewEntry) of
-                true ->
-                    %% [Case 4] Handled by will_merge/3. We do not need to
-                    %% update the indices.
-                    ok;
-                false ->
-                    %% [Case 5] Handled by will_merge/3.
-                    %% If we are here then the we are connected to the root
-                    %% node for Entry, so we add to the indices
-                    maybe_merge(NewEntry, Partition)
-            end
-    end.
-
-%% @private
-maybe_merge(Entry, Partition) ->
-    Peer = bondy_registry_entry:node(Entry),
-
-    %% Disabled when prunning in progress, we skip merging to
-    %% avoid inconsistencies in the indices, we will converge
-    %% on a subsequent AAE exchange (if/when merge re-enabled)
-    case bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled) of
-        enabled ->
-            %% TODO we need to resolve registration inconsistencies here, so we
-            %% need to reuse the logic of ?MODULE:maybe_add_registration
-            _ = bondy_registry_partition:add(Partition, Entry),
-            ok;
-        disabled ->
-            ok
-    end.
-
-%% @private
-maybe_resolve(Object) ->
-    maybe_resolve(Object, lww).
-
-%% @private
-maybe_resolve(Object, Resolver) ->
-    case plum_db_object:value_count(Object) > 1 of
-        true ->
-            plum_db_object:resolve(Object, Resolver);
-        false ->
-            Object
-    end.
-
-%% @private
-resolve_value(Object) ->
-    plum_db_object:value(maybe_resolve(Object)).
-
 %% @private
 do_match(?EOT) ->
     ?EOT;
@@ -1308,60 +1055,90 @@ do_find_matches(Type, RealmUri, Uri, Opts0) ->
     bondy_registry_partition:find_matches(Partition, Type, RealmUri, Uri, Opts).
 
 %% @private
+%% Rebuilds the in-memory match indices (trie / ETS) from the durable
+%% (ephemeral, in-RAM) bondy_db store, per realm, sweeping any stale entry left
+%% by a previous incarnation of THIS node (same nodestring, created before this
+%% boot). With the registry on a memory topology and AAE off, a fresh node boot
+%% finds an empty store — nothing survives a restart — so this only does real
+%% work on a registry-process restart while bondy_db stays up.
 init_indices(State) ->
     ?LOG_NOTICE(#{
         description =>
-            "Initialising in-memory registry indices from plum_db store."
+            "Rebuilding in-memory registry indices from the bondy_db store."
     }),
 
     Now = State#state.start_ts,
-    AnyRealm = '_',
-    Opts = [{resolver, lww}, {remove_tombstones, true}],
-
-    Fun = fun
-        ({_, ?TOMBSTONE}) ->
-            ok;
-        ({_, Entry}) ->
-            %% In the event of another node not terminating properly, the last
-            %% sessions' registrations will still be in the DB. This function
-            %% ensures no stale entry is restored from plum_db to the in-memory
-            %% store and that they are removed from the db.
-            Node = bondy_config:nodestring(),
-            EntryNode = bondy_registry_entry:nodestring(Entry),
-            Created = bondy_registry_entry:created(Entry),
-            RealmUri = bondy_registry_entry:realm_uri(Entry),
-            Partition = pick_partition(RealmUri),
-
-            %% IMPORTANT We assume nodes keep their names forever.
-            case Node == EntryNode andalso Created < Now of
-                true ->
-                    %% This entry should have been deleted when node
-                    %% crashed or shutdown
-                    ?LOG_DEBUG(#{
-                        description => "Removing stale entry from plum_db",
-                        entry => Entry
-                    }),
-
-                    _ = bondy_registry_partition:remove(Partition, Entry),
-                    ok;
-                false ->
-                    _ = bondy_registry_partition:add_indices(Partition, Entry),
-                    ok
-            end
-    end,
+    Node = bondy_config:nodestring(),
 
     try
-        ok = plum_db:foreach(Fun, ?PLUM_DB_REGISTRATION_PREFIX(AnyRealm), Opts),
-        ok = plum_db:foreach(Fun, ?PLUM_DB_SUBSCRIPTION_PREFIX(AnyRealm), Opts)
+        ok = rebuild_indices(registration, Now, Node),
+        ok = rebuild_indices(subscription, Now, Node)
     catch
-        throw:Reason:Stacktrace ->
+        Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
-                description => "Error while initialising registry from plum_db",
+                description =>
+                    "Error while initialising registry from bondy_db",
+                class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
             {error, Reason}
     end.
+
+%% @private
+rebuild_indices(Type, Now, Node) ->
+    case bondy_namespace_catalog:table(registry_table_name(Type)) of
+        undefined ->
+            %% Registry not provisioned (e.g. the catalogue is idle) — nothing
+            %% to rebuild.
+            ok;
+        Table ->
+            _ = [
+                rebuild_realm_indices(Table, RealmUri, Now, Node)
+             || Realm <- bondy_realm:list(),
+                (RealmUri = bondy_realm:uri(Realm)) =/= undefined
+            ],
+            ok
+    end.
+
+%% @private
+rebuild_realm_indices(Table, RealmUri, Now, Node) ->
+    case bondy_db:list(Table, RealmUri) of
+        {ok, Rows} ->
+            Partition = pick_partition(RealmUri),
+            _ = [
+                maybe_restore_index(Partition, Entry, Now, Node)
+             || {_Key, #{entry := Entry}, _Hlc} <- Rows
+            ],
+            ok;
+        {error, _} ->
+            ok
+    end.
+
+%% @private
+maybe_restore_index(Partition, Entry, Now, Node) ->
+    EntryNode = bondy_registry_entry:nodestring(Entry),
+    Created = bondy_registry_entry:created(Entry),
+
+    %% IMPORTANT We assume nodes keep their names forever.
+    case Node == EntryNode andalso Created < Now of
+        true ->
+            %% A stale entry from a previous incarnation of this node — it
+            %% should have been deleted on crash/shutdown.
+            ?LOG_DEBUG(#{
+                description => "Removing stale registry entry",
+                entry => Entry
+            }),
+            _ = bondy_registry_partition:remove(Partition, Entry),
+            ok;
+        false ->
+            _ = bondy_registry_partition:add_indices(Partition, Entry),
+            ok
+    end.
+
+%% @private
+registry_table_name(registration) -> ?BONDY_DB_REGISTRATION_TAB;
+registry_table_name(subscription) -> ?BONDY_DB_SUBSCRIPTION_TAB.
 
 %% @private
 maybe_fun(undefined, _) ->
@@ -1412,8 +1189,8 @@ do_remove_all({[{_EntryKey, Entry} | T], Cont}, SessionId, Fun, Opts, Acc) ->
 
     case SessionId =:= Session orelse SessionId == '_' of
         true ->
-            %% We delete the entry from plum_db.
-            %% This will broadcast the delete to all nodes.
+            %% Delete the entry from the bondy_db store and its in-memory
+            %% indices (cross-node convergence rides AAE, design D-3).
             ok = bondy_registry_partition:remove(
                 pick_partition(RealmUri), Entry, Opts
             ),

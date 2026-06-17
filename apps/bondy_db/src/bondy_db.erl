@@ -1165,7 +1165,10 @@ range(
     AdapterOpts = (maps:without([shard], Opts))#{shard => Shard},
     case bondy_oplog_core:range(NS, ?INDEX, Bucket, {Lo, Hi}, AdapterOpts) of
         {ok, Rows} ->
-            {ok, [{uncell_key(Topology, Realm, K), V, Hlc} || {K, V, Hlc} <- Rows]};
+            {ok, [
+                {uncell_key(Topology, Realm, K), V, Hlc}
+             || {K, V, Hlc} <- Rows
+            ]};
         {error, _} = Err ->
             Err
     end.
@@ -1332,7 +1335,13 @@ index_get(Table, Realm, IndexName, Term, Opts) when
                 {Low, High} = index_eq_bounds(Topology, Realm, Norm, After),
                 RangeOpts = (index_range_opts(Opts))#{shard => SecShard},
                 read_index(
-                    Topology, Realm, NS, IndexName, SecBucket, Low, High,
+                    Topology,
+                    Realm,
+                    NS,
+                    IndexName,
+                    SecBucket,
+                    Low,
+                    High,
                     RangeOpts
                 );
             {stale, Lag} ->
@@ -1472,7 +1481,10 @@ all facts with `p = P0` and `o` in `[O1, O2)`).
     | {error, term()}.
 
 index_prefix_range(Table, Realm, IndexName, LoCols, HiCols, Opts) when
-    is_binary(Realm), is_atom(IndexName), is_list(LoCols), is_list(HiCols),
+    is_binary(Realm),
+    is_atom(IndexName),
+    is_list(LoCols),
+    is_list(HiCols),
     is_map(Opts)
 ->
     with_index(Table, IndexName, fun(Spec, SecShardCount) ->
@@ -2422,7 +2434,9 @@ index_descriptors(Specs, DefaultShardCount, Topology) ->
 %% adapter — fails loudly at open instead of silently degrading to the MST.
 %% (Ephemeral/ETS tables legitimately omit it and fall back to the MST by
 %% design, so only the `leveled` backend is asserted.)
-assert_durable_rebuild_invariant(leveled, IndexMap) when map_size(IndexMap) > 0 ->
+assert_durable_rebuild_invariant(leveled, IndexMap) when
+    map_size(IndexMap) > 0
+->
     case
         bondy_oplog_projection_adapter:cell_keys_exported(
             bondy_db_projection_leveled
@@ -2812,7 +2826,9 @@ read_index(Topology, Realm, NS, IndexName, SecBucket, Low, High, RangeOpts) ->
 index_rows(Topology, Realm, Rows) ->
     [
         {
-            uncell_key(Topology, Realm, bondy_oplog_index_key:decode_pk(SecKey)),
+            uncell_key(
+                Topology, Realm, bondy_oplog_index_key:decode_pk(SecKey)
+            ),
             bondy_oplog_index_spec:decode_projection(Columns)
         }
      || {SecKey, Columns, _Hlc} <- Rows
@@ -2877,8 +2893,11 @@ realm_scan_range(Topology, Realm) when is_binary(Realm) ->
 %% upper bound under a folding topology so the scan stays within `Realm`.
 fold_high(Topology, Realm, infinity) ->
     case ?FOLDS_REALM(Topology) of
-        true -> {_, Hi} = realm_scan_range(Topology, Realm), Hi;
-        false -> infinity
+        true ->
+            {_, Hi} = realm_scan_range(Topology, Realm),
+            Hi;
+        false ->
+            infinity
     end;
 fold_high(Topology, Realm, High) when is_binary(High) ->
     cell_key(Topology, Realm, High).
@@ -2912,8 +2931,10 @@ index_eq_bounds(Topology, Realm, Norm, After) ->
         false ->
             Lo =
                 case After of
-                    undefined -> <<Enc/binary, 0>>;
-                    _ when is_binary(After) -> <<Enc/binary, 0, After/binary, 0>>
+                    undefined ->
+                        <<Enc/binary, 0>>;
+                    _ when is_binary(After) ->
+                        <<Enc/binary, 0, After/binary, 0>>
                 end,
             {Lo, <<Enc/binary, 1>>}
     end.
@@ -2935,7 +2956,10 @@ composite_enc(Spec, Cols) ->
 composite_eq_bounds(Topology, Realm, Enc) ->
     case ?FOLDS_REALM(Topology) of
         true ->
-            {<<Realm/binary, 0, Enc/binary, 0>>, <<Realm/binary, 0, Enc/binary, 1>>};
+            {
+                <<Realm/binary, 0, Enc/binary, 0>>,
+                <<Realm/binary, 0, Enc/binary, 1>>
+            };
         false ->
             {<<Enc/binary, 0>>, <<Enc/binary, 1>>}
     end.
@@ -2946,7 +2970,10 @@ composite_eq_bounds(Topology, Realm, Enc) ->
 composite_range_bounds(Topology, Realm, EncLo, EncHi) ->
     case ?FOLDS_REALM(Topology) of
         true ->
-            {<<Realm/binary, 0, EncLo/binary, 0>>, <<Realm/binary, 0, EncHi/binary, 0>>};
+            {
+                <<Realm/binary, 0, EncLo/binary, 0>>,
+                <<Realm/binary, 0, EncHi/binary, 0>>
+            };
         false ->
             {<<EncLo/binary, 0>>, <<EncHi/binary, 0>>}
     end.
@@ -2965,7 +2992,11 @@ composite_scan(Table, Realm, IndexName, Spec, SecShardCount, {Low, High}, Opts) 
         ok ->
             case
                 bondy_oplog_core:range_all(
-                    NS, IndexName, SecBucket, {Low, High}, index_range_opts(Opts)
+                    NS,
+                    IndexName,
+                    SecBucket,
+                    {Low, High},
+                    index_range_opts(Opts)
                 )
             of
                 {ok, Rows} ->
@@ -2984,7 +3015,10 @@ composite_scan(Table, Realm, IndexName, Spec, SecShardCount, {Low, High}, Opts) 
 %% answer is the columns).
 composite_rows(Topology, Realm, Arity, Rows) ->
     Folded = ?FOLDS_REALM(Topology),
-    [composite_row(Folded, Realm, Arity, SecKey, Columns) || {SecKey, Columns, _Hlc} <- Rows].
+    [
+        composite_row(Folded, Realm, Arity, SecKey, Columns)
+     || {SecKey, Columns, _Hlc} <- Rows
+    ].
 
 composite_row(true, Realm, Arity, SecKey, Columns) ->
     Skip = byte_size(Realm) + 1,

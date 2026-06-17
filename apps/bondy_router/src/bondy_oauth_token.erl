@@ -17,7 +17,7 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
 -define(VERSION, ~"1.1").
@@ -553,7 +553,7 @@ store_key(AuthId) ->
 %% dependency (the catalogue, a `bondy_sup` child, opens it at boot, well before
 %% any auth flow issues or revokes a token).
 table() ->
-    case bondy_namespace_catalog:table(?PLUM_DB_OAUTH_TOKEN_TAB) of
+    case bondy_namespace_catalog:table(?BONDY_DB_OAUTH_TOKEN_TAB) of
         undefined -> error(oauth_token_table_unavailable);
         Table -> Table
     end.

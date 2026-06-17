@@ -13,7 +13,6 @@
 
 -define(CAT, bondy_namespace_catalog).
 
-
 %% =============================================================================
 %% Pure declaration tests (no setup)
 %% =============================================================================
@@ -24,10 +23,22 @@ declarations_test_() ->
     Core = [S || S <- Tables, maps:get(db, S) =:= core],
     Registry = [S || S <- Tables, maps:get(db, S) =:= registry],
     [
-        {"thirteen tables declared", ?_assertEqual(13, length(Tables))},
-        {"eleven core, two registry", fun() ->
-            ?assertEqual(11, length(Core)),
+        {"fourteen tables declared", ?_assertEqual(14, length(Tables))},
+        {"twelve core, two registry", fun() ->
+            ?assertEqual(12, length(Core)),
             ?assertEqual(2, length(Registry))
+        end},
+        {"retained_messages is a durable core lww migrated table", fun() ->
+            %% Cut over to bondy_db (§11.4): always durable regardless of the
+            %% inert `wamp.message_retention.storage_type` knob; storage-only
+            %% lww, always provisioned, no secondary index (matched by key).
+            Spec = maps:get(retained_messages, ByName),
+            ?assertEqual(core, maps:get(db, Spec)),
+            ?assertEqual(durable, maps:get(durability, Spec)),
+            ?assertEqual(realm, maps:get(shard_by, Spec)),
+            ?assertEqual(lww, maps:get(fold, Spec)),
+            ?assertEqual(true, maps:get(migrated, Spec, false)),
+            ?assertEqual([], maps:get(indexes, Spec, []))
         end},
         {"group membership is a core aw fold (the §3 split table)", fun() ->
             Spec = maps:get(security_group_members, ByName),
@@ -45,12 +56,19 @@ declarations_test_() ->
             ?assertEqual(key, shard_by(ByName, bondy_realm))
         end},
         {"all other tables shard by realm", fun() ->
-            Others = [S || S <- Tables,
-                not lists:member(maps:get(name, S),
-                    [bondy_ticket, bondy_oauth_token, bondy_realm])],
-            ?assert(lists:all(
-                fun(S) -> maps:get(shard_by, S) =:= realm end, Others
-            ))
+            Others = [
+                S
+             || S <- Tables,
+                not lists:member(
+                    maps:get(name, S),
+                    [bondy_ticket, bondy_oauth_token, bondy_realm]
+                )
+            ],
+            ?assert(
+                lists:all(
+                    fun(S) -> maps:get(shard_by, S) =:= realm end, Others
+                )
+            )
         end},
         {"grants + source cut as lww", fun() ->
             %% grants + source declared mv but cut as lww per the CRDT-fork
@@ -59,15 +77,27 @@ declarations_test_() ->
             ?assertEqual(lww, fold(ByName, security_user_grants)),
             ?assertEqual(lww, fold(ByName, security_sources))
         end},
-        {"registry tables are presence folds, ephemeral", fun() ->
-            ?assert(lists:all(
-                fun(S) ->
-                    maps:get(fold, S) =:= presence andalso
-                        maps:get(durability, S) =:= ephemeral
-                end,
-                Registry
-            ))
-        end},
+        {"registry tables are ephemeral lww, migrated, by_session index",
+            fun() ->
+                %% Cut over to bondy_db (D-7): storage-only `lww` (the presence-FSM
+                %% is deferred to oplog.aae), provisioned (`migrated`), with the
+                %% `by_session` reverse index for session-close cleanup.
+                ?assert(
+                    lists:all(
+                        fun(S) ->
+                            maps:get(fold, S) =:= lww andalso
+                                maps:get(durability, S) =:= ephemeral andalso
+                                maps:get(migrated, S, false) =:= true andalso
+                                [by_session] =:=
+                                    [
+                                        bondy_oplog_index_spec:name(I)
+                                     || I <- maps:get(indexes, S, [])
+                                    ]
+                        end,
+                        Registry
+                    )
+                )
+            end},
         {"core_db_spec: shared_shards, durable, default shards", fun() ->
             Spec = ?CAT:core_db_spec(),
             ?assertMatch(
@@ -103,35 +133,42 @@ declarations_test_() ->
         end}
     ].
 
-
 %% =============================================================================
 %% Lifecycle tests (need the substrate)
 %% =============================================================================
 
 lifecycle_test_() ->
     {setup,
-        fun() -> {ok, _} = application:ensure_all_started(bondy_db), ok end,
-        fun(_) -> ok end,
-        [
+        fun() ->
+            {ok, _} = application:ensure_all_started(bondy_db),
+            ok
+        end,
+        fun(_) -> ok end, [
             {timeout, 60,
                 {"provision_all opens every core table", fun provision_all/0}},
             {timeout, 60,
                 {"default provisions only migrated tables",
-                    fun migrated_only/0}}
+                    fun migrated_only/0}},
+            {timeout, 60,
+                {"registry by_session index works end-to-end",
+                    fun registry_index/0}}
         ]}.
-
 
 provision_all() ->
     Tmp = make_tmpdir(),
     set_env(true, 1, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     try
-        %% Core DB + all eleven core tables provisioned and published.
+        %% Core DB + all twelve core tables provisioned and published.
         ?assert(?CAT:is_open()),
         ?assertMatch(#{name := core}, ?CAT:core_db()),
-        ?assertMatch(#{kind := db, name := core}, bondy_db:info(?CAT:core_db())),
-        CoreNames = [maps:get(name, S)
-            || S <- ?CAT:tables(), maps:get(db, S) =:= core],
+        ?assertMatch(
+            #{kind := db, name := core}, bondy_db:info(?CAT:core_db())
+        ),
+        CoreNames = [
+            maps:get(name, S)
+         || S <- ?CAT:tables(), maps:get(db, S) =:= core
+        ],
         lists:foreach(
             fun(Name) ->
                 ?assertMatch(
@@ -141,9 +178,16 @@ provision_all() ->
             end,
             CoreNames
         ),
-        %% Registry tables are declared but NOT opened here.
-        ?assertEqual(undefined, ?CAT:table(bondy_registration)),
-        ?assertEqual(undefined, ?CAT:table(bondy_subscription)),
+        %% Registry tables (migrated, D-7) are provisioned in the ephemeral
+        %% `registry` DB, independently of the `oplog.catalog` flag.
+        ?assertMatch(
+            #{entity_type := bondy_registration, db_name := registry},
+            ?CAT:table(bondy_registration)
+        ),
+        ?assertMatch(
+            #{entity_type := bondy_subscription, db_name := registry},
+            ?CAT:table(bondy_subscription)
+        ),
         %% Fold → CRDT wiring: the membership table carries the aw_map CRDT;
         %% lww tables resolve to lww_register. (No mv table is provisioned —
         %% grants + sources were cut as lww per the CRDT-fork resolution.)
@@ -162,7 +206,7 @@ provision_all() ->
         %% info/0 summary.
         Info = ?CAT:info(),
         ?assertMatch(#{provision_all := true, core := #{kind := db}}, Info),
-        ?assertEqual(11, map_size(maps:get(tables, Info)))
+        ?assertEqual(12, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),
         reset_env(),
@@ -173,50 +217,164 @@ provision_all() ->
     ?assertEqual(undefined, ?CAT:core_db()),
     ?assertEqual(undefined, ?CAT:table(bondy_realm)).
 
-
 %% Default (flag off): only the migrated domains' tables (api_gateway,
 %% bondy_realm, bondy_bridge_relay, bondy_ticket, bondy_oauth_token,
 %% security_users, security_groups, security_user_grants, security_group_grants,
-%% security_sources) are opened; the core DB still comes up to host them, but
-%% not-yet-migrated tables stay shut.
+%% security_sources, retained_messages) are opened; the core DB still comes up
+%% to host them, but not-yet-migrated tables stay shut.
 migrated_only() ->
     Tmp = make_tmpdir(),
     set_env(false, 1, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     try
         ?assert(?CAT:is_open()),
-        ?assertMatch(#{entity_type := bondy_realm, db_name := core},
-            ?CAT:table(bondy_realm)),
-        ?assertMatch(#{entity_type := api_gateway, db_name := core},
-            ?CAT:table(api_gateway)),
-        ?assertMatch(#{entity_type := bondy_bridge_relay, db_name := core},
-            ?CAT:table(bondy_bridge_relay)),
-        ?assertMatch(#{entity_type := bondy_ticket, db_name := core},
-            ?CAT:table(bondy_ticket)),
-        ?assertMatch(#{entity_type := bondy_oauth_token, db_name := core},
-            ?CAT:table(bondy_oauth_token)),
-        ?assertMatch(#{entity_type := security_users, db_name := core},
-            ?CAT:table(security_users)),
-        ?assertMatch(#{entity_type := security_groups, db_name := core},
-            ?CAT:table(security_groups)),
-        ?assertMatch(#{entity_type := security_user_grants, db_name := core},
-            ?CAT:table(security_user_grants)),
-        ?assertMatch(#{entity_type := security_group_grants, db_name := core},
-            ?CAT:table(security_group_grants)),
-        ?assertMatch(#{entity_type := security_sources, db_name := core},
-            ?CAT:table(security_sources)),
+        ?assertMatch(
+            #{entity_type := bondy_realm, db_name := core},
+            ?CAT:table(bondy_realm)
+        ),
+        ?assertMatch(
+            #{entity_type := api_gateway, db_name := core},
+            ?CAT:table(api_gateway)
+        ),
+        ?assertMatch(
+            #{entity_type := bondy_bridge_relay, db_name := core},
+            ?CAT:table(bondy_bridge_relay)
+        ),
+        ?assertMatch(
+            #{entity_type := bondy_ticket, db_name := core},
+            ?CAT:table(bondy_ticket)
+        ),
+        ?assertMatch(
+            #{entity_type := bondy_oauth_token, db_name := core},
+            ?CAT:table(bondy_oauth_token)
+        ),
+        ?assertMatch(
+            #{entity_type := security_users, db_name := core},
+            ?CAT:table(security_users)
+        ),
+        ?assertMatch(
+            #{entity_type := security_groups, db_name := core},
+            ?CAT:table(security_groups)
+        ),
+        ?assertMatch(
+            #{entity_type := security_user_grants, db_name := core},
+            ?CAT:table(security_user_grants)
+        ),
+        ?assertMatch(
+            #{entity_type := security_group_grants, db_name := core},
+            ?CAT:table(security_group_grants)
+        ),
+        ?assertMatch(
+            #{entity_type := security_sources, db_name := core},
+            ?CAT:table(security_sources)
+        ),
+        ?assertMatch(
+            #{entity_type := retained_messages, db_name := core},
+            ?CAT:table(retained_messages)
+        ),
+        %% Registry tables (migrated, D-7) come up in the ephemeral `registry`
+        %% DB even with the `oplog.catalog` flag off.
+        ?assertMatch(
+            #{entity_type := bondy_registration, db_name := registry},
+            ?CAT:table(bondy_registration)
+        ),
+        ?assertMatch(
+            #{entity_type := bondy_subscription, db_name := registry},
+            ?CAT:table(bondy_subscription)
+        ),
         %% Not-yet-migrated core tables are NOT opened.
         %% security_group_members reverse-index stays dormant (members live on
         %% the user side until the oplog.aae phase) — the sole core table still
         %% on plum_db.
         ?assertEqual(undefined, ?CAT:table(security_group_members)),
-        ?assertMatch(#{provision_all := false, core := #{kind := db}}, ?CAT:info())
+        ?assertMatch(
+            #{provision_all := false, core := #{kind := db}}, ?CAT:info()
+        )
     after
         ok = stop_catalog(Pid),
         reset_env(),
         rmrf(Tmp)
     end.
 
+%% Drives the ephemeral `registry` table exactly as `bondy_registry_store`
+%% does — `entry_id` primary key, the `#{session_id, entry}` cell value, the
+%% `by_session` reverse index — asserting the storage swap's load-bearing
+%% behaviour end-to-end through the provisioned catalogue.
+registry_index() ->
+    Tmp = make_tmpdir(),
+    set_env(false, 1, Tmp),
+    {ok, Pid} = ?CAT:start_link(),
+    try
+        Table = ?CAT:table(bondy_registration),
+        ?assertMatch(#{db_name := registry}, Table),
+        Realm = <<"com.example">>,
+        S1 = <<"session-1">>,
+        S2 = <<"session-2">>,
+
+        %% Two entries for S1, one for S2, one session-less (undefined).
+        ok = put_entry(Table, Realm, 1, S1),
+        ok = put_entry(Table, Realm, 2, S1),
+        ok = put_entry(Table, Realm, 3, S2),
+        ok = put_entry(Table, Realm, 4, undefined),
+        ok = bondy_db:await_index(Table, by_session),
+
+        %% by_session resolves each session's primary keys (the entry_ids).
+        ?assertEqual([1, 2], session_ids(Table, Realm, S1)),
+        ?assertEqual([3], session_ids(Table, Realm, S2)),
+        %% A session-less (undefined) entry is stored but NOT indexed (the index
+        %% skips an undefined term), so it appears under no session — the store
+        %% resolves such entries via a realm scan, never `index_get`.
+        ?assertMatch(
+            {ok, {#{session_id := undefined}, _}},
+            bondy_db:read(Table, Realm, dbkey(4))
+        ),
+        ?assertNot(lists:member(4, session_ids(Table, Realm, S1))),
+        ?assertNot(lists:member(4, session_ids(Table, Realm, S2))),
+
+        %% Point read returns the wrapped cell value verbatim.
+        ?assertMatch(
+            {ok, {#{session_id := S1, entry := {fake, 1}}, _Hlc}},
+            bondy_db:read(Table, Realm, dbkey(1))
+        ),
+
+        %% Clearing an entry drops it from the primary AND every index order.
+        ok = bondy_db:apply(Table, Realm, dbkey(1), clear),
+        ok = bondy_db:await_index(Table, by_session),
+        ?assertEqual({error, not_found}, bondy_db:read(Table, Realm, dbkey(1))),
+        ?assertEqual([2], session_ids(Table, Realm, S1)),
+
+        %% Realm isolation: the memory topology buckets by realm, so the same
+        %% entry_id in another realm is an independent cell, and the by_session
+        %% index restricts to the queried realm.
+        Realm2 = <<"com.other">>,
+        ok = put_entry(Table, Realm2, 2, S2),
+        ok = bondy_db:await_index(Table, by_session),
+        ?assertMatch(
+            {ok, {#{entry := {fake, 2}}, _}},
+            bondy_db:read(Table, Realm, dbkey(2))
+        ),
+        ?assertEqual([2], session_ids(Table, Realm2, S2)),
+        ?assertEqual([], session_ids(Table, Realm2, S1))
+    after
+        ok = stop_catalog(Pid),
+        reset_env(),
+        rmrf(Tmp)
+    end.
+
+%% @private
+put_entry(Table, Realm, EntryId, SessionId) ->
+    Value = #{session_id => SessionId, entry => {fake, EntryId}},
+    bondy_db:apply(Table, Realm, dbkey(EntryId), {set, Value}).
+
+%% @private
+dbkey(EntryId) ->
+    term_to_binary(EntryId).
+
+%% @private
+%% The entry_ids (decoded primary keys) a session indexes to, sorted.
+session_ids(Table, Realm, SessionId) ->
+    {ok, Hits} = bondy_db:index_get(Table, Realm, by_session, SessionId, #{}),
+    lists:sort([binary_to_term(PKey) || {PKey, _Cols} <- Hits]).
 
 %% =============================================================================
 %% Helpers
@@ -260,6 +418,9 @@ await(_Pred, 0) ->
     false;
 await(Pred, N) ->
     case Pred() of
-        true -> true;
-        false -> timer:sleep(10), await(Pred, N - 1)
+        true ->
+            true;
+        false ->
+            timer:sleep(10),
+            await(Pred, N - 1)
     end.

@@ -3,26 +3,25 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_namespace_catalog).
 -behaviour(gen_server).
 -moduledoc """
 The single declaration point for Bondy's `bondy_db` databases and tables —
-the `bondy_db` analogue of `bondy_plum_db.hrl`'s `?PLUM_DB_PREFIXES` — and the
+the `bondy_db` analogue of `bondy_db_tables.hrl`'s `?BONDY_DB_PREFIXES` — and the
 owner process for the durable `core` database.
 
 Two databases are declared:
 
 - **`core`** — durable (`bondy_db_topology_shared_shards` over leveled),
-  holding the eleven security / realm / gateway / token / bridge tables.
+  holding the twelve security / realm / gateway / token / bridge / retention
+  tables.
 - **`registry`** — ephemeral (`bondy_db_topology_memory`, ETS), holding the
-  two routing tables. Declared here but **not opened** until the registry
-  domain cuts over (design §11.4); its ephemeral knobs are recorded so the
-  open is a one-liner.
+  two routing tables (registrations / subscriptions).
 
-The table names mirror the `bondy_plum_db.hrl` prefixes (plus the net-new
+The table names mirror the `bondy_db_tables.hrl` prefixes (plus the net-new
 `security_group_members` split table, design §3 — group membership lives in its
-own `aw_map` table rather than inline in `security_groups`). Each table records
+own `aw_map` table rather than inline in `security_groups` — and
+`retained_messages`, which had no `?BONDY_DB_*` macro). Each table records
 the `shard_by` strategy mapped from plum_db's `prefix|key` onto the new
 `realm|key` model (design D-2: `prefix → realm`, `key → key`) and a fold class
 (`lww | mv | aw | presence`, design §11.3). `shard_by` is **metadata**
@@ -41,8 +40,9 @@ Not-yet-migrated tables stay on `plum_db` and are not opened — unless
 before its cut-over). So a default node opens exactly the migrated tables
 (currently `bondy_realm`, `api_gateway`, `bondy_bridge_relay`, `bondy_ticket`,
 `bondy_oauth_token`, `security_users`, `security_groups`,
-`security_user_grants`, `security_group_grants` and `security_sources`)
-and serves every other read from `plum_db`.
+`security_user_grants`, `security_group_grants`, `security_sources` and
+`retained_messages` in `core`, plus `bondy_registration` / `bondy_subscription`
+in `registry`) and serves every other read from `plum_db`.
 
 ## Lifecycle
 
@@ -64,12 +64,12 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 
 -include_lib("kernel/include/logger.hrl").
 
--include("bondy_plum_db.hrl").
-
+-include("bondy_db_tables.hrl").
 
 -define(PT_DB(Name), {?MODULE, db, Name}).
 -define(PT_TABLE(Name), {?MODULE, table, Name}).
 -define(DEFAULT_CORE_SHARD_COUNT, 16).
+-define(DEFAULT_REGISTRY_SHARD_COUNT, 16).
 
 %% The native CRDTs that have no short fold alias in `bondy_oplog_cell_kernel`
 %% (`mv_register` for grants / sources, `aw_map` for group membership). They are
@@ -78,13 +78,14 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 -define(MV_CRDT, bondy_oplog_crdt_mv_register).
 -define(AW_CRDT, bondy_oplog_crdt_aw_map).
 
-
 -record(state, {
-    db                      ::  bondy_db:db() | undefined,
-    leveled_sup             ::  pid() | undefined,
-    dir                     ::  file:filename_all() | undefined
+    db :: bondy_db:db() | undefined,
+    leveled_sup :: pid() | undefined,
+    dir :: file:filename_all() | undefined,
+    %% The ephemeral `registry` DB (memory topology — no leveled sup / dir),
+    %% provisioned alongside `core` when its tables are migrated (D-7).
+    registry_db :: bondy_db:db() | undefined
 }).
-
 
 -type fold_class() :: lww | mv | aw | presence.
 -type shard_strategy() :: realm | key.
@@ -115,6 +116,7 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 -export([info/0]).
 -export([is_open/0]).
 -export([provision_all/0]).
+-export([registry_db/0]).
 -export([registry_db_spec/0]).
 -export([start_link/0]).
 -export([table/1]).
@@ -127,13 +129,9 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 -export([handle_info/2]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Starts the catalogue process (a `bondy_sup` child).".
 -spec start_link() -> {ok, pid()} | {error, term()}.
@@ -141,10 +139,9 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-
 -doc """
-Returns the declarative specs for all twelve tables (both DBs), mirroring the
-`bondy_plum_db.hrl` prefixes. The single source of truth for the catalogue.
+Returns the declarative specs for all fourteen tables (both DBs), mirroring the
+`bondy_db_tables.hrl` prefixes. The single source of truth for the catalogue.
 """.
 -spec tables() -> [table_spec()].
 
@@ -156,20 +153,45 @@ tables() ->
         %% band (the empty binary) keyed by its Uri, so `shard_by => key`
         %% (NOT realm — a constant band under realm-sharding would put every
         %% realm on one shard) spreads realms across shards while a single
-        %% `bondy_db:list/2` over the band scatter-scans them all. Storage-only
-        %% (no `publish`): local lifecycle is inline in bondy_realm, the remote
-        %% delete→close is deferred to oplog.aae.
-        #{name => ?PLUM_DB_REALM_TAB,        db => core, durability => durable, shard_by => key,   fold => lww, migrated => true},
+        %% `bondy_db:list/2` over the band scatter-scans them all. Local
+        %% lifecycle is inline in bondy_realm; `publish => true` wires the remote
+        %% on_merge seam so a peer's realm delete closes this node's sessions for
+        %% that realm (the reactor is `bondy_aae_reactor`).
+        #{
+            name => ?BONDY_DB_REALM_TAB,
+            db => core,
+            durability => durable,
+            shard_by => key,
+            fold => lww,
+            migrated => true,
+            publish => true
+        },
         %% security_users — fifth domain cut over to bondy_db (§11.4): always
-        %% provisioned, storage-only (no `publish`). Its local lifecycle
-        %% side-effects fire inline in bondy_rbac_user; the remote on_merge
-        %% session-close is deferred to the oplog.aae phase (a publish/reactor
-        %% seam then).
-        #{name => ?PLUM_DB_USER_TAB,         db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, indexes => user_indexes()},
+        %% provisioned. Local lifecycle side-effects fire inline in
+        %% bondy_rbac_user; `publish => true` wires the remote on_merge seam so
+        %% a peer's user delete / credential change closes this node's sessions
+        %% for that user (the reactor is `bondy_rbac_user`'s merge handler).
+        #{
+            name => ?BONDY_DB_USER_TAB,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true,
+            publish => true,
+            indexes => user_indexes()
+        },
         %% security_groups — sixth domain cut over to bondy_db (§11.4): always
         %% provisioned, storage-only (no `publish`). Local lifecycle events fire
         %% inline in bondy_rbac_group; on_merge was a no-op.
-        #{name => ?PLUM_DB_GROUP_TAB,        db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        #{
+            name => ?BONDY_DB_GROUP_TAB,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true
+        },
         %% security_group_members — net-new split table (no plum_db prefix).
         %% The reverse membership READ path ("which users are in group G") is
         %% NOT this table: it is the substrate-maintained `by_group` secondary
@@ -179,7 +201,13 @@ tables() ->
         %% forward membership relation (the `user.groups` → aw_map split, design
         %% §3 table 5b / D-R1) — its `aw` fold (observed-remove) only matters
         %% under concurrent multi-node member edits, which need AAE (off today).
-        #{name => security_group_members,    db => core, durability => durable, shard_by => realm, fold => aw},
+        #{
+            name => security_group_members,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => aw
+        },
         %% security_{group,user}_grants — seventh domain cut over to bondy_db
         %% (§11.4): always provisioned, storage-only (no `publish` — grants carry
         %% no lifecycle side-effects). Declared `mv` (sibling-preserving) but cut
@@ -191,8 +219,24 @@ tables() ->
         %% "grants for role" query is a bounded role-band range scan; the
         %% `by_resource` index (piece #2) provides the equality reverse lookup
         %% "grants on resource R" (see `grant_indexes/0`).
-        #{name => ?PLUM_DB_GROUP_GRANT_TAB,  db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, indexes => grant_indexes()},
-        #{name => ?PLUM_DB_USER_GRANT_TAB,   db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, indexes => grant_indexes()},
+        #{
+            name => ?BONDY_DB_GROUP_GRANT_TAB,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true,
+            indexes => grant_indexes()
+        },
+        #{
+            name => ?BONDY_DB_USER_GRANT_TAB,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true,
+            indexes => grant_indexes()
+        },
         %% security_sources — eighth domain cut over to bondy_db (§11.4):
         %% storage-only, same lww-defer as grants (declared mv → cut lww;
         %% honouring mv deferred to oplog.aae). The compound `{Username, AMask,
@@ -201,31 +245,110 @@ tables() ->
         %% match (on the auth path) is a bounded username-band range scan. The
         %% reverse by-mask lookup is deferred (the stored `cidr` differs from the
         %% key's anchor-mask, and CIDR matching is containment, not equality).
-        #{name => ?PLUM_DB_SOURCE_TAB,       db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        #{
+            name => ?BONDY_DB_SOURCE_TAB,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true
+        },
         %% api_gateway — first domain cut over to bondy_db (§11.4): always
         %% provisioned, and publishes change events so the cowboy-dispatch
         %% reactor rebuilds on local + AE-replicated spec writes.
-        #{name => api_gateway,               db => core, durability => durable, shard_by => realm, fold => lww, migrated => true, publish => true},
+        #{
+            name => api_gateway,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true,
+            publish => true
+        },
         %% ticket / oauth_token shard by key — creation + point lookup are
         %% prioritised over listing / range (mirrors the plum_db rationale).
         %% Third/fourth domains cut over to bondy_db (§11.4): always provisioned,
         %% storage-only (no `publish` — revocation is inline, design D-3; nothing
         %% subscribes to ticket/token changes).
-        #{name => ?PLUM_DB_TICKET_TAB,       db => core, durability => durable, shard_by => key,   fold => lww, migrated => true},
-        #{name => ?PLUM_DB_OAUTH_TOKEN_TAB,  db => core, durability => durable, shard_by => key,   fold => lww, migrated => true},
+        #{
+            name => ?BONDY_DB_TICKET_TAB,
+            db => core,
+            durability => durable,
+            shard_by => key,
+            fold => lww,
+            migrated => true
+        },
+        #{
+            name => ?BONDY_DB_OAUTH_TOKEN_TAB,
+            db => core,
+            durability => durable,
+            shard_by => key,
+            fold => lww,
+            migrated => true
+        },
         %% bridge_relay — second domain cut over to bondy_db (§11.4): always
         %% provisioned. Storage-only (no `publish`): bridge config has no
         %% change reactor — `bondy_bridge_relay_manager` reads it once at boot
         %% and runs only its OWN node's bridges (`nodestring` filter), so it
         %% needs no cluster-wide change notification.
-        #{name => bondy_bridge_relay,        db => core, durability => durable, shard_by => realm, fold => lww, migrated => true},
+        #{
+            name => bondy_bridge_relay,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true
+        },
+        %% retained_messages — WAMP retained-event store cut over to bondy_db
+        %% (§11.4). A DURABLE core table regardless of the legacy
+        %% `wamp.message_retention.storage_type` knob (now inert): the operator
+        %% decision is that retained messages always survive a restart. Always
+        %% provisioned — the feature is gated per-publish by the `retain`
+        %% option, not at provisioning. Storage-only `lww`: the per-realm count
+        %% / memory counters are maintained inline at the local write sites; the
+        %% remote-replication counter sync (the retired plum_db `object_update`
+        %% subscription) is deferred to the oplog.aae phase. Keyed by Topic and
+        %% matched via key-ordered `range_all/5` prefix / wildcard scans (no
+        %% secondary index).
+        #{
+            name => retained_messages,
+            db => core,
+            durability => durable,
+            shard_by => realm,
+            fold => lww,
+            migrated => true
+        },
 
-        %% registry — ephemeral (ETS, memory topology); opened at §11.4. The
-        %% fold is the presence-FSM, co-designed with the routing redesign (D-7).
-        #{name => ?PLUM_DB_REGISTRATION_TAB, db => registry, durability => ephemeral, shard_by => realm, fold => presence},
-        #{name => ?PLUM_DB_SUBSCRIPTION_TAB, db => registry, durability => ephemeral, shard_by => realm, fold => presence}
+        %% registry — tenth / last domain cut over to bondy_db (§11.4 / D-7):
+        %% ephemeral (ETS projection, mem WAL, memory topology — NO durable or
+        %% disk-backed storage, exactly like the plum_db `type => ram` tables it
+        %% replaces), provisioned when migrated. Storage-only and cut as `lww`:
+        %% the presence-FSM fold, SUSPEND/RESUME/EVICT and the remote change
+        %% reactor (replacing the plum_db `on_merge`) are deferred to the
+        %% oplog.aae phase — with AAE off there are no remote entries, so the
+        %% merge machinery is inert. The durable key is the random realm-unique
+        %% `entry_id`; the `by_session` index (registry_indexes/0) serves
+        %% session-close cleanup (`remove_all`) as a bounded reverse lookup
+        %% instead of a realm scan.
+        #{
+            name => ?BONDY_DB_REGISTRATION_TAB,
+            db => registry,
+            durability => ephemeral,
+            shard_by => realm,
+            fold => lww,
+            migrated => true,
+            indexes => registry_indexes()
+        },
+        #{
+            name => ?BONDY_DB_SUBSCRIPTION_TAB,
+            db => registry,
+            durability => ephemeral,
+            shard_by => realm,
+            fold => lww,
+            migrated => true,
+            indexes => registry_indexes()
+        }
     ].
-
 
 -doc """
 The `core` DB declaration: durable shared-shards over leveled, with a
@@ -241,7 +364,6 @@ core_db_spec() ->
         shard_count => core_shard_count()
     }.
 
-
 -doc """
 The `registry` DB declaration: ephemeral ETS, with the four explicit knobs
 that pin the whole stack in-memory and avoid the disk-WAL footgun (design
@@ -254,6 +376,7 @@ registry_db_spec() ->
         name => registry,
         topology => bondy_db_topology_memory,
         durability => ephemeral,
+        shard_count => registry_shard_count(),
         %% The four ephemeral knobs, applied per-table at open time (§11.4).
         table_opts => #{
             projection_backend => ets,
@@ -265,7 +388,6 @@ registry_db_spec() ->
             fused => true
         }
     }.
-
 
 -doc """
 The `bondy_db:open_table/3` options that wire a table's fold class to its
@@ -299,13 +421,17 @@ fold_opts(presence) ->
     %% (design §11.4 / D-7); registry tables are not opened yet.
     error({not_yet_supported, presence}).
 
-
 -doc "The published `core` DB handle, or `undefined` when not open.".
 -spec core_db() -> bondy_db:db() | undefined.
 
 core_db() ->
     persistent_term:get(?PT_DB(core), undefined).
 
+-doc "The published ephemeral `registry` DB handle, or `undefined`.".
+-spec registry_db() -> bondy_db:db() | undefined.
+
+registry_db() ->
+    persistent_term:get(?PT_DB(registry), undefined).
 
 -doc "The published handle for table `Name`, or `undefined` when not open.".
 -spec table(Name :: atom()) -> bondy_db:table() | undefined.
@@ -313,13 +439,11 @@ core_db() ->
 table(Name) when is_atom(Name) ->
     persistent_term:get(?PT_TABLE(Name), undefined).
 
-
 -doc "Whether the `core` DB has been provisioned and published.".
 -spec is_open() -> boolean().
 
 is_open() ->
     core_db() =/= undefined.
-
 
 -doc """
 Whether the `oplog.catalog` flag is set, i.e. whether ALL declared core tables
@@ -330,7 +454,6 @@ are provisioned (not just the migrated ones). Off by default.
 provision_all() ->
     application:get_env(bondy_router, oplog_catalog_enabled, false) =:= true.
 
-
 -doc """
 A summary of the catalogue: the `provision_all` flag, the `core` DB info and
 each core table's `bondy_db:info/1` (or `not_open`).
@@ -340,63 +463,86 @@ each core table's `bondy_db:info/1` (or `not_open`).
 info() ->
     #{
         provision_all => provision_all(),
-        core => case core_db() of
-            undefined -> not_open;
-            Db -> bondy_db:info(Db)
-        end,
+        core =>
+            case core_db() of
+                undefined -> not_open;
+                Db -> bondy_db:info(Db)
+            end,
         tables => maps:from_list([
             {Name, table_info(Name)}
          || #{name := Name, db := core} <- tables()
         ])
     }.
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-
-
 init([]) ->
-    %% Trap exits so terminate/2 runs on supervised shutdown (to close the DB)
+    %% Trap exits so terminate/2 runs on supervised shutdown (to close the DBs)
     %% and so a leveled-sup crash surfaces as an EXIT message we can act on.
     process_flag(trap_exit, true),
+    %% Provision the durable `core` and the ephemeral `registry` DBs
+    %% independently — either may be idle (no migrated tables) without
+    %% affecting the other.
+    State0 = open_core_into(#state{}),
+    State = open_registry_into(State0),
+    {ok, State}.
+
+%% @private
+open_core_into(State) ->
     case specs_to_open() of
         [] ->
-            %% No migrated domains and the `oplog.catalog` flag off — nothing
-            %% to provision; every read still flows through plum_db.
+            %% No migrated core domains and the `oplog.catalog` flag off —
+            %% nothing to provision; every such read still flows through plum_db.
             ?LOG_NOTICE(#{
                 description =>
                     "bondy_db namespace catalogue idle; no core tables to "
                     "provision (reads continue via plum_db)"
             }),
-            {ok, #state{}};
+            State;
         Specs ->
             case do_open_core(Specs) of
                 {ok, Db, Sup, Dir} ->
-                    {ok, #state{db = Db, leveled_sup = Sup, dir = Dir}};
+                    State#state{db = Db, leveled_sup = Sup, dir = Dir};
                 {error, Reason} ->
                     %% Don't brick the node over a migration feature — log
-                    %% loudly and start idle (is_open/0 stays false).
+                    %% loudly and leave core idle (is_open/0 stays false).
                     ?LOG_ERROR(#{
                         description =>
                             "Failed to provision bondy_db core tables; "
-                            "catalogue starting idle",
+                            "catalogue starting with core idle",
                         reason => Reason
                     }),
-                    {ok, #state{}}
+                    State
             end
     end.
 
+%% @private
+open_registry_into(State) ->
+    case registry_specs_to_open() of
+        [] ->
+            State;
+        Specs ->
+            case do_open_registry(Specs) of
+                {ok, Db} ->
+                    State#state{registry_db = Db};
+                {error, Reason} ->
+                    ?LOG_ERROR(#{
+                        description =>
+                            "Failed to provision bondy_db registry tables; "
+                            "catalogue starting with registry idle",
+                        reason => Reason
+                    }),
+                    State
+            end
+    end.
 
 handle_call(_Request, _From, State) ->
     {reply, {error, badcall}, State}.
 
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
-
 
 handle_info({'EXIT', Sup, Reason}, #state{leveled_sup = Sup} = State) ->
     %% Our leveled sup died — stop so bondy_sup restarts us and re-opens.
@@ -405,22 +551,17 @@ handle_info({'EXIT', Sup, Reason}, #state{leveled_sup = Sup} = State) ->
         reason => Reason
     }),
     {stop, {leveled_sup_died, Reason}, State#state{leveled_sup = undefined}};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
-
-terminate(_Reason, #state{db = Db, leveled_sup = Sup}) ->
+terminate(_Reason, #state{db = Db, leveled_sup = Sup, registry_db = RegistryDb}) ->
     _ = close_core(Db, Sup),
+    _ = close_registry(RegistryDb),
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 %% The core table specs to provision at boot: the migrated ones always, plus
@@ -432,6 +573,12 @@ specs_to_open() ->
         false -> [S || S <- Core, maps:get(migrated, S, false)]
     end.
 
+%% @private
+%% The registry table specs to provision at boot: the migrated ones. The
+%% `oplog.catalog` flag gates only the durable core tables, not the ephemeral
+%% registry — it comes up exactly when its tables carry `migrated => true`.
+registry_specs_to_open() ->
+    [S || #{db := registry} = S <- tables(), maps:get(migrated, S, false)].
 
 %% @private
 do_open_core(Specs) ->
@@ -474,6 +621,43 @@ do_open_core(Specs) ->
             Err
     end.
 
+%% @private
+%% Provision the ephemeral `registry` DB (memory topology — no leveled sup or
+%% on-disk dir) and its migrated tables. The per-table ephemeral knobs
+%% (projection_backend / oplog_instance_opts / fused) ride in via `table_opts/1`
+%% from `registry_db_spec/0`.
+do_open_registry(Specs) ->
+    Spec = registry_db_spec(),
+    ShardCount = maps:get(shard_count, Spec),
+    DbOpts = #{
+        topology => maps:get(topology, Spec),
+        shard_count => ShardCount,
+        %% DB default fold (lww); the memory topology hosts the ETS projection.
+        fold_module => lww_register,
+        %% Pin the WAL in-memory at the DB level too; the per-table
+        %% `oplog_instance_opts` (registry_db_spec/0) carry the full ephemeral
+        %% knobs and replace this at open_table time.
+        oplog_instance_opts => #{wal_backend => mem, durability => ephemeral}
+    },
+    case bondy_db:open(registry, DbOpts) of
+        {ok, Db} ->
+            ok = put_db(registry, Db),
+            case open_tables(Db, Specs) of
+                ok ->
+                    ?LOG_NOTICE(#{
+                        description => "bondy_db registry tables provisioned",
+                        count => length(Specs),
+                        tables => [maps:get(name, S) || S <- Specs],
+                        shard_count => ShardCount
+                    }),
+                    {ok, Db};
+                {error, _} = Err ->
+                    _ = close_registry(Db),
+                    Err
+            end;
+        {error, _} = Err ->
+            Err
+    end.
 
 %% @private
 open_tables(_Db, []) ->
@@ -487,7 +671,6 @@ open_tables(Db, [#{name := Name} = Spec | Rest]) ->
             Err
     end.
 
-
 %% @private
 %% Closes every open core table, the DB, and the leveled sup; clears the
 %% published handles. Tolerant of partial state (any of Db / Sup undefined).
@@ -500,15 +683,35 @@ close_core(Db, Sup) ->
      || #{name := Name, db := core} <- tables(),
         (T = table(Name)) =/= undefined
     ],
-    _ = case Db of
-        undefined -> ok;
-        _ ->
-            _ = catch bondy_db:close(Db),
-            persistent_term:erase(?PT_DB(core))
-    end,
+    _ =
+        case Db of
+            undefined ->
+                ok;
+            _ ->
+                _ = catch bondy_db:close(Db),
+                persistent_term:erase(?PT_DB(core))
+        end,
     _ = stop_sup(Sup),
     ok.
 
+%% @private
+%% Closes every open registry table and the registry DB; clears the published
+%% handles. The memory topology owns no leveled sup / on-disk dir, so this is
+%% simpler than close_core/2. Tolerant of `undefined` (registry idle).
+close_registry(undefined) ->
+    ok;
+close_registry(Db) ->
+    _ = [
+        begin
+            _ = catch bondy_db:close_table(T),
+            _ = persistent_term:erase(?PT_TABLE(Name))
+        end
+     || #{name := Name, db := registry} <- tables(),
+        (T = table(Name)) =/= undefined
+    ],
+    _ = catch bondy_db:close(Db),
+    _ = persistent_term:erase(?PT_DB(registry)),
+    ok.
 
 %% @private
 stop_sup(undefined) ->
@@ -516,7 +719,6 @@ stop_sup(undefined) ->
 stop_sup(Sup) when is_pid(Sup) ->
     catch bondy_db_leveled_sup:stop(Sup),
     ok.
-
 
 %% @private
 %% Maps a table spec to its `bondy_db:open_table/3` opts: the fold→CRDT wiring
@@ -530,10 +732,53 @@ table_opts(#{fold := Class} = Spec) ->
             true -> Opts0#{publish => true};
             false -> Opts0
         end,
-    case maps:get(indexes, Spec, []) of
-        [] -> Opts1;
-        Indexes -> Opts1#{indexes => Indexes}
-    end.
+    Opts2 =
+        case maps:get(indexes, Spec, []) of
+            [] -> Opts1;
+            Indexes -> Opts1#{indexes => Indexes}
+        end,
+    maybe_ephemeral_opts(Spec, Opts2).
+
+%% @private
+%% Registry (ephemeral, memory-topology) tables carry the in-RAM projection /
+%% WAL knobs at the DB-spec level (registry_db_spec/0); merge them under the
+%% fold + index opts (the key sets are disjoint). Core tables pass through.
+maybe_ephemeral_opts(#{db := registry}, Opts) ->
+    maps:merge(maps:get(table_opts, registry_db_spec()), Opts);
+maybe_ephemeral_opts(#{db := core, durability := durable}, Opts) ->
+    %% Make each durable core table's per-shard WAL + MST pack durable, rooted
+    %% under the data dir (collocated with the leveled projection) instead of
+    %% the ephemeral `/tmp` fallback (which abandons fsynced frames on restart
+    %% and keeps no MST pack on disk). Without this the DB-level
+    %% `durability => durable` never reaches the oplog instances.
+    %%
+    %% The MST pack store (`storage_path`) and the WAL (`wal_dir`) live in their
+    %% own sibling subtrees alongside the leveled `core' dir — see
+    %% `bondy_db_dir/0`. An explicit `wal_dir` (rather than letting the WAL
+    %% default to a `wal/' dir *under* the pack instance dir) keeps the WAL leaf
+    %% at `wal/<InstanceId>' (`wal/core/<ET>/<Shard>') instead of the doubly
+    %% nested `mst/.../<InstanceId>/wal/<InstanceId>'. The pack store keeps the
+    %% default `sharded' path layout (`mst/<hash>/<hash>/<InstanceId>'); `flat'
+    %% is unsafe here because the slash-bearing `InstanceId' makes the
+    %% pack-store's shard-dir derivation double-nest the pack away from its
+    %% manifest.
+    %%
+    %% `seed => true` starts each instance live as a genesis peer and writes a
+    %% durable `lifecycle.live` flag that survives restart. A fresh persistent
+    %% instance with the default `seed => false` would instead block in
+    %% `pre_bootstrap` waiting for a live peer to bootstrap from — which a single
+    %% node never has. Under multi-node AAE every node genesis-seeds and the lww
+    %% merge reconciles their cells (proven by `bondy_aae_cluster_SUITE`).
+    Opts#{
+        oplog_instance_opts => #{
+            backend => bondy_mst_pack_store,
+            storage_path => core_mst_dir(),
+            wal_dir => core_wal_dir(),
+            seed => true
+        }
+    };
+maybe_ephemeral_opts(_Spec, Opts) ->
+    Opts.
 
 %% @private
 %% The `security_users` secondary indexes.
@@ -553,7 +798,6 @@ table_opts(#{fold := Class} = Spec) ->
 user_indexes() ->
     [#{name => by_group, extract => [groups]}].
 
-
 %% @private
 %% The equality reverse index for grants (piece #2): "which roles have a grant
 %% on resource R". The grant cell value is the fact map
@@ -568,6 +812,18 @@ user_indexes() ->
 grant_indexes() ->
     [#{name => by_resource, extract => [resource], normalize => canonical}].
 
+%% @private
+%% The registry's reverse access path for session-close cleanup (D-7): "which
+%% entries belong to session S". The registry cell value is the thin fact map
+%% `#{session_id => SId, entry => Entry}` (the `#entry{}` record preserved
+%% verbatim under `entry`, with `session_id` denormalised to the top level
+%% precisely so this pointer-only index can extract it). `bondy_registry`'s
+%% `remove_all/_` resolves a session's entries through `bondy_db:index_get/5`
+%% (bounded) instead of a realm scan + filter. A session-less entry (callback /
+%% internal registration, `session_id => undefined`) yields no index entry —
+%% correct, since session-close never targets it.
+registry_indexes() ->
+    [#{name => by_session, extract => [session_id]}].
 
 %% @private
 table_info(Name) ->
@@ -576,25 +832,50 @@ table_info(Name) ->
         Table -> bondy_db:info(Table)
     end.
 
-
 %% @private
 core_shard_count() ->
     application:get_env(
         bondy_router, oplog_core_shard_count, ?DEFAULT_CORE_SHARD_COUNT
     ).
 
+%% @private
+registry_shard_count() ->
+    application:get_env(
+        bondy_router, oplog_registry_shard_count, ?DEFAULT_REGISTRY_SHARD_COUNT
+    ).
+
+%% @private
+%% Root of the on-disk layout for all bondy_db data, configurable via the
+%% `platform_data_dir' schema knob. The durable `core' DB keeps its three
+%% storage components in sibling subtrees under here:
+%%
+%%   <data>/bondy_db/core   leveled projection      (shards `core/0'..`core/N')
+%%   <data>/bondy_db/mst    MST pack store          (`mst/<InstanceId>/...')
+%%   <data>/bondy_db/wal    write-ahead log         (`wal/<InstanceId>/...')
+%%
+%% with `InstanceId = core/<EntityType>/<Shard>'. `mst' and `wal' are siblings
+%% of `core' (not nested under it), and `path_layout => flat' keeps each leaf at
+%% `<base>/core/<ET>/<Shard>' rather than under opaque hash dirs.
+bondy_db_dir() ->
+    DataDir = application:get_env(bondy_router, platform_data_dir, "data"),
+    filename:join([DataDir, "bondy_db"]).
 
 %% @private
 core_dir() ->
-    DataDir = application:get_env(bondy_router, platform_data_dir, "data"),
-    filename:join([DataDir, "bondy_db", "core"]).
+    filename:join([bondy_db_dir(), "core"]).
 
+%% @private
+core_mst_dir() ->
+    unicode:characters_to_binary(filename:join([bondy_db_dir(), "mst"])).
+
+%% @private
+core_wal_dir() ->
+    unicode:characters_to_binary(filename:join([bondy_db_dir(), "wal"])).
 
 %% @private
 put_db(Name, Db) ->
     persistent_term:put(?PT_DB(Name), Db),
     ok.
-
 
 %% @private
 put_table(Name, Table) ->

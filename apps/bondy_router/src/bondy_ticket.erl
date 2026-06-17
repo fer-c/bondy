@@ -133,7 +133,7 @@ WAMP permission required to call the procedures.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
 -define(NOW, erlang:system_time(second)).
@@ -428,7 +428,10 @@ Revokes all tickets issued to all users in realm `RealmUri`.
 revoke_all(RealmUri) when is_binary(RealmUri) ->
     Table = table(),
     {ok, Rows} = bondy_db:list(Table, RealmUri),
-    _ = [bondy_db:apply(Table, RealmUri, Key, clear) || {Key, _V, _Hlc} <- Rows],
+    _ = [
+        bondy_db:apply(Table, RealmUri, Key, clear)
+     || {Key, _V, _Hlc} <- Rows
+    ],
     ok.
 
 -doc """
@@ -464,49 +467,9 @@ the scope `Scope`.
 ) -> ok.
 
 revoke_all(_RealmUri, _Authid, _Scope) ->
-    % Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
-    % Key = store_key(Authid, Scope),
-    % Realm = maps:get(realm, Scope, undefined),
-    % InstanceId = maps:get(device_id, Scope, undefined),
-
-    % Fun = fun
-    %     ({_, ?TOMBSTONE}) ->
-    %         ok;
-    %     ({K, Claims}) when K == Key andalso is_map(Claims)->
-    %         plum_db:delete(Prefix, Key);
-    %     ({K, L0}) when K == Key andalso is_list(L0) ->
-    %         %% List :: [t()]
-    %         LKey = list_key(Scope),
-    %         case lists:keyfind(LKey, 1, List) of
-    %             {LKey, Claims} ->
-    %                 {ok, Claims};
-    %             error ->
-    %                 {error, not_found}
-    %         end
-    %         plum_db:update(Prefix, Key, L1);
-    %     (_) ->
-    %         ok
-    % end,
-    % %% We use ticket resolver as we want to preserve the per client ticket list
-    % plum_db:foreach(Fun, Prefix, [{resolver, ticket_resolver/2}]).
     error(not_implemented).
 
 remove_expired() ->
-    % Prefix = {?PLUM_DB_TICKET_TAB, '_'},
-    % Fun = fun
-    %     ({{Prefix, Key}, O}, ok) ->
-    %         %% fold_elements does not currently respect opts, so we manually
-    %         %% resolve
-    %         case plum_db_object:values(plum_db_object:resolve(O, lww)) of
-    %             ['$deleted'] ->
-    %                 ok;
-    %             [Val] ->
-    %                 plum_db:delete(Prefix, Key)
-    %         end
-    % end,
-    % Opts = [],
-    % plum_db:fold_elements(Fun, ok, Prefix, Opts).
-
     ok.
 
 -doc """
@@ -533,7 +496,9 @@ update_claims(AuthRealmUri, Authid, UpdateFun) when
             {error, not_found};
         {ok, {Claims, _Hlc}} when is_map(Claims) ->
             UpdatedClaims = UpdateFun(Claims),
-            ok = bondy_db:apply(Table, AuthRealmUri, EncKey, {set, UpdatedClaims});
+            ok = bondy_db:apply(
+                Table, AuthRealmUri, EncKey, {set, UpdatedClaims}
+            );
         {ok, {_List, _Hlc}} ->
             %% For list-type entries (client-scoped), not supported for OIDC
             {error, not_found}
@@ -797,7 +762,7 @@ is_expired(#{expires_at := Exp}) ->
 %% (the catalogue, a `bondy_sup` child, opens it at boot, well before any auth
 %% flow issues or revokes a ticket).
 table() ->
-    case bondy_namespace_catalog:table(?PLUM_DB_TICKET_TAB) of
+    case bondy_namespace_catalog:table(?BONDY_DB_TICKET_TAB) of
         undefined -> error(ticket_table_unavailable);
         Table -> Table
     end.

@@ -248,7 +248,7 @@ async_handle_event(
         bondy_broker:publish(ReqId, #{}, Topic, [Username, Meta], #{}, Ctxt)
     end,
     {ok, {Fun, RealmUri}};
-async_handle_event({[bondy, backup, Type], #{filename := File}}, Ref) when
+async_handle_event({[bondy, export, Type], #{filename := File}}, Ref) when
     Type == start; Type == stop; Type == exception
 ->
     Fun = fun() ->
@@ -257,15 +257,15 @@ async_handle_event({[bondy, backup, Type], #{filename := File}}, Ref) when
         Ctxt = bondy_context:local_context(?MASTER_REALM_URI, Ref),
         Topic =
             case Type of
-                start -> ?BONDY_BACKUP_STARTED;
-                stop -> ?BONDY_BACKUP_FINISHED;
-                exception -> ?BONDY_BACKUP_FAILED
+                start -> ?BONDY_EXPORT_STARTED;
+                stop -> ?BONDY_EXPORT_FINISHED;
+                exception -> ?BONDY_EXPORT_FAILED
             end,
         bondy_broker:publish(ReqId, #{}, Topic, [File], #{}, Ctxt)
     end,
     {ok, {Fun, undefined}};
 async_handle_event(
-    {[bondy, backup, restore, Type], #{filename := File}}, Ref
+    {[bondy, export, import, Type], #{filename := File}}, Ref
 ) when
     Type == start; Type == stop; Type == exception
 ->
@@ -275,9 +275,9 @@ async_handle_event(
         Ctxt = bondy_context:local_context(?MASTER_REALM_URI, Ref),
         Topic =
             case Type of
-                start -> ?BONDY_BACKUP_RESTORE_STARTED;
-                stop -> ?BONDY_BACKUP_RESTORE_FINISHED;
-                exception -> ?BONDY_BACKUP_RESTORE_FAILED
+                start -> ?BONDY_EXPORT_IMPORT_STARTED;
+                stop -> ?BONDY_EXPORT_IMPORT_FINISHED;
+                exception -> ?BONDY_EXPORT_IMPORT_FAILED
             end,
         bondy_broker:publish(ReqId, #{}, Topic, [File], #{}, Ctxt)
     end,

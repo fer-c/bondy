@@ -36,9 +36,21 @@ stateDiagram-v2
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
--include_lib("bondy_plum_db.hrl").
+-include_lib("bondy_db_tables.hrl").
 -include("bondy.hrl").
 -include("bondy_bridge_relay.hrl").
+
+%% The bondy_db tables whose cells make up a realm's replicable security model,
+%% shipped to a bridge client on full sync. The realm record comes first so the
+%% client has the realm before its users/groups/grants land.
+-define(SYNC_TABLES, [
+    ?BONDY_DB_REALM_TAB,
+    ?BONDY_DB_GROUP_TAB,
+    ?BONDY_DB_USER_TAB,
+    ?BONDY_DB_SOURCE_TAB,
+    ?BONDY_DB_USER_GRANT_TAB,
+    ?BONDY_DB_GROUP_GRANT_TAB
+]).
 
 -record(state, {
     ranch_ref :: atom(),
@@ -83,6 +95,11 @@ stateDiagram-v2
 -export([connecting/3]).
 -export([active/3]).
 -export([idle/3]).
+
+-ifdef(TEST).
+%% Exposed for testing the read side of the bondy_db full sync.
+-export([realm_sync_cells/1]).
+-endif.
 
 %% =============================================================================
 %% API
@@ -916,77 +933,75 @@ full_sync(SessionId, RealmUri, Opts, State) ->
 -doc """
 A temporary POC of full sync, not elegant at all.
 
-This should be resolved at the plum_db layer and not here, but we are
-interested in having a POC ASAP.
+Reads the realm's security model from bondy_db and ships each live cell to the
+client as an `{aae_data, SessionId, {cell, ...}}` message; the client merges it
+into its own bondy_db (see `bondy_bridge_relay_client:handle_aae_data/2`). The
+bridge connects two *separate* clusters over its own transport, so this is the
+cross-cluster equivalent of intra-cluster anti-entropy — it cannot ride the
+Partisan AAE path.
+
+Each cell carries its origin HLC so the receiver's `lww_register` resolves
+last-writer-wins correctly (a value the client has since edited with a newer HLC
+is kept — the bridge does not blindly overwrite). Tombstones are not
+bootstrapped: a fresh client has nothing to delete, and ongoing deletes flow
+through the incremental event path / cluster AAE.
 """.
 do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
     %% TODO we should spawn an exchange statem for this
     Me = self(),
-
-    Prefixes = [
-        %% TODO We should NOT sync the priv keys!!
-        %% We might need to split the realm from the priv keys to enable a
-        %% AAE hash comparison.
-        {?PLUM_DB_REALM_TAB, RealmUri},
-        {?PLUM_DB_GROUP_TAB, RealmUri},
-        %% TODO we should not sync passwords! We might need to split the
-        %% password from the user object and allow admin to enable sync or not
-        %% (e.g. WAMPSCRAM)
-        {?PLUM_DB_USER_TAB, RealmUri},
-        {?PLUM_DB_SOURCE_TAB, RealmUri},
-        {?PLUM_DB_USER_GRANT_TAB, RealmUri},
-        {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}
-        % ,
-        % {?PLUM_DB_REGISTRATION_TAB, RealmUri},
-        % {?PLUM_DB_SUBSCRIPTION_TAB, RealmUri},
-        % {?PLUM_DB_TICKET_TAB, RealmUri}
-    ],
-
     _ = lists:foreach(
-        fun(Prefix) ->
-            lists:foreach(
-                fun(Obj0) ->
-                    Obj = prepare_object(Obj0),
-                    Msg = {aae_data, SessionId, Obj},
-                    gen_statem:cast(Me, {forward_message, Msg})
-                end,
-                pdb_objects(Prefix)
-            )
+        fun({TableName, Band, Key, Value, Hlc}) ->
+            Msg =
+                {aae_data, SessionId, {cell, TableName, Band, Key, Value, Hlc}},
+            gen_statem:cast(Me, {forward_message, Msg})
         end,
-        Prefixes
+        realm_sync_cells(RealmUri)
     ),
     ok.
 
 %% @private
-prepare_object(Obj) ->
-    case bondy_realm:is_type(Obj) of
-        true ->
-            %% A temporary hack to prevent keys being synced with an client
-            %% router. We will use this until be implement partial replication
-            %% and decide on Key management strategies.
-            bondy_realm:strip_private_keys(Obj);
-        false ->
-            Obj
-    end.
+-doc """
+The bondy_db cells that make up a realm's replicable security model, as
+`{TableName, Band, Key, Value, Hlc}` tuples ready to ship to a bridge client.
+Exposed for testing the read side of `do_full_sync/4`.
 
-pdb_objects(FullPrefix) ->
-    It = plum_db:iterator(FullPrefix, []),
-    try
-        pdb_objects(It, [])
-    catch
-        {break, Result} -> Result
-    after
-        ok = plum_db:iterator_close(It)
-    end.
+TODO We should NOT sync private keys (stripped from the realm record below) nor
+passwords (still synced — needs the password split off the user object so an
+admin can opt in, e.g. WAMPSCRAM).
+""".
+realm_sync_cells(RealmUri) ->
+    lists:flatmap(
+        fun(TableName) -> table_cells(TableName, RealmUri) end,
+        ?SYNC_TABLES
+    ).
 
 %% @private
-pdb_objects(It, Acc0) ->
-    case plum_db:iterator_done(It) of
-        true ->
-            Acc0;
-        false ->
-            Acc = [plum_db:iterator_element(It) | Acc0],
-            pdb_objects(plum_db:iterate(It), Acc)
+%% The realm table is a global registry keyed by Uri under the empty band; the
+%% rest are realm-sharded (band = RealmUri). Both yield live `{TableName, Band,
+%% Key, Value, Hlc}` cells (cleared cells are skipped — see do_full_sync/4).
+table_cells(?BONDY_DB_REALM_TAB = TableName, RealmUri) ->
+    Table = sync_table(TableName),
+    case bondy_db:read(Table, <<>>, RealmUri) of
+        {ok, {Realm, Hlc}} ->
+            %% Strip private keys (POC: until partial replication + key mgmt).
+            Value = bondy_realm:strip_private_keys(Realm),
+            [{TableName, <<>>, RealmUri, Value, Hlc}];
+        {error, not_found} ->
+            []
+    end;
+table_cells(TableName, RealmUri) ->
+    Table = sync_table(TableName),
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    [
+        {TableName, RealmUri, Key, Value, Hlc}
+     || {Key, Value, Hlc} <- Rows, Value =/= undefined
+    ].
+
+%% @private
+sync_table(TableName) ->
+    case bondy_namespace_catalog:table(TableName) of
+        undefined -> error({table_not_provisioned, TableName});
+        Table -> Table
     end.
 
 %% @private

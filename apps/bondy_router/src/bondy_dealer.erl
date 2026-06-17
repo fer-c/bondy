@@ -271,7 +271,7 @@ another register request second might be permissible immediately.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_uris.hrl").
 
 -define(MATCH_LIMIT, 100).

@@ -114,13 +114,18 @@ primary_fan_out_smoke({Db, _Sup, _Dir}) ->
     Keys = [<<"k-", (integer_to_binary(I))/binary>> || I <- lists:seq(1, 60)],
     lists:foreach(
         fun(K) ->
-            ok = bondy_db:apply(T, ?R, K, {set, bondy_db:tick(T), <<K/binary, "-v">>})
+            ok = bondy_db:apply(
+                T, ?R, K, {set, bondy_db:tick(T), <<K/binary, "-v">>}
+            )
         end,
         Keys
     ),
     lists:foreach(
         fun(K) ->
-            ?assertEqual({ok, {<<K/binary, "-v">>, '_'}}, mask_hlc(bondy_db:read(T, ?R, K)))
+            ?assertEqual(
+                {ok, {<<K/binary, "-v">>, '_'}},
+                mask_hlc(bondy_db:read(T, ?R, K))
+            )
         end,
         Keys
     ),
@@ -128,7 +133,9 @@ primary_fan_out_smoke({Db, _Sup, _Dir}) ->
     %% prove the key set actually reaches every shard (bucket = entity binary).
     Bucket = atom_to_binary(users, utf8),
     Used = lists:foldl(
-        fun(K, Acc) -> sets:add_element(erlang:phash2({Bucket, K}, ?SHARDS), Acc) end,
+        fun(K, Acc) ->
+            sets:add_element(erlang:phash2({Bucket, K}, ?SHARDS), Acc)
+        end,
         sets:new([{version, 2}]),
         Keys
     ),
@@ -175,7 +182,9 @@ setup_colocated(Db) ->
     Terms = terms_spanning_shards(users, ?SHARDS),
     %% Sanity: the terms genuinely cover every Bookie, else the fan-out is
     %% not exercised and the isolation claim is weaker than advertised.
-    ?assertEqual(?SHARDS, length(lists:usort([sec_shard(users, Tm) || Tm <- Terms]))),
+    ?assertEqual(
+        ?SHARDS, length(lists:usort([sec_shard(users, Tm) || Tm <- Terms]))
+    ),
 
     write_terms(Users, <<"u">>, Terms),
     write_terms(Items, <<"i">>, Terms),
@@ -272,7 +281,9 @@ flush_index(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             ok = bondy_oplog_secondary_writer:flush_sync(Pid)

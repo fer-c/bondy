@@ -14,7 +14,6 @@
 
 -define(CRDT, bondy_oplog_crdt_lww_register).
 
-
 publish_list_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         [
@@ -37,7 +36,6 @@ setup() ->
 cleanup(_) ->
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     ok.
-
 
 %% A `publish => true` table wires every shard's applier to publish each
 %% verified apply to the table namespace. A subscriber receives `{Key, FoldOp}`.
@@ -65,7 +63,9 @@ publish_off() ->
     try
         NS = bondy_db:namespace(T),
         {ok, _Ref} = bondy_oplog_core:subscribe(NS, all),
-        ok = bondy_db:apply(T, <<"r">>, <<"k1">>, {set, bondy_db:tick(T), <<"v">>}),
+        ok = bondy_db:apply(
+            T, <<"r">>, <<"k1">>, {set, bondy_db:tick(T), <<"v">>}
+        ),
         receive
             {bondy_oplog_core_event, NS, _, _, _} -> ?assert(false)
         after 300 ->
@@ -80,9 +80,15 @@ publish_off() ->
 list_scans() ->
     {Db, T} = open(list_scan, false),
     try
-        ok = bondy_db:apply(T, <<"r">>, <<"a">>, {set, bondy_db:tick(T), <<"va">>}),
-        ok = bondy_db:apply(T, <<"r">>, <<"b">>, {set, bondy_db:tick(T), <<"vb">>}),
-        ok = bondy_db:apply(T, <<"r">>, <<"c">>, {set, bondy_db:tick(T), <<"vc">>}),
+        ok = bondy_db:apply(
+            T, <<"r">>, <<"a">>, {set, bondy_db:tick(T), <<"va">>}
+        ),
+        ok = bondy_db:apply(
+            T, <<"r">>, <<"b">>, {set, bondy_db:tick(T), <<"vb">>}
+        ),
+        ok = bondy_db:apply(
+            T, <<"r">>, <<"c">>, {set, bondy_db:tick(T), <<"vc">>}
+        ),
         {ok, Live0} = bondy_db:list(T, <<"r">>),
         ?assertEqual(
             [{<<"a">>, <<"va">>}, {<<"b">>, <<"vb">>}, {<<"c">>, <<"vc">>}],
@@ -97,7 +103,6 @@ list_scans() ->
     after
         ok = bondy_db:close(Db)
     end.
-
 
 %% The ergonomic API: the short-form ops carry no caller HLC and arbitrary term
 %% values; the substrate stamps the write HLC and serialises the term. A read
@@ -119,7 +124,6 @@ short_form_ops() ->
     after
         ok = bondy_db:close(Db)
     end.
-
 
 %% =============================================================================
 %% Helpers

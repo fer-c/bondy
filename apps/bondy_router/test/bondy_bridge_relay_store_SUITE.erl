@@ -19,7 +19,6 @@
 
 -compile([nowarn_export_all, export_all]).
 
-
 all() ->
     bondy_ct:all().
 
@@ -32,7 +31,6 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     Config.
-
 
 %% The catalogue provisions the bondy_bridge_relay bondy_db table at boot (it is
 %% a migrated domain), so the config store has a live table to read / write.
@@ -86,7 +84,6 @@ reload_after_remove_test(_) ->
     ok = bondy_bridge_relay:add(bridge(Name)),
     ?assert(bondy_bridge_relay:exists(Name)),
     ok = bondy_bridge_relay:remove(Name).
-
 
 %% =============================================================================
 %% Helpers

@@ -102,20 +102,26 @@ prefix_each_order({_Db, Table, _Sup, _Dir}) ->
 
     %% spog: by subject s1
     ?assertEqual(
-        [[<<"s1">>, <<"p1">>, <<"o1">>, <<"g1">>],
-         [<<"s1">>, <<"p2">>, <<"o2">>, <<"g1">>]],
+        [
+            [<<"s1">>, <<"p1">>, <<"o1">>, <<"g1">>],
+            [<<"s1">>, <<"p2">>, <<"o2">>, <<"g1">>]
+        ],
         prefix(Table, R, spog, [<<"s1">>])
     ),
     %% pogs: by (predicate p1, object o1)
     ?assertEqual(
-        [[<<"p1">>, <<"o1">>, <<"g1">>, <<"s1">>],
-         [<<"p1">>, <<"o1">>, <<"g2">>, <<"s2">>]],
+        [
+            [<<"p1">>, <<"o1">>, <<"g1">>, <<"s1">>],
+            [<<"p1">>, <<"o1">>, <<"g2">>, <<"s2">>]
+        ],
         prefix(Table, R, pogs, [<<"p1">>, <<"o1">>])
     ),
     %% gspo: by graph g1
     ?assertEqual(
-        [[<<"g1">>, <<"s1">>, <<"p1">>, <<"o1">>],
-         [<<"g1">>, <<"s1">>, <<"p2">>, <<"o2">>]],
+        [
+            [<<"g1">>, <<"s1">>, <<"p1">>, <<"o1">>],
+            [<<"g1">>, <<"s1">>, <<"p2">>, <<"o2">>]
+        ],
         prefix(Table, R, gspo, [<<"g1">>])
     ),
     %% an unbound value yields nothing
@@ -127,7 +133,9 @@ covering_returns_whole_fact({_Db, Table, _Sup, _Dir}) ->
     R = <<"g">>,
     put_quad(Table, R, <<"s1">>, <<"p1">>, <<"o1">>, <<"g1">>),
     flush(Table),
-    {ok, [{Cols, _Proj}]} = bondy_db:index_prefix(Table, R, pogs, [<<"p1">>], #{}),
+    {ok, [{Cols, _Proj}]} = bondy_db:index_prefix(
+        Table, R, pogs, [<<"p1">>], #{}
+    ),
     %% pogs order, all four columns present
     ?assertEqual([<<"p1">>, <<"o1">>, <<"g1">>, <<"s1">>], Cols).
 
@@ -173,11 +181,16 @@ delete_removes_all_orders({_Db, Table, _Sup, _Dir}) ->
     flush(Table),
     ?assertEqual(2, length(prefix(Table, R, pogs, [<<"p1">>, <<"o1">>]))),
 
-    ok = bondy_db:apply(Table, R, quad_key(<<"s1">>, <<"p1">>, <<"o1">>, <<"g1">>), clear),
+    ok = bondy_db:apply(
+        Table, R, quad_key(<<"s1">>, <<"p1">>, <<"o1">>, <<"g1">>), clear
+    ),
     flush(Table),
 
     %% gone from all three orders
-    ?assertEqual([[<<"s2">>, <<"p1">>, <<"o1">>, <<"g1">>]], prefix(Table, R, spog, [<<"s2">>])),
+    ?assertEqual(
+        [[<<"s2">>, <<"p1">>, <<"o1">>, <<"g1">>]],
+        prefix(Table, R, spog, [<<"s2">>])
+    ),
     ?assertEqual([], prefix(Table, R, spog, [<<"s1">>])),
     ?assertEqual(
         [[<<"p1">>, <<"o1">>, <<"g1">>, <<"s2">>]],
@@ -194,7 +207,9 @@ quad_key(S, P, O, G) ->
 
 put_quad(Table, Realm, S, P, O, G) ->
     V = #{s => S, p => P, o => O, g => G},
-    ok = bondy_db:apply(Table, Realm, quad_key(S, P, O, G), {set, bondy_db:tick(Table), V}).
+    ok = bondy_db:apply(
+        Table, Realm, quad_key(S, P, O, G), {set, bondy_db:tick(Table), V}
+    ).
 
 flush(Table) ->
     _ = [ok = bondy_db:await_index(Table, I) || I <- ?ORDERS],

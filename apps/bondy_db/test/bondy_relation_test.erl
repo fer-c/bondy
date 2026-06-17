@@ -113,7 +113,10 @@ rejected_rows_backfilled({_Db, T, _Sup, _Dir}) ->
     GotKeys = [K || {K, _} <- Vals],
     ?assertEqual(UserKeys, GotKeys),
     %% no alias leaked through
-    ?assertEqual([], [K || {K, V} <- Vals, maps:get(type, V, undefined) =:= alias]),
+    ?assertEqual([], [
+        K
+     || {K, V} <- Vals, maps:get(type, V, undefined) =:= alias
+    ]),
     %% full pages are exactly `limit` users despite interleaved rejects
     ?assertEqual([7, 7, 6], [length(P) || P <- Pages]).
 
@@ -130,10 +133,16 @@ lookup_hit_miss_rejected({_Db, T, _Sup, _Dir}) ->
     _ = put_users(T, 3),
     _ = put_aliases(T, 1),
     Rel = relation(T),
-    ?assertMatch({ok, {<<"u00001">>, _}}, bondy_relation:lookup(Rel, ?R, <<"u00001">>)),
-    ?assertEqual({error, not_found}, bondy_relation:lookup(Rel, ?R, <<"missing">>)),
+    ?assertMatch(
+        {ok, {<<"u00001">>, _}}, bondy_relation:lookup(Rel, ?R, <<"u00001">>)
+    ),
+    ?assertEqual(
+        {error, not_found}, bondy_relation:lookup(Rel, ?R, <<"missing">>)
+    ),
     %% an alias cell exists but the decoder rejects it ⇒ not_found
-    ?assertEqual({error, not_found}, bondy_relation:lookup(Rel, ?R, <<"a00001">>)).
+    ?assertEqual(
+        {error, not_found}, bondy_relation:lookup(Rel, ?R, <<"a00001">>)
+    ).
 
 empty_relation({_Db, T, _Sup, _Dir}) ->
     Rel = relation(T),
@@ -141,7 +150,9 @@ empty_relation({_Db, T, _Sup, _Dir}) ->
         {ok, #{values => [], next => undefined, has_more => false}},
         bondy_relation:list(Rel, ?R, #{limit => 10})
     ),
-    ?assertEqual({ok, []}, bondy_relation:fold(Rel, ?R, fun(X, A) -> [X | A] end, [])).
+    ?assertEqual(
+        {ok, []}, bondy_relation:fold(Rel, ?R, fun(X, A) -> [X | A] end, [])
+    ).
 
 cursor_wire_roundtrip({_Db, T, _Sup, _Dir}) ->
     _ = put_users(T, 15),
@@ -155,10 +166,15 @@ cursor_wire_roundtrip({_Db, T, _Sup, _Dir}) ->
     {ok, Decoded} = bondy_relation:decode_cursor(Rel, Wire),
     {ok, #{values := Vs}} =
         bondy_relation:list(Rel, ?R, #{limit => 5, cursor => Decoded}),
-    ?assertEqual([<<"u00006">>, <<"u00007">>, <<"u00008">>, <<"u00009">>, <<"u00010">>],
-        [K || {K, _} <- Vs]),
+    ?assertEqual(
+        [<<"u00006">>, <<"u00007">>, <<"u00008">>, <<"u00009">>, <<"u00010">>],
+        [K || {K, _} <- Vs]
+    ),
     %% malformed ⇒ malformed
-    ?assertEqual({error, malformed}, bondy_relation:decode_cursor(Rel, <<"!!not-base64!!">>)),
+    ?assertEqual(
+        {error, malformed},
+        bondy_relation:decode_cursor(Rel, <<"!!not-base64!!">>)
+    ),
     %% a cursor minted for a different schema ⇒ stale
     Other = bondy_relation:new(users, #{
         table => T, decode => fun decode_row/1, schema => some_other_schema

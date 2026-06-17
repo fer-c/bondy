@@ -218,12 +218,15 @@ collation_columns([], _Norm, _Value, Acc) ->
     lists:reverse(Acc);
 collation_columns([Path | Rest], Norm, Value, Acc) ->
     case navigate(Path, Value) of
-        ?MISSING -> missing;
-        undefined -> missing;
+        ?MISSING ->
+            missing;
+        undefined ->
+            missing;
         %% Multi-valued composite columns (a cartesian product) are unsupported
         %% in v1 — a list column drops the whole tuple rather than crash the codec.
         Leaf when is_list(Leaf) -> missing;
-        Leaf -> collation_columns(Rest, Norm, Value, [normalize(Norm, Leaf) | Acc])
+        Leaf ->
+            collation_columns(Rest, Norm, Value, [normalize(Norm, Leaf) | Acc])
     end.
 
 -doc """
@@ -307,7 +310,8 @@ check_columns(#{extract := Path}) ->
     end;
 check_columns(#{collation := Paths}) ->
     case
-        is_list(Paths) andalso Paths =/= [] andalso lists:all(fun is_path/1, Paths)
+        is_list(Paths) andalso Paths =/= [] andalso
+            lists:all(fun is_path/1, Paths)
     of
         true -> ok;
         false -> {error, {invalid_collation, Paths}}

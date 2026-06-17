@@ -134,7 +134,9 @@ after_key_pages_one_term({_Db, Table, _Sup, _Dir}) ->
     %% Page 3 was short ⇒ it already signalled the end (cursor undefined).
     ?assertEqual(undefined, A3),
     %% Paging strictly after the very last key yields nothing.
-    ?assertEqual({[], undefined}, page(Table, <<"r1">>, <<"g1">>, <<"u00025">>, 10)).
+    ?assertEqual(
+        {[], undefined}, page(Table, <<"r1">>, <<"g1">>, <<"u00025">>, 10)
+    ).
 
 %% Clearing a user removes EVERY index entry it contributed (the OLD→NEW
 %% term diff with NewTerms = []), across all its groups.

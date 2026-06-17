@@ -487,13 +487,6 @@ load_config(Map, State) when is_map(Map) ->
                 end
             end,
             NewState = lists:foldl(Folder, State, Subscriptions),
-            %% We store the specification, see add/2 for an explanation
-            %% ok = plum_db:put(?PREFIX,
-            %%     Id,
-            %%     maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Spec)
-            %% ),
-            %% %% We rebuild the dispatch table
-            %% rebuild_dispatch_tables();
             {ok, NewState};
         {error, _} = Error ->
             {Error, State}

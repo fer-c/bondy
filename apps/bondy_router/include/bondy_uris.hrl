@@ -29,6 +29,13 @@
 -define(BONDY_CERT_SET_CLIENT_AUTH, <<"bondy.cert_manager.set_client_auth">>).
 -define(BONDY_CERT_GET_CLIENT_AUTH, <<"bondy.cert_manager.get_client_auth">>).
 
+-define(BONDY_EXPORT_CREATE, <<"bondy.export.create">>).
+-define(BONDY_EXPORT_IMPORT, <<"bondy.export.import">>).
+-define(BONDY_EXPORT_STATUS, <<"bondy.export.status">>).
+
+%% Deprecated aliases — superseded by the bondy.export.* procedures above.
+%% Kept so existing operator tooling keeps working; they dispatch to the same
+%% bondy_export_api handler.
 -define(BONDY_BACKUP_CREATE, <<"bondy.backup.create">>).
 -define(BONDY_BACKUP_RESTORE, <<"bondy.backup.restore">>).
 -define(BONDY_BACKUP_STATUS, <<"bondy.backup.status">>).
@@ -143,6 +150,14 @@
 %% TOPIC URIS
 %% =============================================================================
 
+-define(BONDY_EXPORT_FAILED, <<"bondy.export.failed">>).
+-define(BONDY_EXPORT_FINISHED, <<"bondy.export.finished">>).
+-define(BONDY_EXPORT_STARTED, <<"bondy.export.started">>).
+-define(BONDY_EXPORT_IMPORT_FAILED, <<"bondy.export.import_failed">>).
+-define(BONDY_EXPORT_IMPORT_FINISHED, <<"bondy.export.import_finished">>).
+-define(BONDY_EXPORT_IMPORT_STARTED, <<"bondy.export.import_started">>).
+
+%% Deprecated topic aliases — superseded by the bondy.export.* topics above.
 -define(BONDY_BACKUP_FAILED, <<"bondy.backup.failed">>).
 -define(BONDY_BACKUP_FINISHED, <<"bondy.backup.finished">>).
 -define(BONDY_BACKUP_RESTORE_FAILED, <<"bondy.backup.restore_failed">>).

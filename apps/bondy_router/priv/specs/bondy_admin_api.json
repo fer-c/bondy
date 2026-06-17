@@ -101,7 +101,7 @@
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "bondy.backup.create",
+                            "procedure" : "bondy.export.create",
                             "options" : {},
                             "args" : [
                                 "{{request.body}}"
@@ -135,7 +135,7 @@
                     "get": {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "bondy.backup.status",
+                            "procedure" : "bondy.export.status",
                             "options" : {},
                             "args" : ["{{variables.query_match}}"],
                             "kwargs" : {}
@@ -168,7 +168,7 @@
                     "post": {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "bondy.backup.restore",
+                            "procedure" : "bondy.export.import",
                             "options" : {},
                             "args" : ["{{request.body}}"],
                             "kwargs" : {}

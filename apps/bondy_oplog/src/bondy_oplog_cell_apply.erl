@@ -27,6 +27,13 @@ behaviour is byte-identical.
     adapter := module(),
     handle := term(),
     fold_module := atom() | undefined,
+    %% Namespace under which the replay path publishes remote-merge events
+    %% (`bondy_oplog_core:publish_merge/4`) so node-local reactors can react to
+    %% peer-originated changes. `undefined` (the default) disables emission —
+    %% set only for tables opened with `publish => true`. Only the replay
+    %% (`apply_cell_pairs/3`) path emits; local writes use the applier's
+    %% `publish_batch`.
+    publish_ns => atom() | undefined,
     %% Cache adapter pair captured at init time so the applier can
     %% keep the per-shard read cache coherent after every projection
     %% write. Without this, `bondy_db:apply/4` followed by `read/3` on
@@ -474,11 +481,15 @@ index_ops_for_one(
     Cols = bondy_oplog_index_spec:project(Spec, NewValue),
     Removed = OldTerms -- NewTerms,
     [
-        index_op(IName, SecBucket, SCount, T, Key, {put, Cols, Hlc}, RealmFolded)
+        index_op(
+            IName, SecBucket, SCount, T, Key, {put, Cols, Hlc}, RealmFolded
+        )
      || T <- NewTerms
     ] ++
         [
-            index_op(IName, SecBucket, SCount, T, Key, {remove, Hlc}, RealmFolded)
+            index_op(
+                IName, SecBucket, SCount, T, Key, {remove, Hlc}, RealmFolded
+            )
          || T <- Removed
         ].
 
@@ -503,8 +514,8 @@ index_op(IName, SecBucket, SCount, Term, PrimaryKey, EventDelta, RealmFolded) ->
 %% `«Realm, 0, BareKey»` (realm URIs are NUL-free, so the first `0x00` delimits it).
 index_seckey(Term, PrimaryKey, true) when is_list(Term) ->
     [Realm, BareKey] = binary:split(PrimaryKey, <<0>>),
-    <<Realm/binary, 0,
-        (bondy_oplog_index_key:encode_term(Term))/binary, 0, BareKey/binary>>;
+    <<Realm/binary, 0, (bondy_oplog_index_key:encode_term(Term))/binary, 0,
+        BareKey/binary>>;
 index_seckey(Term, PrimaryKey, _RealmFolded) ->
     bondy_oplog_index_key:encode(Term, PrimaryKey).
 
@@ -625,8 +636,12 @@ apply_cell_pairs(Ctx, Id, Pairs) ->
     HighWaterRef = maps:get(high_water_ref, Ctx, undefined),
     OldStateCache = maps:get(oldstate_cache, Ctx, undefined),
     SecIdx = sec_idx(Ctx),
+    %% When set (table opened with `publish => true`), every cell this replay
+    %% writes is published as a remote-merge event so node-local reactors can
+    %% react to peer-originated changes. `undefined` ⇒ no emission, zero cost.
+    PublishNs = maps:get(publish_ns, Ctx, undefined),
     try
-        {LocalWrites, MaxHlc, N, IdxAcc} = lists:foldl(
+        {LocalWrites, MaxHlc, N, IdxAcc, PubAcc} = lists:foldl(
             fun
                 (
                     {MstKey, {
@@ -635,7 +650,7 @@ apply_cell_pairs(Ctx, Id, Pairs) ->
                         _Prev,
                         _Sig
                     }},
-                    {WAcc, HlcAcc, NAcc, IAcc}
+                    {WAcc, HlcAcc, NAcc, IAcc, PAcc}
                 ) ->
                     case
                         compute_one_cell(
@@ -655,19 +670,28 @@ apply_cell_pairs(Ctx, Id, Pairs) ->
                     of
                         {ok, NewFrame, NewHlc, IdxOps} ->
                             WAcc1 = WAcc#{{Bucket, CellKey} => NewFrame},
+                            PAcc1 = maybe_collect_merge(
+                                PublishNs,
+                                PAcc,
+                                Bucket,
+                                CellKey,
+                                FoldEvent,
+                                NewHlc
+                            ),
                             {
                                 WAcc1,
                                 max_hlc(HlcAcc, NewHlc),
                                 NAcc + 1,
-                                merge_idx_ops(IAcc, IdxOps)
+                                merge_idx_ops(IAcc, IdxOps),
+                                PAcc1
                             };
                         skip ->
-                            {WAcc, HlcAcc, NAcc, IAcc}
+                            {WAcc, HlcAcc, NAcc, IAcc, PAcc}
                     end;
                 (_, Acc) ->
                     Acc
             end,
-            {#{}, undefined, 0, #{}},
+            {#{}, undefined, 0, #{}, #{}},
             Pairs
         ),
         case map_size(LocalWrites) of
@@ -696,7 +720,11 @@ apply_cell_pairs(Ctx, Id, Pairs) ->
                             undefined -> ok;
                             _ -> advance_high_water(HighWaterRef, MaxHlc)
                         end,
-                        dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, false);
+                        dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, false),
+                        %% Notify reactors AFTER the durable write + index
+                        %% dispatch, so a reactor that reads back sees the
+                        %% merged value. Best-effort, never blocks the replay.
+                        publish_merges(PublishNs, PubAcc);
                     {error, Reason} ->
                         ?LOG_WARNING(#{
                             description =>
@@ -724,6 +752,29 @@ apply_cell_pairs(Ctx, Id, Pairs) ->
             }),
             0
     end.
+
+%% @private
+%% Accumulate a cell's `(FoldEvent, Hlc)` for remote-merge publication, keyed by
+%% `{Bucket, CellKey}` so a key written twice in one batch publishes once (the
+%% last write). A no-op when the table did not opt in (`publish_ns = undefined`).
+maybe_collect_merge(undefined, PubAcc, _Bucket, _CellKey, _FoldEvent, _Hlc) ->
+    PubAcc;
+maybe_collect_merge(_NS, PubAcc, Bucket, CellKey, FoldEvent, Hlc) ->
+    PubAcc#{{Bucket, CellKey} => {FoldEvent, Hlc}}.
+
+%% @private
+%% Publish one remote-merge event per collected cell. The published `(Key, Op)`
+%% mirrors `bondy_db:publish_event/1` (Key = CellKey, Op = FoldEvent), so a
+%% reactor sees the same shape for local and remote changes.
+publish_merges(undefined, _PubAcc) ->
+    ok;
+publish_merges(NS, PubAcc) ->
+    maps:foreach(
+        fun({_Bucket, CellKey}, {FoldEvent, Hlc}) ->
+            bondy_oplog_core:publish_merge(NS, CellKey, Hlc, FoldEvent)
+        end,
+        PubAcc
+    ).
 
 %% @private
 %% Invalidate the per-shard read cache entry for `{Bucket, Key}` after a

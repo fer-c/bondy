@@ -8,7 +8,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy_registry.hrl").
 
 -moduledoc """
@@ -17,16 +17,6 @@ Indeces for matching bondy_registry_entry(s).
 
 -define(IS_TYPE(X), (X == registration orelse X == subscription)).
 
--define(PDB_FOLD_OPTS, [
-    %% NOTICE THIS SHOULD BE KEY SORTED!!!!!
-    %% Entries are never modified so by disabling put
-    %% (conflict resolution on read) plum_db will read concurrently from
-    %% ets.
-    {allow_put, false},
-    {remove_tombstones, true},
-    {resolver, lww}
-]).
--define(PDB_GET_OPTS, ?PDB_FOLD_OPTS).
 -define(MATCH_POLICIES, [?EXACT_MATCH, ?PREFIX_MATCH, ?WILDCARD_MATCH]).
 
 -record(bondy_registry_store, {
@@ -115,7 +105,16 @@ Indeces for matching bondy_registry_entry(s).
 -type wildcard(T) :: T | '_'.
 -type var(T) :: wildcard(T) | '$1' | '$2' | '$3' | '$4'.
 -type eot() :: ?EOT.
--type find_opts() :: plum_db:match_opts().
+-type find_opts() :: store_opts().
+%% Option proplist for the maintenance find/fold/foreach API. Historically
+%% `store_opts()/get_opts()/fold_opts()'; the store now runs on bondy_db
+%% and the only honoured option is `{limit, _}' (see `find/4'). Kept as a
+%% proplist so the return shape stays the plum_db-style `{limit,_}'-keyed result.
+-type store_opts() :: proplists:proplist().
+-type store_fold_fun() ::
+    fun(({Key :: term(), Value :: term()}, Acc :: term()) -> term()).
+-type store_foreach_fun() ::
+    fun(({Key :: term(), Value :: term()}) -> term()).
 -type find_result() ::
     eot()
     | [t()]
@@ -159,6 +158,9 @@ Indeces for matching bondy_registry_entry(s).
 -export_type([reg_idx/0]).
 -export_type([reg_match_opts/0]).
 -export_type([reg_match_result/0]).
+-export_type([store_fold_fun/0]).
+-export_type([store_foreach_fun/0]).
+-export_type([store_opts/0]).
 -export_type([sub_idx/0]).
 -export_type([sub_match_opts/0]).
 -export_type([sub_match_result/0]).
@@ -435,14 +437,18 @@ take(Store, Entry) ->
 
 take(#bondy_registry_store{} = Store, Type, EntryKey) when ?IS_TYPE(Type) ->
     ok = validate_key(EntryKey),
-    PDBPrefix = pdb_prefix(Type, bondy_registry_entry:realm_uri(EntryKey)),
+    Table = db_table(Type),
+    RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+    Key = db_key(bondy_registry_entry:id(EntryKey)),
 
-    case plum_db:take(PDBPrefix, EntryKey) of
-        undefined ->
-            {error, not_found};
-        Entry ->
+    case bondy_db:read(Table, RealmUri, Key) of
+        {ok, {Value, _Hlc}} ->
+            Entry = unwrap(Value),
+            ok = bondy_db:apply(Table, RealmUri, Key, clear),
             Result = delete_indices(Store, Entry),
-            resulto:then(Result, fun(_) -> {ok, Entry} end)
+            resulto:then(Result, fun(_) -> {ok, Entry} end);
+        {error, not_found} ->
+            {error, not_found}
     end.
 
 -doc """
@@ -488,46 +494,14 @@ doing (1) anyway, but we need to check, e.g. timestamp differences?
     {ok, entry()} | {error, not_found | any()}.
 
 dirty_delete(#bondy_registry_store{} = Store, Type, EntryKey) ->
-    PDBPrefix = pdb_prefix(Type, bondy_registry_entry:realm_uri(EntryKey)),
-
-    case plum_db:get_object({PDBPrefix, EntryKey}) of
-        {ok, {object, Clock} = Obj0} ->
-            %% We use a static fake ActorID and the original timestamp so that
-            %% the tombstone is deterministic.
-            %% This allows the operation to be idempotent when performed
-            %% concurrently by multiple nodes. Idempotency is a requirement so
-            %% that the hash of the object compares equal between nodes
-            %% irrespective of which created it.
-            %% Also the ActorID helps us determine this is a dirty delete.
-            Partition = plum_db:get_partition({PDBPrefix, EntryKey}),
-            ActorId = {Partition, ?PLUM_DB_REGISTRY_ACTOR},
-            Context = plum_db_object:context(Obj0),
-            [{_, Timestamp}] = plum_db_dvvset:values(Clock),
-            InsertRec = plum_db_dvvset:new(Context, {?TOMBSTONE, Timestamp}),
-
-            %% We create a new object
-            Obj = {object, plum_db_dvvset:update(InsertRec, Clock, ActorId)},
-
-            %% We must resolve the object before calling dirty_put/4.
-            Resolved = plum_db_object:resolve(Obj, lww),
-
-            %% Avoid broadcasting, the primary objective of this delete is to
-            %% remove the local replica of an entry when we get disconnected
-            %% from its root node.
-            %% Every node will do the same, so if this is a node crashing we
-            %% would have a tsunami of deletes being broadcasted.
-            %% We will achieve convergence via AAE on our next exchange.
-            Opts = [{broadcast, false}],
-
-            ok = plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts),
-
-            %% We return the original value
-            Entry = plum_db_object:value(Obj0),
-            Result = delete_indices(Store, Entry),
-            resulto:then(Result, fun(_) -> {ok, Entry} end);
-        {error, _} = Error ->
-            Error
-    end.
+    %% bondy_db `clear` is HLC-ordered and idempotent by construction, so the
+    %% plum_db deterministic-tombstone hack this used to need (a fixed ActorID
+    %% + the original timestamp, so the tombstone converged byte-for-byte
+    %% across nodes) is gone: a dirty delete is now just a local delete. With
+    %% AAE off there are no remote replicas to dirty-delete, so this is reached
+    %% only by the (inert) node-down `prune` path; the presence-FSM / EVICT
+    %% replacement lands with oplog.aae (design D-7).
+    take(Store, Type, EntryKey).
 
 -doc "".
 -spec lookup(Store :: t(), IndexEntry :: index_entry()) ->
@@ -543,28 +517,29 @@ lookup(Store, #sub_idx{entry_key = EntryKey}) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
 lookup(Store, Type, EntryKey) when ?IS_TYPE(Type) ->
-    lookup(Store, Type, EntryKey, ?PDB_GET_OPTS).
+    lookup(Store, Type, EntryKey, []).
 
 -doc "".
 -spec lookup(
     Store :: t(),
     Type :: entry_type(),
     EntryKey :: entry_key(),
-    Opts :: plum_db:get_opts()
+    Opts :: store_opts()
 ) -> {ok, Entry :: entry()} | {error, not_found}.
 
-lookup(#bondy_registry_store{} = _Store, Type, EntryKey, Opts0) when
+lookup(#bondy_registry_store{} = _Store, Type, EntryKey, _Opts0) when
     ?IS_TYPE(Type)
 ->
     ok = validate_key(EntryKey),
-    PDBPrefix = pdb_prefix(Type, bondy_registry_entry:realm_uri(EntryKey)),
-    Opts = lists:keymerge(1, lists:sort(Opts0), ?PDB_GET_OPTS),
+    Table = db_table(Type),
+    RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+    Key = db_key(bondy_registry_entry:id(EntryKey)),
 
-    case plum_db:get(PDBPrefix, EntryKey, Opts) of
-        undefined ->
-            {error, not_found};
-        Entry ->
-            {ok, Entry}
+    case bondy_db:read(Table, RealmUri, Key) of
+        {ok, {Value, _Hlc}} ->
+            {ok, unwrap(Value)};
+        {error, not_found} ->
+            {error, not_found}
     end.
 
 -doc "".
@@ -577,149 +552,212 @@ lookup(#bondy_registry_store{} = _Store, Type, EntryKey, Opts0) when
 ) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
-lookup(#bondy_registry_store{} = _Store, Type, RealmUri, EntryId, Opts0) when
+lookup(#bondy_registry_store{} = _Store, Type, RealmUri, EntryId, _Opts0) when
     ?IS_TYPE(Type)
 ->
-    PDBPrefix = pdb_prefix(Type, RealmUri),
-    Pattern = bondy_registry_entry:key_pattern(RealmUri, '_', EntryId),
-    Opts = lists:keymerge(1, lists:sort(Opts0), ?PDB_FOLD_OPTS),
+    %% `entry_id` is the bondy_db primary key, so lookup-by-id is a point read
+    %% (no `session_id` needed — ids are random realm-unique).
+    Table = db_table(Type),
 
-    case plum_db:match(PDBPrefix, Pattern, Opts) of
-        [{_, Entry}] ->
-            {ok, Entry};
-        [] ->
+    case bondy_db:read(Table, RealmUri, db_key(EntryId)) of
+        {ok, {Value, _Hlc}} ->
+            {ok, unwrap(Value)};
+        {error, not_found} ->
             {error, not_found}
     end.
 
 -doc "".
 -spec find(continuation()) -> find_result().
 
-find(Cont) ->
-    find(Cont, ?PDB_FOLD_OPTS).
+find(_Cont) ->
+    %% bondy_db reads materialise the whole (bounded) result set in one shot, so
+    %% `find` never hands back a live continuation — a resumed continuation is
+    %% always already exhausted.
+    ?EOT.
 
 -doc "".
--spec find(continuation(), plum_db:match_opts()) -> find_result().
+-spec find(continuation(), store_opts()) -> find_result().
 
-find(#continuation{source = plum_db, original = Cont0} = C, Opts0) when
-    is_list(Opts0)
-->
-    Opts = lists:keymerge(1, lists:sort(Opts0), ?PDB_FOLD_OPTS),
-
-    case plum_db:match(Cont0, Opts) of
-        {L, Cont1} when Cont1 =/= ?EOT ->
-            {L, C#continuation{original = Cont1}};
-        Other ->
-            Other
-    end.
+find(_Cont, _Opts) ->
+    ?EOT.
 
 -doc """
-Finds entries in the registry using a pattern.
+Finds entries in the registry using a key pattern.
 
-This is used for entry maintenance and not for routing. For routing based on
-and URI use the `match_` functions instead.
+This is used for entry maintenance, not routing — for URI routing use the
+`match_` functions instead. The bondy_db port serves the only patterns the
+registry actually uses: `entry_id` bound (a point read on the primary key)
+and/or `session_id` bound (a bounded `by_session` index lookup). A fully-wild
+`{'_', '_'}` pattern lists the realm (admin only). The return shape matches the
+plum_db contract, keyed on the `{limit, _}` option (see `find/4`).
 """.
--spec find(t(), entry_type(), entry_key()) -> [entry()].
+-spec find(t(), entry_type(), entry_key()) -> find_result().
 
-find(_Store, Type, Pattern) when ?IS_TYPE(Type) ->
-    ok = validate_key(Pattern),
-    find(Type, Pattern, ?PDB_FOLD_OPTS).
+find(Store, Type, Pattern) when ?IS_TYPE(Type) ->
+    find(Store, Type, Pattern, []).
 
--spec find(t(), entry_type(), entry_key(), plum_db:match_opts()) ->
+-spec find(t(), entry_type(), entry_key(), store_opts()) ->
     find_result().
 
-find(Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
+find(_Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
     ok = validate_key(Pattern),
     RealmUri = bondy_registry_entry:realm_uri(Pattern),
-    PDBPrefix = pdb_prefix(Type, RealmUri),
-    Opts = lists:keymerge(1, lists:sort(Opts0), ?PDB_FOLD_OPTS),
+    Session = bondy_registry_entry:session_id(Pattern),
+    EntryId = bondy_registry_entry:id(Pattern),
+    Pairs = find_pairs(Type, RealmUri, Session, EntryId),
 
-    case plum_db:match(PDBPrefix, Pattern, Opts) of
-        L when is_list(L) ->
-            L;
-        {L, C} when C =/= ?EOT ->
-            Cont = #continuation{
-                store = Store,
-                type = Type,
-                function = ?FUNCTION_NAME,
-                realm_uri = RealmUri,
-                opts = Opts,
-                source = plum_db,
-                original = C
-            },
-            {L, Cont};
-        Other ->
-            Other
+    %% Match the plum_db contract, keyed on `{limit, _}`: a bounded request gets
+    %% the `{List, Cont}` form (`?EOT` for empty); an unbounded one a bare list.
+    %% bondy_db reads always materialise the whole (bounded) set, so the
+    %% continuation is always already exhausted (`?EOT`).
+    case lists:keymember(limit, 1, Opts0) of
+        true ->
+            case Pairs of
+                [] -> ?EOT;
+                _ -> {Pairs, ?EOT}
+            end;
+        false ->
+            Pairs
     end.
+
+%% @private
+%% The `{EntryKey, Entry}` pairs matching a key pattern, dispatched on which
+%% fields are bound:
+%% - `entry_id` bound -> point read on the primary key (+ session filter);
+%% - `entry_id` wild, `session_id` = undefined -> realm scan filtered to the
+%%   (rare) session-less entries, which the `by_session` index does not carry;
+%% - `entry_id` wild, `session_id` bound -> bounded `by_session` index lookup;
+%% - both wild -> whole-realm list (admin; no hot caller).
+find_pairs(Type, RealmUri, Session, EntryId) when EntryId =/= '_' ->
+    Table = db_table(Type),
+    case bondy_db:read(Table, RealmUri, db_key(EntryId)) of
+        {ok, {Value, _Hlc}} ->
+            Entry = unwrap(Value),
+            case session_matches(Session, Entry) of
+                true -> [{bondy_registry_entry:key(Entry), Entry}];
+                false -> []
+            end;
+        {error, not_found} ->
+            []
+    end;
+find_pairs(Type, RealmUri, undefined, '_') ->
+    %% Session-less (internal / callback) entries get no `by_session` index
+    %% entry (the index skips an `undefined` term), so dedup them via a realm
+    %% scan filtered to session-less entries. Rare (internal subscribers only).
+    Table = db_table(Type),
+    case bondy_db:list(Table, RealmUri) of
+        {ok, Rows} ->
+            [
+                pair(V)
+             || {_K, V, _Hlc} <- Rows,
+                bondy_registry_entry:session_id(unwrap(V)) =:= undefined
+            ];
+        {error, _} ->
+            []
+    end;
+find_pairs(Type, RealmUri, Session, '_') when Session =/= '_' ->
+    session_pairs(Type, RealmUri, Session);
+find_pairs(Type, RealmUri, '_', '_') ->
+    Table = db_table(Type),
+    case bondy_db:list(Table, RealmUri) of
+        {ok, Rows} ->
+            [pair(V) || {_K, V, _Hlc} <- Rows];
+        {error, _} ->
+            []
+    end.
+
+%% @private
+session_matches('_', _Entry) ->
+    true;
+session_matches(Session, Entry) ->
+    Session =:= bondy_registry_entry:session_id(Entry).
+
+%% @private
+%% All `{EntryKey, Entry}` pairs for a `(RealmUri, SessionId)` via the
+%% `by_session` index. The index is maintained asynchronously, so flush it first
+%% (`await_index/2`) for read-your-writes: session-close cleanup (`remove_all`)
+%% MUST see every entry the session created — including one made microseconds
+%% before disconnect — or the entry leaks; the idempotent-SUBSCRIBE check relies
+%% on the same freshness.
+session_pairs(Type, RealmUri, Session) ->
+    Table = db_table(Type),
+    _ = bondy_db:await_index(Table, by_session),
+    case bondy_db:index_get(Table, RealmUri, by_session, Session, #{}) of
+        {ok, Hits} ->
+            lists:filtermap(
+                fun({PKey, _Cols}) ->
+                    case bondy_db:read(Table, RealmUri, PKey) of
+                        {ok, {Value, _Hlc}} -> {true, pair(Value)};
+                        {error, not_found} -> false
+                    end
+                end,
+                Hits
+            );
+        {error, _} ->
+            []
+    end.
+
+%% @private
+pair(Value) ->
+    Entry = unwrap(Value),
+    {bondy_registry_entry:key(Entry), Entry}.
 
 -doc "".
 -spec fold(
     Store :: t(),
-    Fun :: plum_db:fold_fun(),
+    Fun :: store_fold_fun(),
     Acc :: any(),
     Cont :: continuation()
 ) -> any() | partial(any()).
 
-fold(_Store, Fun, Acc, Cont) ->
-    fold(_Store, Fun, Acc, Cont, ?PDB_FOLD_OPTS).
+fold(_Store, _Fun, Acc, _Cont) ->
+    %% Continuations are always exhausted (see `find/1`).
+    Acc.
 
 -doc "".
 -spec fold(
     Store :: t(),
-    Fun :: plum_db:fold_fun(),
+    Fun :: store_fold_fun(),
     Acc :: any(),
     Cont :: continuation(),
-    Opts :: plum_db:fold_opts()
-) -> any() | partial(any()).
+    Opts :: store_opts()
+) -> any().
 
-fold(Store, Fun, Acc, #continuation{source = plum_db, original = C0}, Opts0) ->
-    Opts = lists:keymerge(1, lists:sort(Opts0), ?PDB_FOLD_OPTS),
+fold(_Store, _Fun, Acc, _Cont, _Opts) ->
+    Acc.
 
-    case plum_db:fold(Fun, Acc, C0, Opts) of
-        {L, C1} when C1 =/= ?EOT ->
-            Cont = #continuation{
-                store = Store,
-                type = undefined,
-                function = ?FUNCTION_NAME,
-                realm_uri = undefined,
-                opts = Opts,
-                source = plum_db,
-                original = C1
-            },
-            {L, Cont};
-        Other ->
-            Other
-    end.
-
--doc "".
+-doc """
+Folds `Fun({EntryKey, Entry}, Acc)` over the entries of `(Type, RealmUri)`,
+optionally narrowed by a `{match, KeyPattern}` option (the registry uses it to
+scan one session's entries). Supports early exit via `throw({break, Acc})`,
+mirroring the old `plum_db:fold/4` shape.
+""".
 -spec fold(
     Store :: t(),
     Type :: entry_type(),
     RealmUri :: wildcard(uri()),
-    Fun :: plum_db:fold_fun(),
+    Fun :: store_fold_fun(),
     Acc :: any(),
-    Opts :: plum_db:fold_opts()
-) -> any() | partial(any()).
+    Opts :: store_opts()
+) -> any().
 
-fold(Store, Type, RealmUri, Fun, Acc, Opts0) when ?IS_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, RealmUri),
-    Opts = lists:keymerge(1, lists:sort(Opts0), ?PDB_FOLD_OPTS),
-
-    case plum_db:fold(Fun, Acc, PDBPrefix, Opts) of
-        L when is_list(L) ->
-            L;
-        {L, Cont1} when Cont1 =/= ?EOT ->
-            C = #continuation{
-                store = Store,
-                type = Type,
-                function = ?FUNCTION_NAME,
-                realm_uri = RealmUri,
-                opts = Opts,
-                source = plum_db,
-                original = Cont1
-            },
-            {L, C};
-        Other ->
-            Other
+fold(_Store, Type, RealmUri, Fun, Acc0, Opts0) when ?IS_TYPE(Type) ->
+    Pairs =
+        case lists:keyfind(match, 1, Opts0) of
+            {match, Pattern} ->
+                find_pairs(
+                    Type,
+                    RealmUri,
+                    bondy_registry_entry:session_id(Pattern),
+                    bondy_registry_entry:id(Pattern)
+                );
+            false ->
+                find_pairs(Type, RealmUri, '_', '_')
+        end,
+    try
+        lists:foldl(Fun, Acc0, Pairs)
+    catch
+        throw:{break, Acc} -> Acc
     end.
 
 -doc "".
@@ -727,15 +765,18 @@ fold(Store, Type, RealmUri, Fun, Acc, Opts0) when ?IS_TYPE(Type) ->
     Store :: t(),
     Type :: entry_type(),
     RealmUri :: uri(),
-    Fun :: plum_db:foreach_fun(),
-    Opts :: plum_db:fold_opts()
+    Fun :: store_foreach_fun(),
+    Opts :: store_opts()
 ) -> ok.
 
-foreach(_Store, Type, RealmUri, Fun, Opts0) when ?IS_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, RealmUri),
-    Opts = lists:keymerge(1, lists:sort(Opts0), ?PDB_FOLD_OPTS),
-
-    plum_db:foreach(Fun, PDBPrefix, Opts).
+foreach(_Store, Type, RealmUri, Fun, _Opts0) when ?IS_TYPE(Type) ->
+    Table = db_table(Type),
+    case bondy_db:list(Table, RealmUri) of
+        {ok, Rows} ->
+            lists:foreach(fun({_K, V, _Hlc}) -> Fun(pair(V)) end, Rows);
+        {error, _} ->
+            ok
+    end.
 
 -doc "".
 -spec continuation_info(continuation()) ->
@@ -1152,29 +1193,57 @@ gen_name(Name, Index) when is_atom(Name), is_integer(Index) ->
 %% =============================================================================
 
 %% @private
-pdb_prefix(registration, RealmUri) when
-    is_binary(RealmUri) orelse RealmUri == '_'
-->
-    ?PLUM_DB_REGISTRATION_PREFIX(RealmUri);
-pdb_prefix(subscription, RealmUri) when
-    is_binary(RealmUri) orelse RealmUri == '_'
-->
-    ?PLUM_DB_SUBSCRIPTION_PREFIX(RealmUri).
+%% The published bondy_db table handle for a registry entry type (the
+%% ephemeral `registry` DB, provisioned by `bondy_namespace_catalog`).
+db_table(registration) ->
+    db_table_for(?BONDY_DB_REGISTRATION_TAB);
+db_table(subscription) ->
+    db_table_for(?BONDY_DB_SUBSCRIPTION_TAB).
 
 %% @private
-%% Inserts the entry in plum_db. This will broadcast the delete amongst
-%% the nodes in the cluster.
-%% It will also called the `on_update/3' callback if enabled.
+db_table_for(Name) ->
+    case bondy_namespace_catalog:table(Name) of
+        undefined ->
+            error({registry_not_provisioned, Name});
+        Table ->
+            Table
+    end.
+
+%% @private
+%% The bondy_db primary key for a registry entry: its random realm-unique
+%% `entry_id`. The realm is passed to bondy_db separately (the memory topology
+%% isolates each realm by bucket), so the bare key need not carry it.
+db_key(EntryId) when is_integer(EntryId) ->
+    term_to_binary(EntryId).
+
+%% @private
+%% Wrap an entry as its durable cell value: the `#entry{}` preserved verbatim
+%% under `entry`, with `session_id` denormalised to the top level so the
+%% `by_session` secondary index can extract it (the index engine navigates maps
+%% only). `session_id` may be `undefined` (a callback / internal entry) — that
+%% simply yields no index entry, which is correct (session-close never targets
+%% it).
+wrap(Entry) ->
+    #{
+        session_id => bondy_registry_entry:session_id(Entry),
+        entry => Entry
+    }.
+
+%% @private
+unwrap(#{entry := Entry}) ->
+    Entry.
+
+%% @private
+%% Inserts the entry into its bondy_db table (ephemeral, memory topology). The
+%% in-memory match indices (trie / ETS) are maintained separately by
+%% `store_indices/2`.
 -spec store(t(), Entry :: bondy_registry_entry:t()) -> ok | {error, any()}.
 
 store(_T, Entry) ->
-    %% to be replaced with local-only ets table and globally replicated summmary
-    PDBPrefix = pdb_prefix(
-        bondy_registry_entry:type(Entry),
-        bondy_registry_entry:realm_uri(Entry)
-    ),
-    Key = bondy_registry_entry:key(Entry),
-    plum_db:put(PDBPrefix, Key, Entry).
+    Table = db_table(bondy_registry_entry:type(Entry)),
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Key = db_key(bondy_registry_entry:id(Entry)),
+    bondy_db:apply(Table, RealmUri, Key, {set, wrap(Entry)}).
 
 %% @private
 -spec delete(
@@ -1182,14 +1251,17 @@ store(_T, Entry) ->
     Type :: entry_type(),
     EntryKey :: entry_key(),
     Opts :: map()
-) -> ok.
+) -> ok | {error, any()}.
 
-delete(#bondy_registry_store{} = _Store, Type, EntryKey, Opts) when
+delete(#bondy_registry_store{} = _Store, Type, EntryKey, _Opts) when
     ?IS_TYPE(Type)
 ->
-    PDBPrefix = pdb_prefix(Type, bondy_registry_entry:realm_uri(EntryKey)),
-    PDBOpts = #{broadcast => maps:get(broadcast, Opts, true)},
-    plum_db:delete(PDBPrefix, EntryKey, PDBOpts).
+    %% bondy_db `clear` is HLC-ordered and idempotent; the plum_db `broadcast`
+    %% knob is gone (cross-node replication rides AAE, design D-3 / oplog.aae).
+    Table = db_table(Type),
+    RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+    Key = db_key(bondy_registry_entry:id(EntryKey)),
+    bondy_db:apply(Table, RealmUri, Key, clear).
 
 %% =============================================================================
 %% PRIVATE: INDICES

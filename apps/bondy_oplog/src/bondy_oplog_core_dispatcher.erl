@@ -49,11 +49,18 @@ compile time.
 
 ## Message shape
 
-Subscribers receive
+Subscribers receive one of
 
 ```erlang
-{bondy_oplog_core_event, Namespace, Key, Hlc, Operation}
+{bondy_oplog_core_event,       Namespace, Key, Hlc, Operation}  %% local write
+{bondy_oplog_core_merge_event, Namespace, Key, Hlc, Operation}  %% remote merge
 ```
+
+The first is published by the applier for a **local** `bondy_db:apply/4`
+write; the second by the replay path when **anti-entropy** merges a peer's
+write into the local projection (the plum_db `on_merge` equivalent). Both
+carry the same `(Key, Operation)` so a reactor can subscribe once and handle
+either tag.
 
 Delivery uses the bare send operator (`Pid ! Msg`), which is local-only
 best-effort and never blocks the publisher.
@@ -105,6 +112,7 @@ does not police this.
 -export([subscribe/2]).
 -export([unsubscribe/1]).
 -export([publish/4]).
+-export([publish_merge/4]).
 -export([subscription_count/0]).
 -export([subscription_count/1]).
 
@@ -155,7 +163,30 @@ subscriber was matched.
 -spec publish(atom(), term(), bondy_oplog_hlc:hlc(), term()) -> ok.
 
 publish(NS, Key, Hlc, Op) ->
-    Msg = {bondy_oplog_core_event, NS, Key, Hlc, Op},
+    fanout({bondy_oplog_core_event, NS, Key, Hlc, Op}, NS, Key).
+
+-doc """
+Publish a **remote-merge** event to every matching subscriber: a cell whose
+value changed on this node because anti-entropy merged a peer's write (not a
+local `bondy_db:apply/4`). This is the bondy_db equivalent of plum_db's
+`on_merge` callback — node-local reactors that must react to a peer-originated
+change (e.g. close a user's sessions when the user is deleted on another node)
+subscribe and handle this message; purely local writes never deliver it.
+
+Subscribers receive `{bondy_oplog_core_merge_event, NS, Key, Hlc, Op}` — the
+same `(Key, Op)` shape as a local event, only the tag differs, so a reactor can
+listen for one or both.
+""".
+-spec publish_merge(atom(), term(), bondy_oplog_hlc:hlc(), term()) -> ok.
+
+publish_merge(NS, Key, Hlc, Op) ->
+    fanout({bondy_oplog_core_merge_event, NS, Key, Hlc, Op}, NS, Key).
+
+%% @private
+%% Shared publish hot path: select the namespace's subscriptions and send `Msg`
+%% to those whose pattern matches `Key`. Runs in the caller process — no
+%% gen_server round-trip, best-effort `Pid ! Msg`.
+fanout(Msg, NS, Key) ->
     Subs = ets:select(?TABLE, [{#sub{ns = NS, _ = '_'}, [], ['$_']}]),
     lists:foreach(
         fun(#sub{pid = Pid, pattern = Pat}) ->

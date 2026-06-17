@@ -58,39 +58,39 @@ adapter's `paginated_select`.
 %% spans every realm and the realm is a per-query argument, exactly as in
 %% `bondy_db`.
 -record(relation, {
-    tag                     ::  atom(),
-    table                   ::  bondy_db:table(),
-    decode                  ::  decoder(),
-    schema_hash             ::  binary()
+    tag :: atom(),
+    table :: bondy_db:table(),
+    decode :: decoder(),
+    schema_hash :: binary()
 }).
 
 %% An opaque resumption token: the storage key of the last emitted row,
 %% scoped to the relation/schema that minted it.
 -record(cursor, {
-    key                     ::  binary(),
-    schema_hash             ::  binary()
+    key :: binary(),
+    schema_hash :: binary()
 }).
 
--opaque relation()  ::  #relation{}.
--opaque cursor()    ::  #cursor{}.
+-opaque relation() :: #relation{}.
+-opaque cursor() :: #cursor{}.
 
 %% Maps a raw `bondy_db` row to the caller's tuple, or rejects it. Rejection
 %% lets one physical table back more than one logical relation (e.g. the
 %% user table interleaves user cells with alias-pointer cells): a rejected
 %% row is skipped and the page is back-filled from the next row, so a page
 %% always holds `limit` accepted rows when the band has that many.
--type decoder()     ::  fun((bondy_db:row()) -> {ok, term()} | skip).
+-type decoder() :: fun((bondy_db:row()) -> {ok, term()} | skip).
 
--type page_opts()   ::  #{
-    limit                   :=  pos_integer(),
-    direction               =>  asc | desc,
-    cursor                  =>  cursor() | undefined
+-type page_opts() :: #{
+    limit := pos_integer(),
+    direction => asc | desc,
+    cursor => cursor() | undefined
 }.
 
--type result_set()  ::  #{
-    values                  :=  [term()],
-    next                    :=  cursor() | undefined,
-    has_more                :=  boolean()
+-type result_set() :: #{
+    values := [term()],
+    next := cursor() | undefined,
+    has_more := boolean()
 }.
 
 -export_type([relation/0]).
@@ -133,8 +133,9 @@ encoding changes so old cursors are rejected as stale.
 """.
 -spec new(Tag :: atom(), Opts :: map()) -> relation().
 
-new(Tag, #{table := Table, decode := Decode} = Opts)
-when is_atom(Tag), is_function(Decode, 1) ->
+new(Tag, #{table := Table, decode := Decode} = Opts) when
+    is_atom(Tag), is_function(Decode, 1)
+->
     Schema = maps:get(schema, Opts, Tag),
     #relation{
         tag = Tag,
@@ -156,8 +157,9 @@ live cell exists or the decoder rejects it, or a substrate `{error, _}`.
 ) ->
     {ok, term()} | {error, not_found} | {error, term()}.
 
-lookup(#relation{table = Table, decode = Decode}, Realm, Key)
-when is_binary(Realm), is_binary(Key) ->
+lookup(#relation{table = Table, decode = Decode}, Realm, Key) when
+    is_binary(Realm), is_binary(Key)
+->
     case bondy_db:read(Table, Realm, Key) of
         {ok, {Value, Hlc}} ->
             case Decode({Key, Value, Hlc}) of
@@ -190,8 +192,9 @@ Returns `{ok, ResultSet}` where `ResultSet` is a `t:result_set/0`
 ) ->
     {ok, result_set()} | {error, term()}.
 
-list(#relation{} = Relation, Realm, #{limit := Limit} = Opts)
-when is_binary(Realm), is_integer(Limit), Limit > 0 ->
+list(#relation{} = Relation, Realm, #{limit := Limit} = Opts) when
+    is_binary(Realm), is_integer(Limit), Limit > 0
+->
     Dir = maps:get(direction, Opts, asc),
     After = maps:get(cursor, Opts, undefined),
     ok = assert_cursor(Relation, After),
@@ -223,8 +226,9 @@ Returns `{ok, Acc}` or a substrate `{error, _}`.
 ) ->
     {ok, term()} | {error, term()}.
 
-fold(#relation{} = Relation, Realm, Fun, Acc0)
-when is_binary(Realm), is_function(Fun, 2) ->
+fold(#relation{} = Relation, Realm, Fun, Acc0) when
+    is_binary(Realm), is_function(Fun, 2)
+->
     do_fold(Relation, Realm, <<>>, Fun, Acc0).
 
 -doc """
@@ -351,7 +355,9 @@ finalize_page(Relation, Accepted, Limit) ->
     end.
 
 %% @private
-do_fold(#relation{table = Table, decode = Decode} = Relation, Realm, Lo, Fun, Acc) ->
+do_fold(
+    #relation{table = Table, decode = Decode} = Relation, Realm, Lo, Fun, Acc
+) ->
     RangeOpts = #{limit => ?CHUNK_MIN, direction => asc},
     case bondy_db:range_all(Table, Realm, Lo, infinity, RangeOpts) of
         {ok, []} ->

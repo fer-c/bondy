@@ -7,7 +7,7 @@
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 
 -moduledoc """
 An entry is a record of a RPC registration or PubSub subscription. It

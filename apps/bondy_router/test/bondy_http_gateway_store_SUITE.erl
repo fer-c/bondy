@@ -20,7 +20,6 @@
 -define(REALM, <<"com.bondy.test.gateway_store">>).
 -define(SPEC_ID, <<"com.bondy.test.gateway_store">>).
 
-
 all() ->
     bondy_ct:all().
 
@@ -38,7 +37,6 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     Config.
-
 
 %% The catalogue provisions the api_gateway bondy_db table at boot (it is the
 %% migrated domain), so a reactor subscription and reads have a live table.
@@ -80,7 +78,6 @@ reload_after_delete_test(_) ->
     ok = bondy_http_gateway:load(spec(Id, ?REALM)),
     ?assert(is_map(bondy_http_gateway:lookup(Id))),
     ok = bondy_http_gateway:delete(Id).
-
 
 %% =============================================================================
 %% Helpers

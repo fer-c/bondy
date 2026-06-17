@@ -954,6 +954,12 @@ resolve_cell_apply_ctx(Opts) ->
                         bondy_oplog_core_registry:entry_causal_tier(Entry),
                     {ok, #{
                         shard_key => Key,
+                        %% Namespace to publish remote-merge events under
+                        %% (`undefined` unless the table opted in via
+                        %% `publish => true`). The replay path in
+                        %% `bondy_oplog_cell_apply:apply_cell_pairs/3` gates
+                        %% merge-event emission on this being set.
+                        publish_ns => maps:get(publish_ns, Opts, undefined),
                         adapter =>
                             bondy_oplog_core_registry:entry_projection_adapter(
                                 Entry

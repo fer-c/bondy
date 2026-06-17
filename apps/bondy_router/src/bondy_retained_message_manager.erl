@@ -80,7 +80,7 @@ match(Realm, Topic, SessionId, Strategy) ->
     Topic :: uri(),
     SessionId :: id(),
     Strategy :: binary(),
-    Opts :: plum_db:fold_opts()
+    Opts :: bondy_retained_message:scan_opts()
 ) ->
     {[bondy_retained_message:t()], bondy_retained_message:continuation()}
     | bondy_retained_message:eot().
@@ -224,18 +224,12 @@ start_link() ->
 %% =============================================================================
 
 init([]) ->
-    %% We subscribe to plum_db_events change notifications. We get updates
-    %% in handle_info so that we can we update the tries
-    MS = [
-        {
-            %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
-            {{{retained_messages, '_'}, '_'}, '_', '_'},
-            [],
-            [true]
-        }
-    ],
-    ok = plum_db_events:subscribe(object_update, MS),
-
+    %% Per-realm count / memory counters are maintained inline at the local
+    %% write sites (`bondy_retained_message:put` / `take` / eviction). The
+    %% plum_db `object_update` subscription that used to sync counters for
+    %% remotely-replicated changes (it fired only on `on_merge`, i.e. remote
+    %% merges — never local writes) is retired with the bondy_db cut-over; that
+    %% remote-counter reactor is deferred to the oplog.aae phase.
     ok = init_evictor(),
 
     {ok, #state{}}.
@@ -255,30 +249,6 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-handle_info(
-    {plum_db_event, object_update, {{{_, Realm}, _Key}, Obj, PrevObj}},
-    State
-) ->
-    ?LOG_DEBUG(#{
-        description => "Object update notification",
-        object => Obj,
-        previous => PrevObj
-    }),
-    case maybe_resolve(Obj) of
-        '$deleted' when PrevObj =/= undefined ->
-            %% We make sure we get the last event from the dvvset
-            Reconciled = plum_db_object:resolve(PrevObj, lww),
-            OldMessg = plum_db_object:value(Reconciled),
-            maybe_decr_counters(Realm, OldMessg);
-        '$deleted' when PrevObj == undefined ->
-            %% We got a delete for an entry we do not know anymore.
-            %% This happens when the registry has just been reset
-            %% as we do not persist registrations any more
-            ok;
-        Msg ->
-            maybe_incr_counters(Realm, Msg)
-    end,
-    {noreply, State};
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -339,22 +309,6 @@ init_evictor() ->
     ]),
 
     ?LOG_NOTICE(#{description => "Retained message evictor initialised"}),
-    ok.
-
-%% @private
-maybe_resolve(Object) ->
-    case plum_db_object:value_count(Object) > 1 of
-        true ->
-            Resolved = plum_db_object:resolve(Object, lww),
-            plum_db_object:value(Resolved);
-        false ->
-            plum_db_object:value(Object)
-    end.
-
-%% @private
-maybe_incr_counters(Realm, Msg) when is_tuple(Msg) ->
-    incr_counters(Realm, 1, bondy_retained_message:size(Msg));
-maybe_incr_counters(_, _) ->
     ok.
 
 %% @private

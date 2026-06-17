@@ -10,12 +10,12 @@ An implementation of the `app_config` behaviour.
 -behaviour(app_config).
 
 %% We renamed the default plum_db data channel
--define(PLUM_DB_DATA_CHANNEL, data).
+-define(BONDY_DB_DATA_CHANNEL, data).
 -define(WAMP_RELAY_CHANNEL, wamp_relay).
 -define(BONDY_AAE_CHANNEL, bondy_aae).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_plum_db.hrl").
+-include("bondy_db_tables.hrl").
 -include("bondy.hrl").
 
 -if(?OTP_RELEASE >= 25).
@@ -325,7 +325,7 @@ setup_mods() ->
 
 setup_partisan_channels() ->
     DefaultChannels = #{
-        ?PLUM_DB_DATA_CHANNEL => #{parallelism => 2, compression => false},
+        ?BONDY_DB_DATA_CHANNEL => #{parallelism => 2, compression => false},
         ?WAMP_RELAY_CHANNEL => #{parallelism => 2, compression => false},
         ?BONDY_AAE_CHANNEL => #{parallelism => 2, compression => false}
     },
@@ -346,7 +346,7 @@ setup_partisan_channels() ->
 
     %% There is some redundancy as plum_db_config also configures channels, so
     %% we make sure they coincide.
-    DataChannelOpts = maps:get(?PLUM_DB_DATA_CHANNEL, Channels),
+    DataChannelOpts = maps:get(?BONDY_DB_DATA_CHANNEL, Channels),
     application:set_env(plum_db, data_channel_opts, DataChannelOpts),
     application:set_env(partisan, channels, maps:to_list(Channels)).
 
@@ -419,42 +419,20 @@ dynamic_buffer(Key) ->
 
 %% @private
 prepare_private_config() ->
-    Config0 = configure_plum_db(?CONFIG),
-    configure_message_retention(Config0).
+    %% Retained messages used to inject a `{retained_messages, storage_type}`
+    %% plum_db prefix here; they now live in the durable bondy_db `core` table
+    %% (always durable — `wamp.message_retention.storage_type` is inert), so no
+    %% plum_db prefix is needed and the config knob no longer affects storage.
+    {ok, configure_plum_db(?CONFIG)}.
 
 %% @private
 configure_plum_db(Config) ->
     PDBConfig = [
-        {data_channel, ?PLUM_DB_DATA_CHANNEL},
-        {prefixes, ?PLUM_DB_PREFIXES},
+        {data_channel, ?BONDY_DB_DATA_CHANNEL},
+        {prefixes, ?BONDY_DB_PREFIXES},
         {data_dir, get(platform_data_dir)}
     ],
     key_value:set(plum_db, PDBConfig, Config).
-
-%% @private
-configure_message_retention(Config0) ->
-    try
-        case bondy_config:get([wamp_message_retention, enabled], false) of
-            true ->
-                Type = bondy_config:get([wamp_message_retention, storage_type]),
-                Prefixes0 = key_value:get([plum_db, prefixes], Config0),
-                Prefixes1 = [{retained_messages, Type} | Prefixes0],
-                Config1 = key_value:set(
-                    [plum_db, prefixes], Prefixes1, Config0
-                ),
-                {ok, Config1};
-            false ->
-                {ok, Config0}
-        end
-    catch
-        _:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while preparing configuration",
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end.
 
 %% @private
 configure_registry() ->

@@ -21,7 +21,6 @@
 
 -define(REALM, <<"com.bondy.test.ticket_store">>).
 
-
 revoke_all_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         [
@@ -30,7 +29,6 @@ revoke_all_test_() ->
             {"revoke_all/1 clears the whole realm", fun revoke_all_realm/0}
         ]
     end}.
-
 
 %% revoke_all/2 must clear exactly the target user's cells. Seed alice (two
 %% distinct store keys) and bob (one); revoking alice leaves only bob.
@@ -63,7 +61,6 @@ revoke_all_realm() ->
 
     ok = bondy_ticket:revoke_all(?REALM),
     ?assertEqual([], live_authids(T)).
-
 
 %% =============================================================================
 %% Helpers

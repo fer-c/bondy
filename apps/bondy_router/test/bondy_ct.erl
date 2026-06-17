@@ -141,57 +141,6 @@
         {parallelism, 1},
         {peer_port, 18086}
     ]},
-    {plum_db, [
-        {rocksdb, [
-            {open, [
-                {level_compaction_dynamic_level_bytes, true},
-                {max_bytes_for_level_multiplier, 10},
-                {max_bytes_for_level_base, 536870912},
-                {enable_write_thread_adaptive_yield, true},
-                {allow_concurrent_memtable_write, true},
-                {use_direct_io_for_flush_and_compaction, true},
-                {use_direct_reads, false},
-                {bottommost_compression_opts, [{enabled, false}]},
-                {bottommost_compression, none},
-                {compression_opts, [{enabled, true}]},
-                {compression, lz4},
-                {periodic_compaction_seconds, 604800},
-                {level0_file_num_compaction_trigger, 4},
-                {max_subcompactions, 1},
-                {max_background_flushes, 1},
-                {max_background_compactions, 1},
-                {max_background_jobs, 1},
-                {wal_ttl_seconds, 2592000},
-                {max_total_wal_size, 536870912},
-                {total_threads, 2},
-                {block_based_table_options, [
-                    {block_cache_size, 2147483648},
-                    {block_size, 4096},
-                    {cache_index_and_filter_blocks, false},
-                    {bloom_filter_policy, 10}
-                ]},
-                {sync, false},
-                {min_write_buffer_number_to_merge, 1},
-                {max_write_buffer_number, 2},
-                {write_buffer_size, 67108864},
-                {num_levels, 7}
-            ]},
-            {read, [{verify_checksums, true}]}
-        ]},
-        {aae_exchange_on_cluster_join, true},
-        {hashtree_ttl, 604800},
-        {hashtree_timer, 10000},
-        {aae_enabled, true},
-        {data_exchange_timeout, 60000},
-        {data_dir, "./data"},
-        {store_open_retries_delay, 2000},
-        {store_open_retry_limit, 30},
-        {shard_by, prefix},
-        {partitions, 16},
-        {wait_for_aae_exchange, false},
-        {wait_for_hashtrees, true},
-        {wait_for_partitions, true}
-    ]},
     {wamp, [
         {uri_strictness, loose}
     ]},
@@ -705,8 +654,11 @@
     tests/1,
     start_bondy/0,
     stop_bondy/0,
+    start_cluster/2,
     start_cluster/3,
-    stop_nodes/1
+    stop_cluster/1,
+    stop_nodes/1,
+    peer_boot/1
 ]).
 
 %% =============================================================================
@@ -752,7 +704,7 @@ start_bondy() ->
                 begin
                     application:unload(App),
                     application:set_env([{App, Env}]),
-                    case lists:member(App, [tuplespace, plum_db]) of
+                    case lists:member(App, [tuplespace]) of
                         true ->
                             ok;
                         false ->
@@ -784,12 +736,83 @@ stop_bondy() ->
     application:stop(bondy_router).
 
 %% -----------------------------------------------------------------------------
-%% @doc Starts a set of TEST_SERVER nodes as per `Config' and joins them in a
-%% cluster.
+%% @doc Starts `length(Names)' full `bondy_router' nodes as `peer' nodes on
+%% 127.0.0.1, each with an isolated data directory and a unique Partisan listen
+%% port, all client listeners disabled, and bondy_db anti-entropy
+%% (`oplog.aae') enabled; then joins them into a single Partisan cluster and
+%% waits for the membership to converge.
+%%
+%% `Names' is a list of short node-name atoms (e.g. `[bondy1, bondy2, bondy3]').
+%% `Config' is the CT config — its `priv_dir' roots the per-node data dirs.
+%% Returns `[{Name, Node, Peer}]' in the same order as `Names'.
+%%
+%% The controller drives the peers over Erlang distribution (`erpc'); Bondy's
+%% own replication never uses disterl — its Partisan runs with `connect_disterl
+%% => false', so all node-to-node AAE traffic rides the Partisan overlay.
 %% @end
 %% -----------------------------------------------------------------------------
-start_cluster(_Case, _Config, _Options) ->
-    error(not_implemented).
+-spec start_cluster([atom()], Config :: proplists:proplist()) ->
+    [{atom(), node(), pid()}].
+
+start_cluster(Names, Config) when is_list(Names) ->
+    ok = start_disterl(),
+    PrivDir = proplists:get_value(priv_dir, Config),
+    PrivDir =/= undefined orelse error({missing_priv_dir, Config}),
+    Cookie = atom_to_list(erlang:get_cookie()),
+    Nodes = [
+        start_node(Name, Idx, PrivDir, Cookie)
+     || {Name, Idx} <- lists:zip(Names, lists:seq(1, length(Names)))
+    ],
+    ok = form_cluster(Nodes),
+    ok = wait_for_members(Nodes, length(Nodes), 30000),
+    Nodes.
+
+%% -----------------------------------------------------------------------------
+%% @doc Backwards-compatible 3-arity form. `Options' must carry a `names' key
+%% with the list of node-name atoms.
+%% @end
+%% -----------------------------------------------------------------------------
+start_cluster(_Case, Config, #{names := Names}) ->
+    start_cluster(Names, Config).
+
+%% -----------------------------------------------------------------------------
+%% @doc Stops a cluster started by {@link start_cluster/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_cluster([{atom(), node(), pid()}]) -> ok.
+
+stop_cluster(Nodes) ->
+    lists:foreach(
+        fun({_Name, _Node, Peer}) -> catch peer:stop(Peer) end,
+        Nodes
+    ),
+    ok.
+
+%% -----------------------------------------------------------------------------
+%% @doc Boots `bondy_router' on the local (peer) node from the per-node `Env'.
+%% Invoked on each peer via `erpc'. Mirrors {@link start_bondy/0}'s env-load
+%% sequence, but (a) takes a caller-supplied env so each node gets isolated
+%% data dirs / ports, and (b) does NOT touch distribution — the peer is already
+%% a distributed node courtesy of `peer:start_link/1'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer_boot([{atom(), term()}]) -> ok.
+
+peer_boot(Env) ->
+    ok = ensure_etc(),
+    application:set_env([{kernel, ?KERNEL_ENV}]),
+    _ = [
+        begin
+            _ = application:unload(App),
+            application:set_env([{App, AppEnv}]),
+            case lists:member(App, [tuplespace]) of
+                true -> ok;
+                false -> _ = application:load(App)
+            end
+        end
+     || {App, AppEnv} <- Env
+    ],
+    maybe_error(application:ensure_all_started(bondy_router)).
 
 %% -----------------------------------------------------------------------------
 %% @doc Stop the CT peers in `Nodes'.
@@ -904,3 +927,125 @@ join(Node, Peer, _Config) ->
     PeerSpec = rpc:call(Peer, partisan, node_spec, []),
     ct:pal("Joining node: ~p with peer: ~p", [Node, PeerSpec]),
     ok = rpc:call(Node, partisan_peer_service, join, [PeerSpec]).
+
+%% @private
+%% Boots one peer node, makes this module loadable on it, and starts
+%% `bondy_router' from an isolated per-node env.
+start_node(Name, Idx, PrivDir, Cookie) ->
+    DataDir = filename:join(PrivDir, atom_to_list(Name)),
+    ok = filelib:ensure_dir(filename:join(DataDir, ".keep")),
+    %% Match the controller's host (and thus its short/long name domain) so the
+    %% peer can start distribution; a literal "127.0.0.1" would force a longname
+    %% under a shortnames controller and the peer would exit with
+    %% `nodistribution'.
+    PeerOpts = #{
+        name => Name,
+        host => controller_host(),
+        connection => standard_io,
+        args => ["-setcookie", Cookie, "-pa" | codepath()]
+    },
+    %% `peer:start/1' (not `start_link/1'): the peers must outlive the
+    %% `init_per_suite' process that starts them and survive across testcases.
+    %% The `peer'-spawned control process owns the stdio channel, so the nodes
+    %% still halt cleanly if the controller node dies.
+    {ok, Peer, Node} = peer:start(PeerOpts),
+    %% `peer_boot/1' runs on the peer, so make sure this module is loaded there.
+    {?MODULE, Bin, File} = code:get_object_code(?MODULE),
+    {module, ?MODULE} =
+        erpc:call(Node, code, load_binary, [?MODULE, File, Bin]),
+    Env = node_env(DataDir, 18086 + Idx),
+    ok = erpc:call(Node, ?MODULE, peer_boot, [Env], 60000),
+    {Name, Node, Peer}.
+
+%% @private
+%% The host part of the controller's node name (e.g. "myhost" for
+%% `runner@myhost'). Peers are created on this host so they share the
+%% controller's short/long name domain.
+controller_host() ->
+    case string:split(atom_to_list(node()), "@") of
+        [_, Host] -> Host;
+        _ -> "localhost"
+    end.
+
+%% @private
+%% Per-node override of ?ENV: isolated data dirs (so leveled / the bondy_db
+%% `core' store don't collide or lock each other), a unique Partisan
+%% listen port, all client listeners disabled (irrelevant to AAE and would
+%% clash across same-host nodes), and bondy_db AAE enabled with a fast tick.
+node_env(DataDir, PeerPort) ->
+    Disabled = [
+        admin_api_http,
+        admin_api_https,
+        api_gateway_http,
+        api_gateway_https,
+        wamp_tcp,
+        wamp_tls,
+        wamp_uds,
+        bridge_relay_tcp,
+        bridge_relay_tls
+    ],
+    E0 = key_value:set(
+        [eleveldb, data_root], filename:join(DataDir, "leveldb"), ?ENV
+    ),
+    E1 = key_value:set([bondy_router, platform_data_dir], DataDir, E0),
+    E2 = key_value:set([partisan, peer_port], PeerPort, E1),
+    E3 = lists:foldl(
+        fun(L, Acc) ->
+            key_value:set([bondy_router, L, enabled], false, Acc)
+        end,
+        E2,
+        Disabled
+    ),
+    E4 = key_value:set([bondy_oplog, aae_enabled], true, E3),
+    E5 = key_value:set([bondy_oplog, sync_interval_ms], 200, E4),
+    key_value:set([bondy_oplog, aae_fanout], 3, E5).
+
+%% @private
+%% Joins every node to the first one. Partisan's full-membership strategy
+%% gossips the membership so all nodes converge to the whole set.
+form_cluster([{_, First, _} | Rest]) ->
+    lists:foreach(
+        fun({_, Node, _}) -> ok = join(Node, First, []) end,
+        Rest
+    ),
+    ok;
+form_cluster(_) ->
+    ok.
+
+%% @private
+%% Polls every node's Partisan membership until each sees at least `Expected'
+%% members (membership includes the local node), or fails after `Timeout' ms.
+wait_for_members(Nodes, Expected, Timeout) ->
+    Deadline = erlang:monotonic_time(millisecond) + Timeout,
+    wait_for_members_loop(Nodes, Expected, Deadline).
+
+%% @private
+wait_for_members_loop(Nodes, Expected, Deadline) ->
+    Converged = lists:all(
+        fun({_, Node, _}) ->
+            case rpc:call(Node, partisan_peer_service, members, []) of
+                {ok, Members} -> length(Members) >= Expected;
+                _ -> false
+            end
+        end,
+        Nodes
+    ),
+    case Converged of
+        true ->
+            ok;
+        false ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true ->
+                    Status = [
+                        {Node,
+                            rpc:call(
+                                Node, partisan_peer_service, members, []
+                            )}
+                     || {_, Node, _} <- Nodes
+                    ],
+                    error({cluster_membership_timeout, Status});
+                false ->
+                    timer:sleep(250),
+                    wait_for_members_loop(Nodes, Expected, Deadline)
+            end
+    end.

@@ -484,7 +484,9 @@ list_members(_) ->
     ok = flush_member_index(),
 
     %% All members, in (normalised username) key order, realm-scoped.
-    ?assertEqual({R1Users, undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})),
+    ?assertEqual(
+        {R1Users, undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})
+    ),
     ?assertEqual(
         {[<<"mtu_other">>], undefined},
         bondy_rbac_group:members(?REALM2_URI, G, #{})
@@ -508,7 +510,9 @@ group_deletion_cleans_members(_) ->
     Users = [<<"dgu_01">>, <<"dgu_02">>],
     [ok = add_member(?REALM1_URI, U, [G]) || U <- Users],
     ok = flush_member_index(),
-    ?assertEqual({Users, undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})),
+    ?assertEqual(
+        {Users, undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})
+    ),
 
     ok = bondy_rbac_group:remove(?REALM1_URI, G),
 
@@ -522,7 +526,9 @@ group_deletion_cleans_members(_) ->
     ],
     %% And the reverse index has no entries left for the deleted group.
     ok = flush_member_index(),
-    ?assertEqual({[], undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})).
+    ?assertEqual(
+        {[], undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})
+    ).
 
 %% =============================================================================
 %% Member-test helpers

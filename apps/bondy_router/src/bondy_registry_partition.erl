@@ -402,7 +402,7 @@ Finds entries in the registry using a pattern.
 This is used for entry maintenance and not for routing. For routing based on
 and URI use the `match_` functions instead.
 """.
--spec find(pid(), entry_type(), entry_key(), plum_db:match_opts()) ->
+-spec find(pid(), entry_type(), entry_key(), bondy_registry_store:store_opts()) ->
     bondy_registry_store:find_result().
 
 find(Partition, Type, Pattern, Opts) when ?IS_TYPE(Type) ->
@@ -411,7 +411,7 @@ find(Partition, Type, Pattern, Opts) when ?IS_TYPE(Type) ->
 -doc "".
 -spec fold(
     Partition :: pid(),
-    Fun :: plum_db:fold_fun(),
+    Fun :: bondy_registry_store:store_fold_fun(),
     Acc :: any(),
     Cont :: continuation()
 ) ->
@@ -423,10 +423,10 @@ fold(Partition, Fun, Acc, Cont) ->
 -doc "".
 -spec fold(
     Partition :: pid(),
-    Fun :: plum_db:fold_fun(),
+    Fun :: bondy_registry_store:store_fold_fun(),
     Acc :: any(),
     Cont :: continuation(),
-    Opts :: plum_db:fold_opts()
+    Opts :: bondy_registry_store:store_opts()
 ) ->
     any() | {any(), continuation() | eot()}.
 
@@ -438,9 +438,9 @@ fold(Partition, Fun, Acc, Cont, Opts) ->
     Partition :: pid(),
     Type :: entry_type(),
     RealmUri :: wildcard(uri()),
-    Fun :: plum_db:fold_fun(),
+    Fun :: bondy_registry_store:store_fold_fun(),
     Acc :: any(),
-    Opts :: plum_db:fold_opts()
+    Opts :: bondy_registry_store:store_opts()
 ) ->
     any() | {any(), continuation() | eot()}.
 

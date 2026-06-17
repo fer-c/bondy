@@ -377,9 +377,14 @@ handle_cast(Event, State) ->
 handle_info(
     {bondy_oplog_core_event, _NS, Key, _Hlc, _Op}, State0
 ) ->
-    %% An API spec changed in bondy_db — a local write OR an AE-replicated
-    %% remote write. Debounce-batch so a burst (boot config load, an AE sync)
-    %% collapses into a single dispatch-table rebuild.
+    %% An API spec changed locally in bondy_db. Debounce-batch so a burst (e.g.
+    %% boot config load) collapses into a single dispatch-table rebuild.
+    {noreply, note_spec_change(Key, State0)};
+handle_info(
+    {bondy_oplog_core_merge_event, _NS, Key, _Hlc, _Op}, State0
+) ->
+    %% A peer's API spec change arrived via anti-entropy (the merge-side hook).
+    %% Rebuild this node's dispatch table too, debounced like the local case.
     {noreply, note_spec_change(Key, State0)};
 handle_info(rebuild_specs, State0) ->
     %% The debounce window elapsed — rebuild once for the whole batch.
@@ -506,7 +511,9 @@ stored_specs() ->
 %% @private
 %% Record a changed spec id and (re)arm the debounce timer for a coalesced
 %% rebuild. Repeated changes inside the window accumulate behind one timer.
-note_spec_change(Key, #state{updated_specs = Specs, rebuild_timer = Timer} = St) ->
+note_spec_change(
+    Key, #state{updated_specs = Specs, rebuild_timer = Timer} = St
+) ->
     Specs1 =
         case lists:member(Key, Specs) of
             true -> Specs;
