@@ -146,6 +146,7 @@ it).
 -export([rebuild_indexes/1]).
 -export([index_lag/2]).
 -export([await_index/2]).
+-export([ensure_fresh/2]).
 -export([info/1]).
 -export([namespace/1]).
 -export([publish_event/1]).
@@ -157,6 +158,11 @@ it).
 %% guard directly, without spinning a durable (leveled) Bookie just to
 %% reach its rejection branch.
 -export([assert_fused_requires_ephemeral/2]).
+%% Exposed so the strategy-aware routing (AR-2) can be pinned directly: the
+%% co-location invariant (a subject's record + grants share a shard) and the
+%% legacy `entity` equivalence, without standing up real shards.
+-export([shard_for/3]).
+-export([aggregate_root/2]).
 -endif.
 
 -define(DEFAULT_SHARD_COUNT, 8).
@@ -422,6 +428,14 @@ open_table_provision(
     Db, EntityType, Merged, FoldModule, Backend, Topology, State
 ) ->
     ShardCount = maps:get(shard_count, Merged, ?DEFAULT_SHARD_COUNT),
+    %% Strategy-aware shard routing inputs (AR-2 / AR-3). Threaded into the table
+    %% state and consumed by `shard_for/3` (wired in a later step); the defaults
+    %% reproduce the legacy `phash2({Bucket, Key})` placement (`shard_by => key`,
+    %% strategy `entity`), so a table declaring neither routes exactly as before.
+    PartitionStrategy = maps:get(partition_strategy, Merged, entity),
+    RealmPrefixDepth = maps:get(realm_prefix_depth, Merged, 1),
+    ShardBy = maps:get(shard_by, Merged, key),
+    AggregateRoot = maps:get(aggregate_root, Merged, identity),
     DbName = maps:get(name, Db),
     NS = namespace_atom(DbName, EntityType),
     %% A3 — default the applier's OldValue frame-cache ON for durable
@@ -529,6 +543,10 @@ open_table_provision(
                                 entity_type => EntityType,
                                 namespace => NS,
                                 shard_count => ShardCount,
+                                partition_strategy => PartitionStrategy,
+                                realm_prefix_depth => RealmPrefixDepth,
+                                shard_by => ShardBy,
+                                aggregate_root => AggregateRoot,
                                 fold_module => FoldModule,
                                 crdt_module => CrdtModule,
                                 causal_tier => causal_tier_of(CrdtModule),
@@ -738,7 +756,11 @@ apply(
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
     %% G-1: fold the realm into the storage key (see cell_key/3).
     SKey = cell_key(Topology, Realm, Key),
-    InstanceId = instance_id_for(Table, Bucket, SKey),
+    %% Strategy-aware shard placement (AR-2 / AR-3): pick the shard from the
+    %% table's partition strategy (`aggregate` co-locates a subject's facts;
+    %% `entity` is the legacy `phash2({Bucket, SKey})`), then map it to its
+    %% oplog instance. The point read (`read/3`) derives the same shard.
+    InstanceId = instance_for_shard(Table, shard_for(Table, Realm, Key)),
     %% Write→readable latency sampling. The gate is a free `persistent_term`
     %% read; when enabled we time the whole synchronous write (append +
     %% `await_apply`, plus the tier_2 context read) — that span is exactly
@@ -1094,7 +1116,7 @@ read(
         db_topology := Topology,
         table_state := TableState,
         entity_type := EntityType
-    },
+    } = Table,
     Realm,
     Key
 ) when
@@ -1103,7 +1125,11 @@ read(
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
     %% G-1: fold the realm into the storage key (see cell_key/3).
     SKey = cell_key(Topology, Realm, Key),
-    case bondy_oplog_core:read(NS, ?INDEX, Bucket, SKey) of
+    %% Force the read onto the same shard the write chose (AR-2): under any
+    %% non-`entity` strategy the shard is NOT `phash2({Bucket, SKey})`, so the
+    %% explicit override is what keeps write and read addressing one shard.
+    Shard = shard_for(Table, Realm, Key),
+    case bondy_oplog_core:read(NS, ?INDEX, Bucket, SKey, #{shard => Shard}) of
         {Value, Hlc} when Value =/= undefined ->
             {ok, {Value, Hlc}};
         undefined ->
@@ -1115,10 +1141,12 @@ read(
 -doc """
 Single-shard range scan over `(Realm, [Low, High))`.
 
-The shard is selected by `phash2(Low, ShardCount)` unless the caller
-passes `Opts#{shard => N}`. Callers whose `[Low, High)` spans more than
-one shard MUST scatter across shards themselves and merge the results;
-the facade does not do scatter-merge in v1.
+The shard defaults to the one holding `Low` under the table's partition
+strategy (`shard_for/3` — for the legacy `entity` strategy this is
+`phash2({Bucket, Low})`), unless the caller passes `Opts#{shard => N}`.
+Callers whose `[Low, High)` spans more than one shard / aggregate MUST scatter
+across shards themselves and merge the results (see `range_all/5` / `list/2`);
+the facade does not do scatter-merge here.
 
 Routes through `bondy_oplog_core:range/4`, which merges the projection
 with the per-shard overlay (currently always empty at this layer).
@@ -1141,11 +1169,10 @@ decoded value (a domain term, never raw bytes).
 range(
     #{
         namespace := NS,
-        shard_count := ShardCount,
         db_topology := Topology,
         table_state := TableState,
         entity_type := EntityType
-    },
+    } = Table,
     Realm,
     Low,
     High,
@@ -1161,7 +1188,11 @@ range(
     %% topologies, so their shard formula `phash2({Bucket, Low})` is preserved).
     Lo = cell_key(Topology, Realm, Low),
     Hi = fold_high(Topology, Realm, High),
-    Shard = maps:get(shard, Opts, erlang:phash2({Bucket, Lo}, ShardCount)),
+    %% Single-shard scan: default to the shard holding `Low` under the table's
+    %% partition strategy (for `entity` this is the legacy
+    %% `phash2({Bucket, Lo})`). A range spanning more than one shard / aggregate
+    %% MUST scatter via `range_all/5`; this default is for within-shard scans.
+    Shard = maps:get(shard, Opts, shard_for(Table, Realm, Low)),
     AdapterOpts = (maps:without([shard], Opts))#{shard => Shard},
     case bondy_oplog_core:range(NS, ?INDEX, Bucket, {Lo, Hi}, AdapterOpts) of
         {ok, Rows} ->
@@ -1664,6 +1695,33 @@ table was opened with `publish => true`).
 namespace(#{namespace := NS}) ->
     NS.
 
+
+-doc """
+The application-facing AE freshness fence (`STORAGE_ARCHITECTURE` §9.1/§10.5).
+
+Returns `ok` when every shard of every given table has completed an
+anti-entropy round within `MaxLag` milliseconds, or `{stale, NSs}` naming the
+namespaces whose AE is staler than the bound. `infinity` always passes.
+
+Each table maps to its oplog namespace (`t:table/0`'s `namespace`), so callers
+pass table handles (e.g. the `security_users` / grant tables for the auth path)
+rather than raw namespace atoms.
+
+IMPORTANT: with anti-entropy **disabled** (`bondy_oplog` `aae_enabled = false`,
+the default) the per-shard AE atomics are never advanced past their
+"infinitely stale" sentinel, so a finite `MaxLag` returns `{stale, _}` for every
+namespace. Callers MUST gate enforcement on AAE being enabled — the fence is a
+cross-node-staleness guard and there is no cross-node window with AAE off.
+""".
+-spec ensure_fresh(
+    Tables :: [table()],
+    MaxLag :: non_neg_integer() | infinity
+) -> ok | {stale, [atom()]}.
+
+ensure_fresh(Tables, MaxLag) when is_list(Tables) ->
+    NSs = [maps:get(namespace, T) || T <- Tables],
+    bondy_oplog_core:ensure_fresh(NSs, MaxLag).
+
 -doc """
 The `publish_fun` used by a `publish => true` table: derives the
 `{Key, FoldOp}` pair forwarded to `bondy_oplog_core` subscribers from a verified
@@ -2055,6 +2113,11 @@ start_shard_instance(
     CallerApplier = maps:get(applier, OplogOpts, #{}),
     Pinned = #{
         fold_module => FoldModule,
+        %% This shard's read-side AE freshness target: the applier bumps it on
+        %% each commit and the AE heartbeat (`bondy_oplog_sync_session`) on each
+        %% successful round, so an idle primary shard still stays fresh — which
+        %% the auth freshness fence (STORAGE_ARCHITECTURE §9.1/§9.2) depends on.
+        ae_targets => [{NS, ?INDEX, Shard}],
         applier => CallerApplier#{
             cell_apply_target => {NS, ?INDEX, Shard},
             secondary_indexes => SecIndexes
@@ -2835,13 +2898,83 @@ index_rows(Topology, Realm, Rows) ->
     ].
 
 %% @private
-%% Shard derivation matches `bondy_oplog_core`: `phash2({Bucket, Key}, N)`.
-%% That same composite is used to pick the instance_id so an `apply/4`
-%% and the subsequent `read/3` for the same `(Bucket, Key)` always hit
-%% the same shard's oplog instance and projection.
-instance_id_for(#{instance_ids := Ids, shard_count := SC}, Bucket, Key) ->
-    Shard = erlang:phash2({Bucket, Key}, SC),
+%% Map an already-chosen shard index to its oplog instance_id.
+instance_for_shard(#{instance_ids := Ids}, Shard) ->
     maps:get(Shard, Ids).
+
+%% @private
+%% Strategy-aware shard selection (AR-2 / AR-3): the shard a `(Realm, Key)` cell
+%% routes to under the table's `partition_strategy`. Write (`apply/4`) and point
+%% read (`read/3`) BOTH call this so they always address the same shard.
+%%
+%%   entity    — legacy `phash2({Bucket, FoldedKey}, N)`, where FoldedKey is the
+%%               realm-folded cell key (G-1). Byte-identical to pre-AR-2 routing,
+%%               so a table that declares no strategy routes exactly as before.
+%%   aggregate — `phash2({Realm, AggregateRoot}, N)`: a subject's record + its
+%%               grants + sources co-locate on one shard (atomic batch, AR-4),
+%%               while subjects spread across shards so a single realm still
+%%               fills every core. The shard is independent of the Bucket, which
+%%               is precisely what co-locates different entity types of one
+%%               subject.
+%%   realm     — `phash2(realm_prefix(Realm, Depth), N)`: a whole realm (or a
+%%               shared dotted-prefix group of realms) on one shard. Single realm
+%%               ⇒ one shard (use only when per-realm atomicity outweighs the
+%%               lost write parallelism).
+shard_for(#{shard_count := SC} = Table, Realm, Key) ->
+    case maps:get(partition_strategy, Table, entity) of
+        entity ->
+            #{db_topology := Topology, entity_type := ET,
+              table_state := TS} = Table,
+            Bucket = Topology:bucket_for(ET, Realm, TS),
+            SKey = cell_key(Topology, Realm, Key),
+            erlang:phash2({Bucket, SKey}, SC);
+        aggregate ->
+            Root = aggregate_root(maps:get(aggregate_root, Table, identity), Key),
+            erlang:phash2({Realm, Root}, SC);
+        realm ->
+            Prefix = realm_prefix(Realm, maps:get(realm_prefix_depth, Table, 1)),
+            erlang:phash2(Prefix, SC)
+    end.
+
+%% @private
+%% Extract the aggregate root from a cell key per the table's `aggregate_root`:
+%%
+%%   identity   — the subject IS the key (e.g. a user record keyed by username),
+%%                so the whole key is the root.
+%%   leading_col — the subject prefixes an order-preserving composite key
+%%                 (`encode_col(Subject), 0, term_to_binary(Rest)`, as in
+%%                 `bondy_rbac:encode_key/1` / `bondy_rbac_source:encode_key/1`).
+%%                 Decode that leading column so the grant/source hashes to the
+%%                 SAME `{Realm, Subject}` shard as the subject's own record —
+%%                 the record keys by the plain (un-encoded) subject, so the
+%%                 column MUST be decoded back to that term to match.
+aggregate_root(identity, Key) ->
+    Key;
+aggregate_root(leading_col, Key) when is_binary(Key) ->
+    case binary:match(Key, <<0>>) of
+        {Pos, 1} ->
+            ColBin = binary:part(Key, 0, Pos),
+            bondy_oplog_index_key:decode_col(ColBin);
+        nomatch ->
+            %% No separator (a non-composite key under a leading_col table):
+            %% defensively treat the whole key as the root.
+            Key
+    end.
+
+%% @private
+%% The shard key for `partition_strategy = realm`: the first `Depth` dotted
+%% components of the realm URI joined by `.` (so realms sharing that prefix
+%% co-locate), or the whole realm when it has at most `Depth` components or
+%% `Depth =< 0`.
+realm_prefix(Realm, Depth) when is_integer(Depth), Depth >= 1 ->
+    case binary:split(Realm, <<".">>, [global]) of
+        Parts when length(Parts) > Depth ->
+            iolist_to_binary(lists:join(<<".">>, lists:sublist(Parts, Depth)));
+        _ ->
+            Realm
+    end;
+realm_prefix(Realm, _Depth) ->
+    Realm.
 
 %% @private
 %% Realm separation (G-1). The topology does pure shard placement and never

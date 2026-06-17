@@ -18,6 +18,11 @@ system and the user's password capabilities.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_security.hrl").
+-include("bondy_db_tables.hrl").
+
+%% Default AE-freshness bound for the §9.8 auth fence; overridable via the
+%% `bondy_router` `auth_max_lag` app env (cuttlefish `oplog.aae.fence.max_lag`).
+-define(AUTH_MAX_LAG, 1000).
 
 -type context() :: #{
     realm_uri := uri(),
@@ -440,12 +445,20 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt0) ->
             callback_mod_state := CBModState0
         } = Ctxt0,
 
-        case CBMod:authenticate(Signature, DataIn, Ctxt0, CBModState0) of
-            {ok, DataOut, CBModState1} ->
-                Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
-                {ok, DataOut, Ctxt};
-            {error, Reason, _} ->
-                {error, Reason}
+        %% §9.8 AE auth fence — applied to EVERY method here in the common path:
+        %% a node whose security view is stale/isolated must refuse all new
+        %% authentication, not just the bearer-token path.
+        case security_fence() of
+            ok ->
+                case CBMod:authenticate(Signature, DataIn, Ctxt0, CBModState0) of
+                    {ok, DataOut, CBModState1} ->
+                        Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
+                        {ok, DataOut, Ctxt};
+                    {error, Reason, _} ->
+                        {error, Reason}
+                end;
+            {error, _} = Error ->
+                Error
         end
     catch
         throw:EReason ->
@@ -470,6 +483,61 @@ authenticate(Method, Signature, DataIn, Ctxt) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% §9.8 AE auth fence. On a node whose view of the security tables (users /
+%% grants) is staler than `auth_max_lag` — a lagging or partitioned node —
+%% refuse ALL new authentication regardless of method: such a node must not
+%% authenticate against a security view that may predate a credential or
+%% permission change made elsewhere.
+%%
+%% A no-op unless the AAE phase is enabled (`oplog.aae`): with AAE off, local
+%% writes are synchronous and there is no cross-node staleness window. The
+%% per-shard freshness signal is produced AE-side (`bondy_oplog_sync_session`),
+%% honouring the `oplog.aae.fence.on_isolation` policy; this fence only reads it.
+-spec security_fence() -> ok | {error, temporarily_unavailable}.
+
+security_fence() ->
+    case aae_enabled() of
+        false ->
+            ok;
+        true ->
+            case fence_tables() of
+                [] ->
+                    {error, temporarily_unavailable};
+                Tables ->
+                    case bondy_db:ensure_fresh(Tables, auth_max_lag()) of
+                        ok -> ok;
+                        {stale, _NSs} -> {error, temporarily_unavailable}
+                    end
+            end
+    end.
+
+%% @private
+%% The security tables the fence checks for freshness. Fails closed (empty list
+%% → refuse) if the catalogue has not provisioned them.
+fence_tables() ->
+    lists:filtermap(
+        fun(Tab) ->
+            case bondy_namespace_catalog:table(Tab) of
+                undefined -> false;
+                Table -> {true, Table}
+            end
+        end,
+        [
+            ?BONDY_DB_USER_TAB,
+            ?BONDY_DB_USER_GRANT_TAB,
+            ?BONDY_DB_GROUP_GRANT_TAB
+        ]
+    ).
+
+%% @private
+auth_max_lag() ->
+    application:get_env(bondy_router, auth_max_lag, ?AUTH_MAX_LAG).
+
+%% @private
+aae_enabled() ->
+    application:get_env(bondy_oplog, aae_enabled, false) =:= true.
 
 -doc """
 Returns the requested role `Role` if user `User` is a member of that role,

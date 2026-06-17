@@ -67,7 +67,10 @@ all() ->
         full_challenge_authenticate_flow,
 
         %% Multiple source CIDRs for same user
-        multiple_source_cidrs
+        multiple_source_cidrs,
+
+        %% CP-for-security (§9.8) — the AE fence refuses non-bearer methods too
+        aae_fence_refuses_password_when_stale
     ].
 
 init_per_suite(Config) ->
@@ -380,6 +383,39 @@ user2_allowed_within_cidr(Config) ->
         SessionId, RealmUri, ?U2, [], {192, 168, 50, 100}
     ),
     ?assert(lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))),
+    ?assertMatch(
+        {ok, _, _},
+        bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
+    ).
+
+aae_fence_refuses_password_when_stale(Config) ->
+    %% §9.8: the AE freshness fence lives in the common `bondy_auth:authenticate/4`
+    %% path, so a stale/isolated node refuses EVERY method — not just the
+    %% bearer-token path. Proven here for password auth (a non-oauth2 method).
+    RealmUri = ?config(realm_uri, Config),
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}),
+
+    %% AAE off (the default): the fence is a no-op, the correct password works.
+    ?assertMatch(
+        {ok, _, _},
+        bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
+    ),
+
+    %% AAE on, single-node (no AE round advances the per-shard freshness): the
+    %% security tables read stale, so the common fence refuses with the generic,
+    %% method-agnostic reason — even though the password itself is correct.
+    ok = application:set_env(bondy_oplog, aae_enabled, true),
+    try
+        ?assertEqual(
+            {error, temporarily_unavailable},
+            bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
+        )
+    after
+        ok = application:set_env(bondy_oplog, aae_enabled, false)
+    end,
+
+    %% Restored to the default — the fence is dormant and auth resumes.
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)

@@ -51,7 +51,8 @@ all() ->
         group_deletion_cascades_grants,
         grant_to_any_resource,
         reverse_grants_on_resource,
-        security_disabled_allows_all
+        security_disabled_allows_all,
+        session_rbac_invalidated_on_revoke
     ].
 
 init_per_suite(Config) ->
@@ -1078,6 +1079,74 @@ context_refresh_after_epoch(_) ->
 
     %% Now it should refresh
     {true, _C3} = bondy_rbac:refresh_context(C1).
+
+session_rbac_invalidated_on_revoke(_) ->
+    Uri = <<"com.test.s95_invalidate">>,
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        users => [#{username => <<"s95_u">>, groups => []}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.s95.">>,
+                match => <<"prefix">>,
+                roles => [<<"s95_u">>]
+            }
+        ],
+        sources => [
+            #{
+                usernames => [<<"s95_u">>],
+                authmethod => ?TRUST_AUTH,
+                cidr => <<"0.0.0.0/0">>
+            }
+        ]
+    }),
+
+    %% A STORED session — only a stored session caches its RBAC context in ETS;
+    %% an unstored one rebuilds on every read and would not exercise the cache.
+    {ok, Session} = bondy_session:store(
+        bondy_session:new(Uri, #{
+            peer => {{127, 0, 0, 1}, 52050},
+            authid => <<"s95_u">>,
+            authmethod => ?TRUST_AUTH,
+            security_enabled => true,
+            roles => #{caller => #{}}
+        })
+    ),
+
+    Ctxt = #{
+        realm_uri => Uri,
+        security_enabled => true,
+        authid => <<"s95_u">>,
+        session => Session
+    },
+
+    %% First authorize builds and CACHES the context on the session.
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.s95.foo">>, Ctxt)
+    ),
+
+    %% Revoke — §9.5 must invalidate the live session's cached context so the
+    %% NEXT authorize re-reads current grants, WITHOUT closing the session.
+    ok = bondy_rbac:revoke(Uri, #{
+        <<"permissions">> => [<<"wamp.call">>],
+        <<"uri">> => <<"com.s95.">>,
+        <<"match">> => <<"prefix">>,
+        <<"roles">> => [<<"s95_u">>]
+    }),
+
+    %% Checked immediately (well within the 1s TEST epoch), so a denial is
+    %% attributable to eager invalidation, not the lazy epoch refresh.
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.s95.foo">>, Ctxt)
+    ),
+
+    %% The session was re-evaluated in place, NOT torn down.
+    ?assertMatch({ok, _}, bondy_session:lookup(bondy_session:id(Session))).
 
 %% =============================================================================
 %% EXPLICIT GROUPS (OIDC)

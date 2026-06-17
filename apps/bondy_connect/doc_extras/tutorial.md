@@ -13,9 +13,6 @@ Every code snippet uses only the public API (the `m:bondy_connect` facade) and
 mirrors the behaviour exercised by the test suite, so you can paste it into a
 shell or a module and expect it to work against a running Bondy router.
 
-> **See also:** [`README.md`](README.md) for the overview, [`DESIGN.md`](DESIGN.md)
-> for the architecture and design decisions, and the `m:bondy_connect` module
-> docs for the per-function reference.
 
 ## Contents
 

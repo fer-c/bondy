@@ -184,6 +184,7 @@ data will be lost.
 -export([realm_uri/1]).
 -export([ref/1]).
 -export([refresh_rbac_context/1]).
+-export([invalidate_rbac_context/1]).
 -export([roles/1]).
 -export([size/0]).
 -export([store/1]).
@@ -592,6 +593,24 @@ refresh_rbac_context(#session{id = Id} = Session) ->
     update_rbac_context(Id, get_rbac_context(Session));
 refresh_rbac_context(Id) when is_binary(Id) ->
     refresh_rbac_context(fetch(Id)).
+
+
+-doc """
+Invalidates the cached RBAC context for the session so the next authorisation
+rebuilds it from the subject's current grants (`STORAGE_ARCHITECTURE` §9.5).
+
+Unlike closing the session, the connection, registrations and subscriptions
+survive — this is the authz "re-evaluate in place" path taken when a
+permission/membership change must take effect on a live session without a
+teardown. Setting the cached context to `undefined` makes `rbac_context/1`
+do a full rebuild on its next call.
+""".
+-spec invalidate_rbac_context(t_or_id()) -> ok.
+
+invalidate_rbac_context(#session{id = Id}) ->
+    update_rbac_context(Id, undefined);
+invalidate_rbac_context(Id) when is_binary(Id) ->
+    update_rbac_context(Id, undefined).
 
 -doc """
 Returns the number of sessions in the tuplespace.

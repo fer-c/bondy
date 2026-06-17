@@ -496,8 +496,12 @@ schedule_tick(#state{interval_ms = Ms} = State) ->
 %% per-peer pull-direction sync sessions. Errors from the spawn are
 %% absorbed by the session process and reported via peer_state / logs;
 %% the scheduler does not wait for completion.
-default_dispatch(_InstanceId, []) ->
-    ok;
+default_dispatch(InstanceId, []) ->
+    %% No peers in membership (genuinely solo): apply the configured
+    %% `oplog.aae.fence.on_isolation` policy. `refuse` leaves freshness to
+    %% decay (the fence refuses); `proceed`/`quorum` may certify so a solo
+    %% node keeps authenticating.
+    bondy_oplog_sync_session:maybe_bump_ae_isolated(InstanceId);
 default_dispatch(InstanceId, Peers) ->
     case bondy_oplog_instance:lifecycle_state(InstanceId) of
         pre_bootstrap ->

@@ -984,10 +984,23 @@ grant(RealmUri, RoleList0, Resources, Permissions, Opts) ->
 
     case check_grant_blockers(UnknownRoles, NameOverlaps) of
         none ->
-            do_grant(RoleTypes, RealmUri, Resources, Permissions, Opts);
+            invalidate_sessions_on(
+                do_grant(RoleTypes, RealmUri, Resources, Permissions, Opts),
+                RealmUri
+            );
         Error ->
             Error
     end.
+
+%% @private
+%% §9.5: a successful grant/revoke re-evaluates active local sessions in place
+%% (no teardown) — each session's next authorize re-reads the subject's current
+%% grants. Realm-wide because a group grant change affects every member; the
+%% over-invalidation of unaffected sessions costs only a one-time rebuild.
+invalidate_sessions_on(ok, RealmUri) ->
+    bondy_session_manager:invalidate_rbac_all(RealmUri);
+invalidate_sessions_on(Other, _RealmUri) ->
+    Other.
 
 %% @private
 do_grant([], _, _, _, _) ->
@@ -1040,7 +1053,10 @@ store(Table, RealmUri, {_Rolename, Resource} = Key, Permissions, _Opts) ->
 
 revoke(RealmUri, all, Resources, Permissions) ->
     %% all and anonymous are always valid
-    do_revoke([{all, group}], RealmUri, Resources, Permissions);
+    invalidate_sessions_on(
+        do_revoke([{all, group}], RealmUri, Resources, Permissions),
+        RealmUri
+    );
 revoke(RealmUri, RoleList, Resources, Permissions) ->
     ProtoUri = bondy_realm:prototype_uri(RealmUri),
     RealmProto = {RealmUri, ProtoUri},
@@ -1076,7 +1092,10 @@ revoke(RealmUri, RoleList, Resources, Permissions) ->
 
     case check_grant_blockers(UnknownRoles, NameOverlaps) of
         none ->
-            do_revoke(RoleTypes, RealmUri, Resources, Permissions);
+            invalidate_sessions_on(
+                do_revoke(RoleTypes, RealmUri, Resources, Permissions),
+                RealmUri
+            );
         Error ->
             Error
     end.

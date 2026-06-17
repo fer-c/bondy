@@ -42,6 +42,7 @@ individually or in bulk.
 -export([close_all/1]).
 -export([close_all/2]).
 -export([close_all/4]).
+-export([invalidate_rbac_all/1]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -200,6 +201,22 @@ as result all sessions in all associated realms will be closed.
 close_all(RealmUri, Authid, ReasonUri, Opts) ->
     Bindings = #{authrealm => RealmUri, authid => Authid},
     do_close_all(Bindings, Opts, ReasonUri).
+
+-doc """
+Invalidates the cached RBAC context of every session on realm `RealmUri`
+(`STORAGE_ARCHITECTURE` §9.5). Each session's next authorisation re-reads the
+subject's current grants; the sessions themselves are NOT closed.
+
+Used on a local grant/revoke so a permission change re-evaluates active sessions
+in place. The scope is the whole realm (rather than a single subject) because a
+group grant change affects every member — the over-invalidation of unaffected
+sessions costs only a one-time context rebuild on their next op, and grant
+changes are rare admin operations.
+""".
+-spec invalidate_rbac_all(RealmUri :: uri()) -> ok.
+
+invalidate_rbac_all(RealmUri) ->
+    do_invalidate_rbac_all(#{realm_uri => RealmUri}).
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
@@ -441,6 +458,47 @@ do_close_all(Bindings, Opts0, ReasonUri) ->
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Error while closing all sessions",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ok
+    end.
+
+%% @private
+do_invalidate_rbac_all(Bindings) ->
+    Opts = #{limit => 100, return => object, exclude => undefined},
+
+    Fun = fun
+        ({continue, Cont}) ->
+            try
+                bondy_session:match(Cont)
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(#{
+                        description =>
+                            "Error while invalidating session RBAC context",
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace
+                    }),
+                    []
+            end;
+        (Session) ->
+            %% Re-evaluate in place (no teardown): the next authorize rebuilds
+            %% the context from the subject's current grants (§9.5).
+            ok = bondy_session:invalidate_rbac_context(
+                bondy_session:id(Session)
+            )
+    end,
+
+    try
+        Matches = bondy_session:match(Bindings, Opts),
+        ok = bondy_utils:foreach(Fun, Matches)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while invalidating all session contexts",
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace

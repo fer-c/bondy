@@ -7,6 +7,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include("bondy_security.hrl").
 
 -compile([nowarn_export_all, export_all]).
 
@@ -25,8 +26,10 @@
 -define(BRIDGE_TABLE, bondy_bridge_relay).
 -define(REALM_TABLE, bondy_realm).
 -define(REALM, <<"com.bondy.aae_cluster">>).
-%% How long to wait for a write to propagate across the cluster.
--define(CONVERGE_MS, 30000).
+%% How long to wait for a write to propagate across the cluster. Generous so
+%% the convergence assertions stay robust under the accumulated load of the
+%% full suite (the periodic sync scheduler slows as more namespaces sync).
+-define(CONVERGE_MS, 60000).
 
 all() ->
     [
@@ -34,7 +37,9 @@ all() ->
         global_band_write_converges,
         concurrent_writes_full_convergence,
         merge_event_fires_on_remote_write,
-        realm_merge_event_fires_on_remote_write
+        realm_merge_event_fires_on_remote_write,
+        grant_merge_event_fires_on_remote_write,
+        token_version_rejected_cross_node
     ].
 
 suite() ->
@@ -153,6 +158,83 @@ realm_merge_event_fires_on_remote_write(Config) ->
     ok = wait_for_merge_event(N2, Uri, 15000),
     ok.
 
+%% A grant table (`security_user_grants') now carries `publish => true', so a
+%% peer's grant write must deliver a merge event on node 2 — the path
+%% `bondy_aae_reactor' consumes to drive the §9.5 realm-wide RBAC-context
+%% invalidation. Like security_users it is realm-banded, so the folded cell key
+%% is `<<Realm, 0, EncGrantKey>>'; we match the delivered event on the grant key.
+grant_merge_event_fires_on_remote_write(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    Table = security_user_grants,
+    NS = erpc:call(N2, ?MODULE, do_namespace, [Table]),
+    ok = erpc:call(N2, ?MODULE, start_collector, [NS]),
+
+    GKey = <<"grant_merge_remote">>,
+    GVal = #{resource => <<"uri.res">>, permissions => [<<"wamp.call">>]},
+    ok = apply_on(N1, Table, ?REALM, GKey, GVal),
+    ok = wait_converge(N2, Table, ?REALM, GKey, GVal),
+    ok = wait_for_merge_event(N2, GKey, 15000),
+    ok.
+
+%% The revocation zookie across nodes (STORAGE_ARCHITECTURE §9.2/§9.3): a JWT
+%% minted on node 1 authenticates on node 2 once the realm/user converge AND the
+%% AE fence is fresh; after a credential change on node 1 bumps the user cell's
+%% token_version and that bump converges, node 2 REJECTS the now-stale token.
+token_version_rejected_cross_node(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    Uri = <<"com.bondy.tv_cluster">>,
+    User = <<"tv_user">>,
+    Pass = <<"tv_pass_123">>,
+
+    %% A FINITE MaxLag exercises the real AE freshness fence: with the per-round
+    %% heartbeat wired (each instance's primary shard keys published as
+    %% `ae_targets`, freshened by `bump_ae_on_sync` every successful round), a
+    %% healthy node's low-churn security shards stay fresh, so the fence passes —
+    %% the "N2 authenticates" assertions below are a positive proof of that. 5s
+    %% gives ample margin over the 500ms sync tick under CT load; the production
+    %% default is 1s. (The stale-refusal path is covered single-node in
+    %% bondy_auth_oauth2_SUITE.)
+    [ok = erpc:call(N, ?MODULE, do_set_max_lag, [5000]) || N <- [N1, N2]],
+
+    %% Create the realm + user authoritatively on node 1.
+    ok = erpc:call(N1, ?MODULE, do_create_auth_realm, [Uri, User, Pass]),
+
+    %% token_version observed by node 1 == node 2 (the user cell converged with
+    %% its origin HLC preserved).
+    {ok, TV0} = erpc:call(N1, bondy_rbac_user, token_version, [Uri, User]),
+    ok = wait_token_version(N2, Uri, User, TV0),
+
+    %% Node 2 must now be able to issue + authenticate its own token (realm +
+    %% source converged, fence fresh). Diagnose loudly if not.
+    Diag = erpc:call(N2, ?MODULE, do_diag, [Uri, User]),
+    ct:pal("node2 self-auth diagnosis: ~p", [Diag]),
+    ?assertMatch(#{auth := {ok, _, _}}, Diag),
+
+    %% Mint a JWT on node 1 (embeds tv = TV0) and authenticate it on node 2.
+    JWT = erpc:call(N1, ?MODULE, do_issue_jwt, [Uri, User]),
+    ?assertMatch(
+        {ok, _, _}, erpc:call(N2, ?MODULE, do_authenticate, [Uri, User, JWT])
+    ),
+
+    %% Change the password on node 1 → the user cell is rewritten with a higher
+    %% HLC, so token_version advances.
+    ok = erpc:call(
+        N1, bondy_rbac_user, change_password, [Uri, User, <<"new_pass_456">>]
+    ),
+    {ok, TV1} = erpc:call(N1, bondy_rbac_user, token_version, [Uri, User]),
+    ?assert(TV1 > TV0),
+
+    %% Wait for the bump to converge to node 2.
+    ok = wait_token_version(N2, Uri, User, TV1),
+
+    %% Node 2 now REJECTS the old JWT: its embedded tv (TV0) no longer matches
+    %% the user's current token_version (TV1) — the Zanzibar new-enemy guard.
+    ?assertEqual(
+        {error, oauth2_invalid_grant},
+        erpc:call(N2, ?MODULE, do_authenticate, [Uri, User, JWT])
+    ),
+    ok.
+
 %% =============================================================================
 %% CONTROLLER-SIDE HELPERS
 %% =============================================================================
@@ -160,6 +242,58 @@ realm_merge_event_fires_on_remote_write(Config) ->
 %% @private
 nodes_of(Config) ->
     [Node || {_, Node, _} <- ?config(cluster, Config)].
+
+%% @private
+%% Retries `Fun` (which returns a boolean, or may raise) until it yields `true`
+%% or the deadline passes. Nudges the sync scheduler is the caller's job inside
+%% `Fun` where needed.
+wait_until(Fun, Timeout) ->
+    Deadline = erlang:monotonic_time(millisecond) + Timeout,
+    wait_until_loop(Fun, Deadline).
+
+%% @private
+wait_until_loop(Fun, Deadline) ->
+    Ok =
+        try Fun() of
+            true -> true;
+            _ -> false
+        catch
+            _:_ -> false
+        end,
+    case Ok of
+        true ->
+            ok;
+        false ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true -> error(wait_until_timeout);
+                false ->
+                    timer:sleep(250),
+                    wait_until_loop(Fun, Deadline)
+            end
+    end.
+
+%% @private
+%% Polls `Node` until its `token_version` for the user equals `Expected`,
+%% forcing a sync tick each round.
+wait_token_version(Node, Uri, User, Expected) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_token_version_loop(Node, Uri, User, Expected, Deadline).
+
+%% @private
+wait_token_version_loop(Node, Uri, User, Expected, Deadline) ->
+    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
+    case catch erpc:call(Node, bondy_rbac_user, token_version, [Uri, User]) of
+        {ok, Expected} ->
+            ok;
+        Other ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true ->
+                    error({token_version_timeout, Node, User, Expected, Other});
+                false ->
+                    timer:sleep(250),
+                    wait_token_version_loop(Node, Uri, User, Expected, Deadline)
+            end
+    end.
 
 %% @private
 apply_on(Node, Table, Band, Key, Val) ->
@@ -254,6 +388,74 @@ table_handle(Table) ->
 %% @private
 do_namespace(Table) ->
     bondy_db:namespace(table_handle(Table)).
+
+%% @private
+do_set_max_lag(Ms) ->
+    application:set_env(bondy_router, auth_max_lag, Ms).
+
+%% @private
+do_create_auth_realm(Uri, User, Pass) ->
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        description => <<"token_version cluster test realm">>,
+        security_enabled => true,
+        authmethods => [?WAMP_OAUTH2_AUTH, ?PASSWORD_AUTH],
+        users => [#{username => User, password => Pass, groups => []}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"">>,
+                match => <<"prefix">>,
+                roles => [User]
+            }
+        ],
+        sources => [
+            #{
+                usernames => [User],
+                authmethod => ?WAMP_OAUTH2_AUTH,
+                cidr => <<"0.0.0.0/0">>
+            }
+        ]
+    }),
+    ok.
+
+%% @private
+%% Diagnostic snapshot of this node's readiness to issue + authenticate for the
+%% user: whether the realm/user converged, and the raw issue/authenticate
+%% results (exceptions captured as terms).
+do_diag(Uri, User) ->
+    RealmFound =
+        case catch bondy_realm:lookup(Uri) of
+            {ok, _} -> true;
+            Other -> Other
+        end,
+    TV = catch bondy_rbac_user:token_version(Uri, User),
+    Issue =
+        try do_issue_jwt(Uri, User) of
+            J when is_binary(J) -> {ok, J}
+        catch
+            C:R -> {issue_error, C, R}
+        end,
+    Auth =
+        case Issue of
+            {ok, JWT} -> catch do_authenticate(Uri, User, JWT);
+            _ -> not_issued
+        end,
+    #{realm => RealmFound, tv => TV, issue_ok => element(1, Issue), auth => Auth}.
+
+%% @private
+do_issue_jwt(Uri, User) ->
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, User, [], {127, 0, 0, 1}),
+    {ok, Token} = bondy_oauth_token:issue(password, Ctxt, #{}),
+    {ok, {JWT, _}} = bondy_oauth_token:to_access_token(Token),
+    JWT.
+
+%% @private
+do_authenticate(Uri, User, JWT) ->
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, User, [], {127, 0, 0, 1}),
+    bondy_auth:authenticate(?WAMP_OAUTH2_AUTH, JWT, #{}, Ctxt).
 
 %% @private
 %% Spawns a long-lived collector on this node subscribed to `NS`, registered as

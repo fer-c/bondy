@@ -26,38 +26,6 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Defines whether Bondy will wait for the db partitions to be initialised
-%% before continuing with initialisation.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "startup.wait_for_store_partitions",
-"plum_db.wait_for_partitions", [
-  {datatype, flag},
-  {default, on}
-]}.
-
-%% -----------------------------------------------------------------------------
-%% @doc Defines whether Bondy will wait for the db hashtrees to be built
-%% before continuing with initialisation.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "startup.wait_for_store_hashtrees",
-"plum_db.wait_for_hashtrees", [
-  {datatype, flag},
-  {default, on}
-]}.
-
-%% -----------------------------------------------------------------------------
-%% @doc Defines whether Bondy will wait for the first aae exchange to be
-%% finished before continuing with initialisation.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "startup.wait_for_store_aae_exchange",
-"plum_db.wait_for_aae_exchange", [
-  {datatype, flag},
-  {default, off}
-]}.
 
 
 %% -----------------------------------------------------------------------------
@@ -67,6 +35,10 @@
 %% Partisan AAE channel. Off by default — a single-node or non-replicated
 %% deployment needs no replication, and the substrate is not yet on any
 %% read/write hot path (this governs the plum_db-migration substrate only).
+%% This is the single master switch: the sync scheduler process always runs, but
+%% with AAE off `bondy_app:maybe_setup_oplog_replication/0` wires no Partisan peer
+%% source, so the scheduler has no peers and stays inert (the inner
+%% `sync_scheduler` app-env defaults `true` but is harmless without a peer source).
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "oplog.aae", "bondy_oplog.aae_enabled", [
@@ -96,12 +68,54 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc The freshness bound for the authentication AE fence
+%% (STORAGE_ARCHITECTURE §9.2). A node refuses new authentication when its view
+%% of the security tables (users / grants) has not been confirmed by a local
+%% commit or a successful AE round within this window — bounding how stale a
+%% credential/permission change a node may authenticate against. Lower = tighter
+%% security (a lagging node refuses sooner); higher = more availability under
+%% partition/lag. Only relevant when `oplog.aae` is on (the fence is otherwise a
+%% no-op — local writes are synchronous).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.aae.fence.max_lag", "bondy_router.auth_max_lag", [
+  {datatype, {duration, ms}},
+  {default, "1s"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc What the authentication AE fence does on a node that can reach NO peers
+%% for the security tables. A node partitioned into a minority still has peers in
+%% its membership, so its sync rounds fail and its freshness decays naturally —
+%% this policy governs only the genuinely-isolated case (solo membership). Only
+%% relevant when `oplog.aae` is on.
+%%   refuse  - fail closed: refuse all new authentication while isolated. The
+%%             secure default — a node that cannot confirm freshness with any
+%%             peer must not authenticate against a possibly-stale security view.
+%%             (A single-node deployment runs with `oplog.aae` off, where the
+%%             fence is a no-op, so it is unaffected.)
+%%   proceed - treat isolation as vacuously fresh and keep authenticating. Most
+%%             available, but during a partition a stale isolated node would
+%%             accept a token revoked elsewhere until it heals. Not recommended
+%%             for a security fence.
+%%   quorum  - certify freshness (and so authenticate) only while connected to a
+%%             majority of the expected cluster membership; a minority partition
+%%             refuses even if it can still sync internally. Secure AND available
+%%             for the majority side. Requires a Partisan cluster.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.aae.fence.on_isolation", "bondy_oplog.aae_fence_on_isolation", [
+  {datatype, {enum, [refuse, proceed, quorum]}},
+  {default, refuse}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc Provision ALL declared bondy_db `core` tables at boot, not just the ones
-%% whose domain has been migrated off plum_db (see `bondy_namespace_catalog`).
-%% Off by default: a default node provisions only the migrated tables (e.g.
-%% `api_gateway`) and serves every other read from plum_db. Enable to validate
-%% that a not-yet-migrated domain's table provisions and appears in
-%% `bondy_db:info` before its cut-over.
+%% flagged `migrated` in `bondy_namespace_catalog`. Off by default: a default
+%% node provisions only the migrated tables. All domains are now migrated, so
+%% this is a diagnostic switch — enable it to force-provision every declared
+%% table (e.g. a dormant net-new table) and confirm it appears in
+%% `bondy_db:info`.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "oplog.catalog", "bondy_router.oplog_catalog_enabled", [
@@ -117,6 +131,76 @@
 {mapping, "oplog.core.shard_count", "bondy_router.oplog_core_shard_count", [
   {datatype, integer},
   {default, 16}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Partition strategy for the bondy_db `core` durable database: how a
+%% (realm, key) write maps to one of `oplog.core.shard_count` shards. Sets BOTH
+%% the write-atomicity grain (entities sharing a shard are written in one atomic
+%% batch / one causal log) and which reads are shard-local vs scatter-gather.
+%%   aggregate - shard = hash(realm, aggregate_root). A subject's record, grants
+%%               and memberships co-locate (atomic per-subject writes); subjects
+%%               spread across all shards, so a single realm still uses every
+%%               core. Realm-wide listings scatter-gather. (Recommended.)
+%%   realm     - shard = hash(realm-prefix, oplog.core.realm_prefix_depth). A
+%%               realm's whole dataset is one shard (single-shard realm scans),
+%%               but a single realm collapses to one shard. Many-small-realm
+%%               fleets only.
+%%   entity    - shard = hash(entity_type, key). Maximum write parallelism, NO
+%%               cross-entity atomicity (the pre-bondy_db behaviour).
+%% TOPOLOGY-DEFINING: frozen in the on-disk topology manifest at first provision.
+%% Changing it on a populated node requires a re-key (export -> wipe data dir ->
+%% reimport); see `oplog.core.on_topology_mismatch`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.core.partition_strategy",
+ "bondy_router.oplog_core_partition_strategy", [
+  {datatype, {enum, [aggregate, realm, entity]}},
+  {default, aggregate}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Only used when `oplog.core.partition_strategy = realm`: the number of
+%% leading dot-separated realm-URI components that share a shard (the Spanner
+%% "directory" co-location pattern). 1 = per-realm; 2 co-locates `org.acme.sso`
+%% with `org.acme.app`. TOPOLOGY-DEFINING (frozen in the manifest).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.core.realm_prefix_depth",
+ "bondy_router.oplog_core_realm_prefix_depth", [
+  {datatype, integer},
+  {default, 1}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Maximum number of shards a single cross-shard (scatter-gather) scan
+%% folds concurrently, bounding the parallel-snapshot fan-out of realm-wide
+%% listings under the `aggregate` / `entity` strategies. 0 = no cap (fan out to
+%% all `oplog.core.shard_count` shards). Runtime-tunable (not in the manifest).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.core.scan_max_concurrency",
+ "bondy_router.oplog_core_scan_max_concurrency", [
+  {datatype, integer},
+  {default, 0}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Boot behaviour when the on-disk topology manifest disagrees with the
+%% configured topology (partition_strategy / shard_count / realm_prefix_depth /
+%% per-table shard keys). The on-disk data is keyed under the manifest's
+%% topology, so the new configuration cannot be applied without a re-key.
+%%   warn - log a loud warning naming the diverging keys and keep running on the
+%%          on-disk topology (the new config is NOT applied).
+%%   stop - refuse to boot (fail fast). Recommended for production.
+%% Runtime-tunable (not in the manifest).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.core.on_topology_mismatch",
+ "bondy_router.oplog_core_on_topology_mismatch", [
+  {datatype, {enum, [warn, stop]}},
+  {default, warn}
 ]}.
 
 
@@ -4558,97 +4642,8 @@ end}.
 
 
 %% =============================================================================
-%% DATA STORE
-%% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Defines the level of concurrency in plum_db (the local embedded
-%% database used by Bondy).
-%% Each partition has its own leveldb and ets (in-memory db) instance. Ideally
-%% we can have one partition per CPU core.
-%% Bondy will ignore this configuration in case data already exists i.e. this
-%% parameter is considered on a fresh start.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "store.partitions",
-"plum_db.partitions", [
-  {default, 16},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% -----------------------------------------------------------------------------
-%% @doc Defines how data is hashed and distributed amongst Bondy's database
-%% partitions.
-%% If this is a new deployment we recommend using "key" as it will provide
-%% better distribution.
-%% **Notice that once data is stored, this cannot be changed as you will not be
-%% able to find previous data**.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "store.shard_by",
-"plum_db.shard_by", [
-  {default, prefix},
-  {datatype, {enum, [prefix, key]}},
-  hidden
-]}.
-
-{mapping, "store.open_retry_limit",
-"plum_db.store_open_retry_limit", [
-  {default, 30},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-{mapping, "store.open_retries_delay",
-"plum_db.store_open_retries_delay", [
-  {default, "2s"},
-  {datatype, {duration, ms}}
-]}.
-
-
-
-{mapping, "store.data_dir",
-"plum_db.data_dir", [
-  {datatype, directory},
-  {default, "{{platform_data_dir}}"},
-  hidden
-]}.
-
-
-%% =============================================================================
 %% ACTIVE ANTI-ENTROPY
 %% =============================================================================
-
-
-
-{mapping, "aae.data_exchange_timeout",
-"plum_db.data_exchange_timeout", [
-  {default, "1m"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Controls whether the active anti-entropy subsystem is enabled.
-{mapping, "aae.enabled",
-"plum_db.aae_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-{mapping, "aae.hashtree_timer",
-"plum_db.hashtree_timer", [
-  {default, "10s"},
-  {datatype, {duration, ms}}
-]}.
-
-
-{mapping, "aae.hashtree_ttl",
-"plum_db.hashtree_ttl", [
-  {default, "1w"},
-  {datatype, {duration, s}}
-]}.
 
 
 %% Controls when will the AAE system will trigger the next
@@ -4659,239 +4654,6 @@ end}.
   %% exchange_tick_period cause it overridden by cluster.exchange_tick_period
   {default, "10s"},
   {datatype, {duration, ms}}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "aae.exchange_on_cluster_join", "plum_db.aae_exchange_on_cluster_join", [
-  {default, on},
-  {datatype, flag}
-]}.
-
-
-
-
-%% =============================================================================
-%% DATA STORE / ROCKSDB
-%% =============================================================================
-
-
-%% @doc Enables or disables the verification of the data fetched from
-%% RocksDB against internal checksums.
-{mapping, "store.verify_checksums",
-"plum_db.rocksdb.read.verify_checksums", [
-  {default, on},
-  {datatype, flag}
-]}.
-
-
-{mapping, "store.num_levels",
-"plum_db.rocksdb.open.num_levels", [
-  {default, 7},
-  {datatype, integer}
-]}.
-
-{mapping, "store.write_buffer_size",
-"plum_db.rocksdb.open.write_buffer_size", [
-{default, "64MB"},
-{datatype, bytesize}
-]}.
-
-{mapping, "store.max_write_buffer_number",
-  "plum_db.rocksdb.open.max_write_buffer_number", [
-  {default, 2},
-  {datatype, integer}
-]}.
-
-{mapping, "store.min_write_buffer_number_to_merge",
-"plum_db.rocksdb.open.min_write_buffer_number_to_merge", [
-  {default, 1},
-  {datatype, integer}
-]}.
-
-
-%% @doc Whether Rocksdb will flush after every write. Note: If you are
-%% familiar with fsync, this is analagous to calling fsync after every
-%% write.
-{mapping, "store.sync_on_write",
-"plum_db.rocksdb.open.sync", [
-  {default, off},
-  {datatype, flag}
-]}.
-
-
-%% @doc Each database .sst table file can include an optional "bloom
-%% filter" that is highly effective in shortcutting data queries that
-%% are destined to not find the requested key. The Bloom filter
-%% typically increases the size of an .sst table file by about
-%% 2%.
-{mapping, "store.bloom_filter_policy", "plum_db.rocksdb.open.block_based_table_options.bloom_filter_policy", [
-  {default, 10},
-  {datatype, integer}
-]}.
-
-%% write.
-{mapping, "store.cache_index_and_filter_blocks", "plum_db.rocksdb.open.block_based_table_options.cache_index_and_filter_blocks", [
-  {default, off},
-  {datatype, flag}
-]}.
-
-
-
-%% @doc Defines the size threshold for a block / chunk of data within
-%% one .sst table file. Each new block gets an index entry in the .sst
-%% table file's master index.
-{mapping, "store.block.size",
-"plum_db.rocksdb.open.block_based_table_options.block_size", [
-  {default, "4KB"},
-  {datatype, bytesize}
-]}.
-
-%% @doc Defines the size threshold for a block / chunk of data within
-%% one .sst table file. Each new block gets an index entry in the .sst
-%% table file's master index.
-%% (globally shared by all PDB partitions)
-{mapping, "store.block_cache.size",
-"plum_db.rocksdb.open.block_based_table_options.block_cache_size", [
-  {default, "2GB"},
-  {datatype, bytesize}
-]}.
-
-
-
-%% @doc The number of worker threads performing RocksDB operations
-%% (per partition instance)
-{mapping, "store.threads",
-"plum_db.rocksdb.open.total_threads", [
-  {default, 2},
-  {datatype, integer}
-]}.
-
-
-{mapping, "store.wal.size",
-"plum_db.rocksdb.open.max_total_wal_size", [
-  {default, "512MB"},
-  {datatype, bytesize}
-]}.
-
-{mapping, "store.wal.ttl_seconds",
-"plum_db.rocksdb.open.wal_ttl_seconds", [
-  {default, 2592000}, % 30 days
-  {datatype, integer}
-]}.
-
-
-{mapping, "store.max_background_jobs",
-"plum_db.rocksdb.open.max_background_jobs", [
-  {default, 1},
-  {datatype, integer}
-]}.
-
-{mapping, "store.max_background_compactions",
-"plum_db.rocksdb.open.max_background_compactions", [
-  {default, 1},
-  {datatype, integer}
-]}.
-
-{mapping, "store.max_background_flushes",
-"plum_db.rocksdb.open.max_background_flushes", [
-  {default, 1},
-  {datatype, integer}
-]}.
-
-%% Threads per compaction job
-{mapping, "store.max_subcompactions",
-"plum_db.rocksdb.open.max_subcompactions", [
-  {default, 1},
-  {datatype, integer}
-]}.
-
-{mapping, "store.level0_file_num_compaction_trigger",
-"plum_db.rocksdb.open.level0_file_num_compaction_trigger", [
-  {default, 4},
-  {datatype, integer}
-]}.
-
-%% Default: 24 hours
-{mapping, "store.periodic_compaction_seconds",
-"plum_db.rocksdb.open.periodic_compaction_seconds", [
-  {default, 604800},
-  {datatype, integer}
-]}.
-
-
-
-%% @doc Enables or disables the compression of data on disk.
-%% Enabling (default) saves disk space.  Disabling may reduce read
-%% latency but increase overall disk activity.  Option can be
-%% changed at any time, but will not impact data on disk until
-%% next time a file requires compaction.
-{mapping, "store.compression",
-"plum_db.rocksdb.open.compression", [
-  {default, lz4},
-  {datatype, {enum, [snappy, lz4, none]}}
-]}.
-
-{mapping, "store.compression.enabled",
-"plum_db.rocksdb.open.compression_opts.enabled", [
-  {default, on},
-  {datatype, flag}
-]}.
-
-{mapping, "store.bottommost_compression",
-"plum_db.rocksdb.open.bottommost_compression", [
-  {default, none},
-  {datatype, {enum, [zstd, snappy, lz4, none]}}
-]}.
-
-{mapping, "store.bottommost_compression.enabled",
-"plum_db.rocksdb.open.bottommost_compression_opts.enabled", [
-  {default, off},
-  {datatype, flag}
-]}.
-
-
-{mapping, "store.use_direct_reads",
-"plum_db.rocksdb.open.use_direct_reads", [
-  {default, off},
-  {datatype, flag}
-]}.
-
-
-{mapping, "store.use_direct_io_for_flush_and_compaction", "plum_db.rocksdb.open.use_direct_io_for_flush_and_compaction", [
-  {default, off},
-  {datatype, flag}
-]}.
-
-{mapping, "store.allow_concurrent_memtable_write",
-  "plum_db.rocksdb.open.allow_concurrent_memtable_write", [
-  {default, on},
-  {datatype, flag}
-]}.
-
-{mapping, "store.enable_write_thread_adaptive_yield",
-  "plum_db.rocksdb.open.enable_write_thread_adaptive_yield", [
-  {default, on},
-  {datatype, flag}
-]}.
-
-
-{mapping, "store.max_bytes_for_level_base", "plum_db.rocksdb.open.max_bytes_for_level_base", [
-{default, "512MB"},
-{datatype, bytesize}
-]}.
-
-{mapping, "store.max_bytes_for_level_multiplier", "plum_db.rocksdb.open.max_bytes_for_level_multiplier", [
-{default, 10},
-{datatype, integer}
-]}.
-
-{mapping, "store.level_compaction_dynamic_level_bytes", "plum_db.rocksdb.open.level_compaction_dynamic_level_bytes", [
-  {default, on},
-  {datatype, flag}
 ]}.
 
 

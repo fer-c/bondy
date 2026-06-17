@@ -88,6 +88,11 @@ keeps reads parallel.
 %% subtraction never wraps.
 -define(STALE_SENTINEL, -(1 bsl 62)).
 
+%% The reserved `Index` value of a primary shard's registry key
+%% (`{NS, primary, Shard}`); secondary-index shards key on the index name.
+%% Mirrors `bondy_oplog_instance:?PRIMARY_INDEX` / `bondy_db:?INDEX`.
+-define(PRIMARY_INDEX, primary).
+
 %% Atomics slot layout for an index shard's `inflight_ref` (back-pressure).
 %% Slot 1 counts ops dispatched to the secondary writer but not yet flushed
 %% (the unbounded-mailbox bound); slot 2 is a `needs_rebuild` flag (0 | 1)
@@ -278,6 +283,7 @@ keeps reads parallel.
 -export([last_ae_at/3]).
 -export([ever_freshened/3]).
 -export([shards_for/1]).
+-export([primary_shards_for/1]).
 -export([namespaces/0]).
 
 %% Field accessors (so callers do not need the header).
@@ -635,6 +641,29 @@ namespaces() ->
         }
     ],
     lists:usort(ets:select(?TABLE, MS)).
+
+-doc """
+Like `shards_for/1` but only the namespace's PRIMARY shards
+(`{NS, primary, _}`), excluding secondary-index shards.
+
+The auth freshness fence (`ensure_fresh/2`) reads primary-projection
+cells (user / grant), so it gates on primary freshness only; index-read
+staleness is governed separately by the `index_get` `max_lag` path.
+""".
+-spec primary_shards_for(atom()) -> [shard_entry()].
+
+primary_shards_for(NS) when is_atom(NS) ->
+    MS = [
+        {
+            #entry{
+                key = {NS, ?PRIMARY_INDEX, '_'},
+                _ = '_'
+            },
+            [],
+            ['$_']
+        }
+    ],
+    ets:select(?TABLE, MS).
 
 %% =============================================================================
 %% Accessors

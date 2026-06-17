@@ -273,6 +273,7 @@ end#{
 -export([resolve/2]).
 -export([sso_realm_uri/1]).
 -export([to_external/1]).
+-export([token_version/2]).
 -export([unknown/2]).
 -export([update/3]).
 -export([update/4]).
@@ -695,6 +696,43 @@ fetch(RealmUri, Username) ->
         {error, not_found} ->
             error({no_such_user, Username})
     end.
+
+
+-doc """
+Returns the current `token_version` for `Username` in realm `RealmUri`.
+
+The token version is the **HLC of the user's cell** — a monotonic,
+concurrency-safe version that advances on every write to the user record
+(disable/enable, password change, group membership, authorized keys). It is
+Bondy's revocation **zookie** (`STORAGE_ARCHITECTURE` §9.3): a token embeds the
+version observed at issue time, and the auth path refuses a token whose embedded
+version is older than the user cell's current version, forcing
+re-authentication.
+
+Grant/source changes do NOT advance it — those cells are separate from the user
+cell, and their cross-node freshness is enforced by the AE fence instead (option
+(c), `ISSUES.md` AR-4). The anonymous user has no stored cell and no revocable
+tokens, so it reports a stable sentinel of `0`. Aliases resolve to the canonical
+user's version.
+""".
+-spec token_version(RealmUri :: uri(), Username :: username_int()) ->
+    {ok, bondy_oplog_hlc:hlc()} | {error, not_found}.
+
+token_version(RealmUri, Username0) ->
+    case normalise_username(Username0) of
+        anonymous ->
+            {ok, 0};
+        Username ->
+            case bondy_db:read(table(), RealmUri, Username) of
+                {ok, {Value, _Hlc}} when ?IS_ALIAS(Value) ->
+                    token_version(RealmUri, maps:get(username, Value));
+                {ok, {_Value, Hlc}} ->
+                    {ok, Hlc};
+                {error, not_found} ->
+                    {error, not_found}
+            end
+    end.
+
 
 -spec list(uri()) -> list(t()).
 

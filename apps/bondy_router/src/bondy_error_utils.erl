@@ -146,6 +146,15 @@ map(oauth2_invalid_scope) ->
         <<"description">> =>
             <<"The authorization grant type is not supported by the authorization server.">>
     };
+map(temporarily_unavailable) ->
+    #{
+        <<"code">> => <<"temporarily_unavailable">>,
+        <<"status_code">> => ?HTTP_SERVICE_UNAVAILABLE,
+        <<"message">> =>
+            <<"The server is temporarily unable to complete authentication.">>,
+        <<"description">> =>
+            <<"The authorization server is currently unable to handle the request due to a temporary condition: it has not yet confirmed its security state with the cluster (anti-entropy freshness fence). The client MAY retry after a short delay.">>
+    };
 map(invalid_scheme) ->
     Msg =
         <<"The authorization scheme is missing or the one provided is not the one required.">>,

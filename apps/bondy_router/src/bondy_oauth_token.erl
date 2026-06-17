@@ -217,6 +217,11 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
             authscope => AuthScope,
             authroles => AuthRoles,
             authgrants => AuthGrants,
+            %% The user's revocation zookie at issue time — the user cell's HLC,
+            %% read from the AUTH realm (canonical user record). The auth path
+            %% refuses a token whose `tv` is older than the user's current
+            %% version, forcing re-auth (STORAGE_ARCHITECTURE §9.3).
+            token_version => user_token_version(AuthRealmUri, AuthId),
             meta => maps:get(metadata, Opts, #{}),
             refresh_token => RToken,
             refreshed_at => Now,
@@ -523,6 +528,9 @@ to_jwt_claims(#{type := ?MODULE, version := ~"1.1" = Vsn} = T) ->
         authgrants := AuthGrants,
         meta := Meta
     } = T,
+    %% Defaulted for tokens minted before `token_version` existed (a stored
+    %% refresh token re-minting an access token); 0 is the pre-history sentinel.
+    TokenVersion = maps:get(token_version, T, 0),
     #{
         ~"id" => Id,
         ~"vsn" => Vsn,
@@ -533,6 +541,7 @@ to_jwt_claims(#{type := ?MODULE, version := ~"1.1" = Vsn} = T) ->
         ~"iss" => Issuer,
         ~"aud" => AuthRealmUri,
         ~"sub" => AuthId,
+        ~"tv" => TokenVersion,
         ~"auth" => #{
             ~"scope" => Authscope,
             ~"roles" => AuthRoles,
@@ -542,6 +551,18 @@ to_jwt_claims(#{type := ?MODULE, version := ~"1.1" = Vsn} = T) ->
         %% To be deprecated (included in auth map)
         ~"groups" => AuthRoles
     }.
+
+%% @private
+%% The user's current `token_version` (the user cell's HLC) at issue time, read
+%% from the AUTH realm — the canonical user record (the SSO realm for SSO users,
+%% the operating realm for local users). A missing user (it should exist — they
+%% just authenticated) defaults to 0, guaranteeing a later mismatch and a
+%% fail-closed re-auth. Bondy's revocation zookie (STORAGE_ARCHITECTURE §9.3).
+user_token_version(RealmUri, AuthId) ->
+    case bondy_rbac_user:token_version(RealmUri, AuthId) of
+        {ok, V} -> V;
+        {error, not_found} -> 0
+    end.
 
 %% @private
 store_key(AuthId) ->

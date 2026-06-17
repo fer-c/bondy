@@ -73,9 +73,63 @@ authenticate(JWT, _, Ctxt, State) ->
 
     case bondy_oauth_jwt:verify(RealmUri, JWT) of
         {ok, #{<<"sub">> := UserId} = Claims} ->
-            {ok, Claims, State};
+            case cp_security_check(Claims, UserId) of
+                ok ->
+                    {ok, Claims, State};
+                {error, Reason} ->
+                    {error, Reason, State}
+            end;
         {ok, _} ->
             {error, oauth2_invalid_grant, State};
         {error, Reason} ->
             {error, Reason, State}
     end.
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+-doc """
+The oauth2-specific half of the §9.2 CP-for-security gate: the `token_version`
+zookie comparison (steps 3-4). The generic AE freshness fence (step 2) that
+refuses on a stale/isolated node is applied to EVERY method in the common
+`bondy_auth:authenticate/4` path (§9.8), so it is not repeated here.
+
+Active only in the AAE phase (`bondy_oplog` `aae_enabled`). With anti-entropy
+off there is no cross-node staleness window, so the check is a deliberate no-op
+— a credential change closes sessions inline and tokens carry the synchronous
+local `token_version`.
+""".
+%% @private
+cp_security_check(Claims, UserId) ->
+    case aae_enabled() of
+        false ->
+            ok;
+        true ->
+            check_token_version(Claims, UserId)
+    end.
+
+
+%% @private
+%% Steps 3-4: the JWT's issue-time `tv` (the user cell's HLC at issue) must
+%% equal the user's current `token_version`, else the token predates a
+%% credential/membership change and re-authentication is forced. Read from the
+%% AUTH realm (`aud`) — the canonical user cell, matching the issue-time read.
+check_token_version(Claims, UserId) ->
+    AuthRealmUri = maps:get(<<"aud">>, Claims),
+    Embedded = maps:get(<<"tv">>, Claims, 0),
+    case bondy_rbac_user:token_version(AuthRealmUri, UserId) of
+        {ok, Embedded} ->
+            ok;
+        {ok, _Current} ->
+            {error, oauth2_invalid_grant};
+        {error, not_found} ->
+            {error, oauth2_invalid_grant}
+    end.
+
+
+%% @private
+aae_enabled() ->
+    application:get_env(bondy_oplog, aae_enabled, false) =:= true.

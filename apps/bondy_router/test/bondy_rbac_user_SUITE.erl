@@ -31,7 +31,8 @@ all() ->
         remove_group,
         remove_user,
         list_members,
-        group_deletion_cleans_members
+        group_deletion_cleans_members,
+        token_version
     ].
 
 init_per_suite(Config) ->
@@ -528,6 +529,38 @@ group_deletion_cleans_members(_) ->
     ok = flush_member_index(),
     ?assertEqual(
         {[], undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})
+    ).
+
+token_version(_) ->
+    U = <<"tv_user_1">>,
+    ok = add_member(?REALM1_URI, U, []),
+
+    %% A freshly written user cell has a monotonic HLC version.
+    {ok, V0} = bondy_rbac_user:token_version(?REALM1_URI, U),
+    ?assert(is_integer(V0) andalso V0 >= 0),
+
+    %% Every write to the user cell advances the version (the cell HLC is
+    %% strictly increasing), so a credential change is observable as a higher
+    %% version — this is what lets the auth path detect a token issued before
+    %% the change.
+    ok = bondy_rbac_user:change_password(?REALM1_URI, U, <<"new-secret-123">>),
+    {ok, V1} = bondy_rbac_user:token_version(?REALM1_URI, U),
+    ?assert(V1 > V0),
+
+    %% A second mutation advances it again — monotonic, not merely changed once.
+    ok = bondy_rbac_user:change_password(?REALM1_URI, U, <<"new-secret-456">>),
+    {ok, V2} = bondy_rbac_user:token_version(?REALM1_URI, U),
+    ?assert(V2 > V1),
+
+    %% The anonymous user has no stored cell / no revocable tokens → sentinel 0.
+    ?assertEqual(
+        {ok, 0}, bondy_rbac_user:token_version(?REALM1_URI, anonymous)
+    ),
+
+    %% A non-existent user has no version.
+    ?assertEqual(
+        {error, not_found},
+        bondy_rbac_user:token_version(?REALM1_URI, <<"no_such_user_xyz">>)
     ).
 
 %% =============================================================================

@@ -17,18 +17,7 @@ application** and can be embedded by external consumers via rebar3
 
 ## Status
 
-Implemented and tested on **OTP 28**: the full transport matrix (raw
-TCP/TLS/UDS, WebSocket via gun, in-VM local), the auth methods, RPC and pub/sub
-with CANCEL/INTERRUPT, reconnect/backoff with registration/subscription replay,
-ping keepalive, and isolated load-regulated handler execution. The core holds
-**no dependency on the `bondy` router app**. The CT suite is green (plus a PropEr
-framing suite), and the library has been through a full code review
-([`REVIEW.md`](REVIEW.md)) with all findings resolved. See `IMPLEMENTATION.md`
-for the per-phase feature status.
 
-- Architecture: [`DESIGN.md`](DESIGN.md)
-- Plan / phases: [`IMPLEMENTATION.md`](IMPLEMENTATION.md)
-- Review: [`REVIEW.md`](REVIEW.md)
 
 ## Roles & capabilities (target)
 

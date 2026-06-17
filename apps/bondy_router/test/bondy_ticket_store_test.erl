@@ -30,6 +30,17 @@ revoke_all_test_() ->
         ]
     end}.
 
+%% Regression guard for the bounded list-in-one-cell storage shape preserved
+%% from plum_db: client-scoped tickets for one (user, client) across many
+%% devices live in ONE cell as a per-device list — NOT one cell per ticket.
+storage_shape_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            {"client-scoped tickets are a per-device list in one cell",
+                fun client_tickets_list_in_one_cell/0}
+        ]
+    end}.
+
 %% revoke_all/2 must clear exactly the target user's cells. Seed alice (two
 %% distinct store keys) and bob (one); revoking alice leaves only bob.
 revoke_all_user() ->
@@ -62,9 +73,88 @@ revoke_all_realm() ->
     ok = bondy_ticket:revoke_all(?REALM),
     ?assertEqual([], live_authids(T)).
 
+%% Drive the real `bondy_ticket:store_ticket/3` (which builds the per-device
+%% list via `update_tickets/3`) for one (user, client) across N devices. All N
+%% share one composed store key `{Authid, ClientId, <<>>}` (device handled by
+%% the in-cell list), so they MUST collapse to a single cell holding a list of
+%% N — a cell-per-ticket regression would instead yield N cells.
+client_tickets_list_in_one_cell() ->
+    T = table(),
+    Authid = <<"erin">>,
+    Client = <<"app1">>,
+    N = 5,
+
+    _ = [
+        ok = bondy_ticket:store_ticket(
+            ?REALM, Authid, client_claims(Authid, Client, device(I))
+        )
+     || I <- lists:seq(1, N)
+    ],
+
+    %% Exactly ONE cell for (erin, app1), regardless of device count.
+    Rows = rows_for(T, Authid),
+    ?assertEqual(1, length(Rows)),
+
+    %% And that one cell holds a LIST of N tickets (one per device).
+    [{_Key, Value, _Hlc}] = Rows,
+    ?assert(is_list(Value)),
+    ?assertEqual(N, length(Value)),
+
+    %% Every device — INCLUDING the first — is findable via lookup/3 (regression
+    %% guard for the `update_tickets/3` first-device fix: the first ticket used
+    %% to be stored as a bare unkeyed map and so was unfindable).
+    lists:foreach(
+        fun(I) ->
+            ?assertMatch(
+                {ok, #{scope := #{device_id := _}}},
+                bondy_ticket:lookup(?REALM, Authid, scope(Client, device(I)))
+            )
+        end,
+        lists:seq(1, N)
+    ),
+
+    %% Re-storing ANY existing device — first included — replaces in place: the
+    %% list does NOT grow.
+    lists:foreach(
+        fun(I) ->
+            ok = bondy_ticket:store_ticket(
+                ?REALM, Authid, client_claims(Authid, Client, device(I))
+            ),
+            [{_, V, _}] = rows_for(T, Authid),
+            ?assertEqual(N, length(V))
+        end,
+        [1, N]
+    ),
+
+    ok = bondy_ticket:revoke_all(?REALM, Authid),
+    ?assertEqual([], rows_for(T, Authid)).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+%% A client-scoped (client_local) scope: client_id =/= all and a concrete
+%% device_id, so `store_ticket/3` takes the list-valued cell path.
+scope(ClientId, DeviceId) ->
+    #{realm => ?REALM, client_id => ClientId, device_id => DeviceId}.
+
+%% A client-scoped claims map for the given client + device.
+client_claims(Authid, ClientId, DeviceId) ->
+    #{
+        authrealm => ?REALM,
+        authid => Authid,
+        scope => scope(ClientId, DeviceId),
+        expires_at => erlang:system_time(second) + 3600
+    }.
+
+%% The cells (rows) in the realm whose decoded store key belongs to `Authid`
+%% (its first tuple element), regardless of map- or list-valued.
+rows_for(Table, Authid) ->
+    {ok, Rows} = bondy_db:list(Table, ?REALM),
+    [R || {Key, _V, _H} = R <- Rows, element(1, binary_to_term(Key)) =:= Authid].
+
+device(I) ->
+    <<"device_", (integer_to_binary(I))/binary>>.
 
 %% Seed a ticket cell the way `bondy_ticket:store_ticket/3` does — the composed
 %% store key `term_to_binary`-encoded, a claims map value — so the module's own

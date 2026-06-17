@@ -64,6 +64,7 @@ set) from making the session run forever.
 
 -export([run/3]).
 -export([run/4]).
+-export([maybe_bump_ae_isolated/1]).
 -export([start/3]).
 -export([start/4]).
 -export([bootstrap/3]).
@@ -542,41 +543,107 @@ pull_until_complete(
     end.
 
 %% @private
-maybe_record({ok, Root}, Instance, Peer, true) when is_binary(Root) ->
-    ok = bondy_oplog_peer_state:record_sync_complete(
-        Peer, Instance, Root
-    ),
+%% A successful round (`{ok, Root}`, `Record =:= true`) freshens this
+%% instance's AE targets — INCLUDING when `Root =:= undefined` (an empty
+%% instance verified caught-up with the peer). The empty case is exactly the
+%% idle low-churn shard the auth freshness fence depends on, so it MUST bump;
+%% only the peer-state checkpoint (which needs a concrete root) is skipped.
+maybe_record({ok, Root}, Instance, Peer, true) ->
+    ok = maybe_checkpoint_root(Root, Instance, Peer),
     ok = bump_ae_on_sync(Instance, Peer);
 maybe_record(_, _, _, _) ->
     ok.
 
 %% @private
+maybe_checkpoint_root(Root, Instance, Peer) when is_binary(Root) ->
+    bondy_oplog_peer_state:record_sync_complete(Peer, Instance, Root);
+maybe_checkpoint_root(undefined, _Instance, _Peer) ->
+    ok.
+
+%% @private
 %% Substrate read-side freshness wiring. After a successful AE round,
-%% bump every shard the consumer
-%% registered for this instance so long-quiet shards (no writer
-%% activity) do not trip `{stale, _}` purely on inactivity.
+%% bump every shard the consumer registered for this instance so
+%% long-quiet shards (no writer activity) do not trip `{stale, _}` purely
+%% on inactivity.
 %%
 %% Uses `bondy_oplog_core_registry:bump_ae_targets/2` so the AE-side bump
 %% shares a primitive — and timing semantics — with the applier-side
 %% bump in `bondy_oplog_applier:bump_ae_targets/1`. Empty target list
 %% is a strict no-op.
+%%
+%% This is the `synced` site (we reached a peer this round). Under the
+%% `quorum` isolation policy the bump is additionally gated on a connected
+%% majority, so a minority partition that can still sync internally does
+%% not self-certify fresh. `refuse` / `proceed` always bump here.
 bump_ae_on_sync(Instance, Peer) ->
+    case should_certify_freshness(synced) of
+        true -> do_bump_ae_targets(Instance, #{peer => Peer, site => synced});
+        false -> ok
+    end.
+
+-doc """
+Freshen this instance's AE targets for a node that can reach NO peers
+(solo membership), per the `oplog.aae.fence.on_isolation` policy:
+`proceed` always bumps (treat isolation as vacuously fresh), `refuse`
+never bumps (fail closed — the fence will refuse), `quorum` bumps only
+while connected to a majority (true for genuinely-solo membership).
+Called by the sync scheduler when an instance's peer list is empty.
+""".
+-spec maybe_bump_ae_isolated(instance_id()) -> ok.
+
+maybe_bump_ae_isolated(Instance) when is_binary(Instance) ->
+    case should_certify_freshness(isolated) of
+        true ->
+            do_bump_ae_targets(Instance, #{peer => undefined, site => isolated});
+        false ->
+            ok
+    end.
+
+%% @private
+do_bump_ae_targets(Instance, Meta) ->
     case bondy_oplog_registry:ae_targets(Instance) of
-        [] ->
-            ok;
-        undefined ->
-            ok;
-        Targets ->
+        Targets when is_list(Targets), Targets =/= [] ->
             Now = erlang:monotonic_time(millisecond),
             {Bumped, NotFound} =
                 bondy_oplog_core_registry:bump_ae_targets(Targets, Now),
             telemetry:execute(
                 [bondy_oplog, sync, ae_bumped],
                 #{count => Bumped, not_found => NotFound},
-                #{instance_id => Instance, peer => Peer, now_ms => Now}
+                Meta#{instance_id => Instance, now_ms => Now}
             ),
+            ok;
+        _ ->
             ok
     end.
+
+%% @private
+%% The configured no-peer fence policy (`oplog.aae.fence.on_isolation`).
+isolation_policy() ->
+    application:get_env(bondy_oplog, aae_fence_on_isolation, refuse).
+
+%% @private
+%% Whether a freshness certification is permitted now under the isolation
+%% policy, for a bump arising from `Site` (`synced` = a successful round
+%% that reached a peer; `isolated` = a tick with no peers in membership).
+should_certify_freshness(Site) ->
+    case isolation_policy() of
+        proceed -> true;
+        refuse -> Site =:= synced;
+        quorum -> connected_majority()
+    end.
+
+%% @private
+%% True iff this node is connected to a strict majority of its expected
+%% Partisan membership (self counts). Solo membership is trivially a
+%% majority; a minority partition is not.
+connected_majority() ->
+    Expected =
+        case partisan_peer_service:members() of
+            {ok, Members} when is_list(Members) -> length(Members);
+            _ -> 1
+        end,
+    Connected = length(partisan:nodes()) + 1,
+    Connected * 2 > Expected.
 
 %% @private
 %% Inserts pages into the local store. When the backend supports

@@ -489,8 +489,14 @@ read_at_hlc(NS, Bucket, Key, T) when is_integer(T), T >= 0 ->
     Result.
 
 -doc """
-Freshness predicate. Returns `ok` iff every shard of every supplied
-namespace has had a `bump_ae/3` within `MaxLag` milliseconds of "now".
+Freshness predicate. Returns `ok` iff every PRIMARY shard of every
+supplied namespace has had a `bump_ae/3` within `MaxLag` milliseconds of
+"now" (a local commit or a successful AE round, per
+`bondy_oplog_core_registry`). Secondary-index shards are excluded —
+the auth fence reads primary-projection cells; index staleness is
+governed by the `index_get` `max_lag` path.
+
+`MaxLag = infinity` short-circuits to `ok` (fence disabled).
 """.
 -spec ensure_fresh([atom()], non_neg_integer() | infinity) ->
     ok | {stale, [atom()]}.
@@ -506,7 +512,7 @@ ensure_fresh(NSs, MaxLag) when
         [
             NS
          || NS <- NSs,
-            Entry <- bondy_oplog_core_registry:shards_for(NS),
+            Entry <- bondy_oplog_core_registry:primary_shards_for(NS),
             (Now -
                 atomics:get(
                     bondy_oplog_core_registry:entry_ae_atomics(Entry), 1

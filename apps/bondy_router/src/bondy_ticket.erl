@@ -719,8 +719,15 @@ store_ticket(AuthRealmUri, Authid, Claims) ->
     end.
 
 %% @private
-update_tickets(_, Claims, undefined) ->
-    [Claims];
+%% The first ticket for a client-scoped cell MUST be stored keyed by its
+%% `list_key` (the `{realm, device_id}` pair), exactly like every subsequent
+%% entry. Returning a bare `[Claims]` here (the historical form) left the first
+%% device's ticket unkeyed in the list, so `lookup/3`'s
+%% `lists:keyfind(LKey, 1, List)` could never find it and re-issuing that device
+%% appended a duplicate instead of replacing — an unbounded growth bug for the
+%% first device. Keying it makes lookup find it and keystore replace it.
+update_tickets(Scope, Claims, undefined) when is_map(Scope) ->
+    [{list_key(Scope), Claims}];
 update_tickets(Scope, Claims, Tickets) when is_map(Scope) ->
     update_tickets(list_key(Scope), Claims, Tickets);
 update_tickets({_, _} = Key, Claims, Tickets) ->
