@@ -123,6 +123,9 @@ no-op.
 -export([add/2]).
 -export([add/3]).
 -export([add_group/3]).
+%% Exported for the legacy-backup import translator (bondy_export): upgrades a
+%% pre-v1.1 proplist group value (or passes a current map through).
+-export([from_term/1]).
 -export([add_groups/3]).
 -export([exists/2]).
 -export([fetch/2]).
@@ -691,7 +694,8 @@ not_reserved_name_check(Term) ->
     not bondy_rbac:is_reserved_name(Term) orelse throw(reserved_name),
     ok.
 
-%% @private
+%% @doc Exported for legacy-backup import: upgrade a pre-v1.1 proplist group
+%% value to the current map (or pass a current map through).
 from_term({Name, PList}) when is_list(PList) ->
     Group0 = maps:from_list(
         lists:keymap(fun erlang:binary_to_existing_atom/1, 1, PList)

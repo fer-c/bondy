@@ -98,11 +98,14 @@ stamps_substrate_invariants(Dir) ->
     fun() ->
         {ok, genesis, _} = bondy_db_manifest:reconcile(Dir, configured(), warn),
         {ok, #{frozen := Frozen}} = bondy_db_manifest:read(Dir),
-        %% hash_algo and key_encoding_version are added by the module even
-        %% though the caller never supplied them.
+        %% hash_algo, key_encoding_version, and instances_strategy are added by
+        %% the module even though the caller never supplied them.
         ?assert(maps:is_key(hash_algo, Frozen)),
         ?assert(maps:is_key(key_encoding_version, Frozen)),
-        ?assertEqual(phash2, maps:get(hash_algo, Frozen))
+        ?assertEqual(phash2, maps:get(hash_algo, Frozen)),
+        %% instances_strategy is derived from the topology module
+        %% (shared_shards ⇒ per_shard, the one-log-per-shard collapse).
+        ?assertEqual(per_shard, maps:get(instances_strategy, Frozen))
     end.
 
 warn_mismatch_returns_on_disk_effective(Dir) ->

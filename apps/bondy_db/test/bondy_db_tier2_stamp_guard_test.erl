@@ -98,13 +98,19 @@ regression_is_refused() ->
     %% the next read of an empty cell context is a regression.
     ok = delete_projection_cell(T, ?R, ?K),
 
+    %% The applier reports a regression at the CELL level — `(Bucket, CellKey)`
+    %% — which under the bucket-by-entity-type, realm-folded memory layout is
+    %% the entity-type bucket and the `<<Realm,0,Key>>` cell key (the same shape
+    %% `shared_shards` reports).
+    Bucket = atom_to_binary(items, utf8),
+    CellKey = <<?R/binary, 0, ?K/binary>>,
     Ref = attach_regression_telemetry(),
     try
         ?assertEqual(
-            {error, {context_regression, ?R, ?K}},
+            {error, {context_regression, Bucket, CellKey}},
             bondy_db:apply(T, ?R, ?K, {set, <<"v3">>})
         ),
-        ?assertEqual({telemetered, ?R, ?K}, await_regression_event())
+        ?assertEqual({telemetered, Bucket, CellKey}, await_regression_event())
     after
         detach_regression_telemetry(Ref)
     end,
@@ -125,15 +131,19 @@ open_db(Name) ->
     }),
     {Db, Origin}.
 
-%% Memory topology buckets a cell under its realm (`bucket_for/3`), shard 0
-%% (shard_count 1). Reach the shard's projection adapter via the registry
-%% and delete the single cell, simulating an in-process durable-state loss.
+%% Memory now buckets a cell by entity type (`bucket_for/3`) and folds the realm
+%% into the cell key (G-1), shard 0 (shard_count 1). Reach the shard's projection
+%% adapter via the registry and delete the single cell at its real
+%% `(EntityType bucket, <<Realm,0,Key>>)` address, simulating an in-process
+%% durable-state loss.
 delete_projection_cell(T, Realm, Key) ->
     NS = maps:get(namespace, bondy_db:info(T)),
     {ok, Entry} = bondy_oplog_core_registry:lookup(NS, primary, 0),
     Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-    Adapter:delete(Handle, Realm, Key).
+    Bucket = atom_to_binary(items, utf8),
+    CellKey = <<Realm/binary, 0, Key/binary>>,
+    Adapter:delete(Handle, Bucket, CellKey).
 
 attach_regression_telemetry() ->
     Ref = {?MODULE, erlang:unique_integer()},

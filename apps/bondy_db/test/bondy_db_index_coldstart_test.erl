@@ -335,7 +335,7 @@ flush_index(Table, IndexName) ->
     ).
 
 %% Drop every shard's buffered-but-unflushed index ops WITHOUT touching the
-%% durable cells or the trust marker (`bondy_oplog_secondary_writer:reset/1`),
+%% durable cells or the trust marker (`bondy_oplog_secondary_writer:reset/2`),
 %% simulating a crash that loses the writer's in-memory coalesce buffer.
 reset_index(Table, IndexName) ->
     Info = bondy_db:info(Table),
@@ -348,7 +348,7 @@ reset_index(Table, IndexName) ->
             ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
-            ok = bondy_oplog_secondary_writer:reset(Pid)
+            ok = bondy_oplog_secondary_writer:reset(Pid, {NS, IndexName})
         end,
         lists:seq(0, N - 1)
     ).

@@ -277,4 +277,47 @@ export the other.
     TableState :: table_state()
 ) -> ok.
 
--optional_callbacks([provision_cache/5, release_cache/2]).
+-doc """
+**Optional.** Declares how this topology maps tables onto `bondy_oplog`
+instances.
+
+- `per_table_shard` (the default for a topology that omits this callback) — each
+  `(EntityType, Shard)` gets its own instance: one WAL + MST + applier per table
+  per shard. Required when the topology's `bucket_for/3` is not realm-independent
+  (`per_entity`, `single_bookie`, `memory`), because the bucket carried in each
+  event cannot by itself identify the table.
+
+- `per_shard` — all tables on a shard share **one** instance (one WAL + MST +
+  applier), distinguished by the `bucket` each event carries. Valid ONLY for a
+  topology whose `bucket_for/3` returns the realm-independent entity-type tag
+  (`atom_to_binary(EntityType, utf8)`) and whose `route/2` returns one shared
+  projection handle per shard — i.e. `shared_shards`. The shared instance's
+  lifecycle is refcounted across the tables on the shard, exactly as the shared
+  Bookie's is.
+""".
+-callback instances_strategy() -> per_table_shard | per_shard.
+
+-optional_callbacks([
+    provision_cache/5, release_cache/2, instances_strategy/0
+]).
+
+-export([instances_strategy/1]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-doc """
+Resolve a topology module's `instances_strategy/0`, defaulting to
+`per_table_shard` when the module omits the optional callback. The single
+resolver shared by the provisioning path (`bondy_db`) and the topology manifest
+(`bondy_db_manifest`), so both agree on a topology's instance-mapping strategy.
+""".
+-spec instances_strategy(Module :: module()) ->
+    per_table_shard | per_shard.
+
+instances_strategy(Module) when is_atom(Module) ->
+    case erlang:function_exported(Module, instances_strategy, 0) of
+        true -> Module:instances_strategy();
+        false -> per_table_shard
+    end.

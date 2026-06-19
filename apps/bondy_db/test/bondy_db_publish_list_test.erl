@@ -46,8 +46,12 @@ publish_delivers() ->
         {ok, _Ref} = bondy_oplog_core:subscribe(NS, all),
         H = bondy_db:tick(T),
         ok = bondy_db:apply(T, <<"r">>, <<"k1">>, {set, H, <<"v1">>}),
+        %% The event carries the cell-level key, which on the memory topology is
+        %% realm-folded (`<<Realm,0,Key>>`) — the same shape `shared_shards`
+        %% publishes, where a reactor un-folds it to recover the key.
+        CellKey = <<"r", 0, "k1">>,
         receive
-            {bondy_oplog_core_event, NS, <<"k1">>, _Hlc, Op} ->
+            {bondy_oplog_core_event, NS, CellKey, _Hlc, Op} ->
                 ?assertEqual({set, H, <<"v1">>}, Op)
         after 5000 ->
             ?assert(false)

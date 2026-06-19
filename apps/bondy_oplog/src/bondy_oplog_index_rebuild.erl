@@ -244,7 +244,10 @@ reset_target_shard(Entry) ->
     bondy_oplog_core_registry:index_mark_rebuild(Entry),
     case bondy_oplog_core_registry:entry_writer_pid(Entry) of
         Pid when is_pid(Pid) ->
-            _ = catch bondy_oplog_secondary_writer:reset(Pid);
+            %% Reset only THIS index shard's stream on the (possibly shared)
+            %% writer — sibling indexes on the same writer keep their buffers.
+            {NS, IName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
+            _ = catch bondy_oplog_secondary_writer:reset(Pid, {NS, IName});
         _ ->
             ok
     end,

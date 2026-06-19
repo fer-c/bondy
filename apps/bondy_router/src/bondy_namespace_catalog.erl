@@ -72,11 +72,12 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 -define(DEFAULT_REGISTRY_SHARD_COUNT, 16).
 
 %% The native CRDTs that have no short fold alias in `bondy_oplog_cell_kernel`
-%% (`mv_register` for grants / sources, `aw_map` for group membership). They are
+%% (`mv_register` for grants / sources, `ew_flag` for group membership). They are
 %% passed as an explicit `crdt_module`; the `fold_module` stays `lww_register`,
-%% their byte-compatible carrier — see the mv_register / aw_map e2e tests.
+%% their byte-compatible carrier — see the mv_register / ew_flag e2e tests.
 -define(MV_CRDT, bondy_oplog_crdt_mv_register).
 -define(AW_CRDT, bondy_oplog_crdt_aw_map).
+-define(EW_CRDT, bondy_oplog_crdt_ew_flag).
 
 -record(state, {
     db :: bondy_db:db() | undefined,
@@ -87,7 +88,7 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
     registry_db :: bondy_db:db() | undefined
 }).
 
--type fold_class() :: lww | mv | aw | presence.
+-type fold_class() :: lww | mv | aw | ew | presence.
 -type shard_strategy() :: realm | key.
 -type db_name() :: core | registry.
 -type table_spec() :: #{
@@ -192,21 +193,29 @@ tables() ->
             fold => lww,
             migrated => true
         },
-        %% security_group_members — net-new split table (no plum_db prefix).
-        %% The reverse membership READ path ("which users are in group G") is
-        %% NOT this table: it is the substrate-maintained `by_group` secondary
-        %% index on `security_users` (see `user_indexes/0`), which rides on the
-        %% authoritative lww `user.groups`. This table stays DORMANT (not
-        %% `migrated`) for the oplog.aae phase, where it becomes the *add-wins*
-        %% forward membership relation (the `user.groups` → aw_map split, design
-        %% §3 table 5b / D-R1) — its `aw` fold (observed-remove) only matters
-        %% under concurrent multi-node member edits, which need AAE (off today).
+        %% security_group_members — the AUTHORITATIVE group-membership relation
+        %% (design §3 / D-R3). Membership is cell-per-fact, add-wins: each
+        %% `(user, group)` fact is an `ew_flag` (enable-wins) presence cell, so a
+        %% concurrent add survives a remove that did not observe it. Every fact
+        %% is stored in BOTH key orderings (a forward `f` band keyed
+        %% `enc(user) ⊕ enc(group)` and a reverse `r` band keyed
+        %% `enc(group) ⊕ enc(user)`) so "groups of a user" and "members of a
+        %% group" are each a bounded, realm-local key-range scan with no
+        %% secondary index — the permutation-index pattern (design §11). The
+        %% read/write primitives live in `bondy_rbac_user`. `publish => true`
+        %% wires the remote `on_merge` seam so a peer's membership change merged
+        %% via anti-entropy invalidates this node's cached RBAC contexts for the
+        %% realm in place (§9.5; reactor `bondy_aae_reactor:react_member/2`),
+        %% exactly as grants do. token_version still advances on a membership
+        %% change because the write path also touches the user cell.
         #{
-            name => security_group_members,
+            name => ?BONDY_DB_GROUP_MEMBERS_TAB,
             db => core,
             durability => durable,
             shard_by => realm,
-            fold => aw
+            fold => ew,
+            migrated => true,
+            publish => true
         },
         %% security_{group,user}_grants — seventh domain cut over to bondy_db
         %% (§11.4): always provisioned. `publish => true` wires the remote
@@ -345,14 +354,21 @@ tables() ->
         %% registry — tenth / last domain cut over to bondy_db (§11.4 / D-7):
         %% ephemeral (ETS projection, mem WAL, memory topology — NO durable or
         %% disk-backed storage, exactly like the plum_db `type => ram` tables it
-        %% replaces), provisioned when migrated. Storage-only and cut as `lww`:
-        %% the presence-FSM fold, SUSPEND/RESUME/EVICT and the remote change
-        %% reactor (replacing the plum_db `on_merge`) are deferred to the
-        %% oplog.aae phase — with AAE off there are no remote entries, so the
-        %% merge machinery is inert. The durable key is the random realm-unique
-        %% `entry_id`; the `by_session` index (registry_indexes/0) serves
-        %% session-close cleanup (`remove_all`) as a bounded reverse lookup
-        %% instead of a realm scan.
+        %% replaces). Cut as `lww`, and that IS the registry presence state
+        %% machine: keys carry the globally-unique `SessionId`, so no two writers
+        %% ever target the same key (§8.3) — a `set` is `live`, a `clear` is
+        %% `dead`, HLC-ordered, and a re-CREATE uses a fresh SessionId (a
+        %% different key), so there is no resurrection to resolve and no dedicated
+        %% presence fold is needed. `publish => true` wires the merge-side hook so
+        %% `bondy_aae_reactor` maintains this node's routing trie from peers'
+        %% replicated registrations (the AAE merge lands in this projection; the
+        %% trie is a separate materialised view). Node-level liveness
+        %% (SUSPEND/RESUME) is local Partisan-driven trie masking in
+        %% `bondy_registry`, not replicated data; only owner DELETE / self-clean
+        %% and the rendezvous-hashed EVICT are replicated `clear`s (§9.6). The key
+        %% is the random realm-unique `entry_id`; the `by_session` index
+        %% (registry_indexes/0) serves session-close cleanup (`remove_all`) as a
+        %% bounded reverse lookup instead of a realm scan.
         #{
             name => ?BONDY_DB_REGISTRATION_TAB,
             db => registry,
@@ -360,6 +376,7 @@ tables() ->
             shard_by => realm,
             fold => lww,
             migrated => true,
+            publish => true,
             indexes => registry_indexes()
         },
         #{
@@ -369,6 +386,7 @@ tables() ->
             shard_by => realm,
             fold => lww,
             migrated => true,
+            publish => true,
             indexes => registry_indexes()
         }
     ].
@@ -472,14 +490,18 @@ native CRDT — the per-table "WAMP fold module" selection (design §11.3).
   Concurrent writes to the same `(realm, principal, resource)` survive as
   siblings, so the auth layer can refuse / alert instead of silently
   accepting an LWW winner.
-- `aw`  → `lww_register` carrier + the `aw_map` CRDT: group membership. A
-  concurrent add survives a remove that did not observe it.
+- `aw`  → `lww_register` carrier + the `aw_map` CRDT: a single-cell add-wins
+  map (no current table uses it; reserved).
+- `ew`  → `lww_register` carrier + the `ew_flag` CRDT: cell-per-fact group
+  membership. Each membership fact is an enable-wins presence cell, so a
+  concurrent add survives a remove that did not observe it (add-wins). See
+  `bondy_rbac_user`'s membership relation.
 
-`mv_register` / `aw_map` have no short fold alias in `bondy_oplog_cell_kernel`,
-so they are passed as an explicit `crdt_module` (the `fold_module` stays
-`lww_register`, their byte-compatible carrier). `presence` (the registry
-tables) is deferred with the registry domain (design §11.4 / D-7) and has no
-mapping yet.
+`mv_register` / `aw_map` / `ew_flag` have no short fold alias in
+`bondy_oplog_cell_kernel`, so they are passed as an explicit `crdt_module` (the
+`fold_module` stays `lww_register`, their byte-compatible carrier). `presence`
+(the registry tables) is deferred with the registry domain (design §11.4 / D-7)
+and has no mapping yet.
 """.
 -spec fold_opts(fold_class()) -> map().
 
@@ -489,6 +511,8 @@ fold_opts(mv) ->
     #{fold_module => lww_register, crdt_module => ?MV_CRDT};
 fold_opts(aw) ->
     #{fold_module => lww_register, crdt_module => ?AW_CRDT};
+fold_opts(ew) ->
+    #{fold_module => lww_register, crdt_module => ?EW_CRDT};
 fold_opts(presence) ->
     %% Registry presence-FSM fold — deferred with the registry domain
     %% (design §11.4 / D-7); registry tables are not opened yet.
@@ -923,14 +947,12 @@ maybe_ephemeral_opts(_Spec, Opts) ->
 %% so "which users are in group G" is a bounded `bondy_db:index_get/5`
 %% instead of the O(all-users) realm scan group deletion used to require.
 %%
-%% Terms are stored verbatim (`normalize => none`): `user.groups` is already
-%% casefolded by `bondy_data_validators:groupnames/1` at write, and the query
-%% side casefolds identically via `bondy_rbac_group:normalise_name/1`, so the
-%% query term matches the stored term exactly. The substrate maintains the
-%% index on every user write and removes every entry on delete; the forward
-%% direction stays the authoritative lww `user.groups`.
+%% Empty since membership left the user cell: both the forward ("groups of a
+%% user") and reverse ("members of a group") access paths are now bounded
+%% key-range scans over the cell-per-fact `security_group_members` relation (see
+%% `bondy_rbac_user`), so no `by_group` index on `security_users` is needed.
 user_indexes() ->
-    [#{name => by_group, extract => [groups]}].
+    [].
 
 %% @private
 %% The equality reverse index for grants (piece #2): "which roles have a grant

@@ -25,11 +25,14 @@
 -define(USERS_TABLE, security_users).
 -define(BRIDGE_TABLE, bondy_bridge_relay).
 -define(REALM_TABLE, bondy_realm).
+-define(MEMBER_TABLE, security_group_members).
 -define(REALM, <<"com.bondy.aae_cluster">>).
 %% How long to wait for a write to propagate across the cluster. Generous so
 %% the convergence assertions stay robust under the accumulated load of the
-%% full suite (the periodic sync scheduler slows as more namespaces sync).
--define(CONVERGE_MS, 60000).
+%% full suite (the periodic sync scheduler slows as more namespaces sync, and
+%% each added test compounds it — a fixed ceiling that is comfortable for a
+%% lightly-loaded cluster becomes marginal as the suite grows).
+-define(CONVERGE_MS, 120000).
 
 all() ->
     [
@@ -39,6 +42,9 @@ all() ->
         merge_event_fires_on_remote_write,
         realm_merge_event_fires_on_remote_write,
         grant_merge_event_fires_on_remote_write,
+        concurrent_membership_adds_both_survive,
+        registry_registration_converges_and_presence,
+        remote_user_delete_closes_peer_sessions,
         token_version_rejected_cross_node
     ].
 
@@ -176,6 +182,118 @@ grant_merge_event_fires_on_remote_write(Config) ->
     ok = wait_for_merge_event(N2, GKey, 15000),
     ok.
 
+%% Group membership is cell-per-fact, add-wins (`security_group_members`, the
+%% `ew_flag` relation). Two adds of the SAME user to DIFFERENT groups, authored
+%% independently on two different nodes, must BOTH survive on all three after
+%% AAE — the lost update a whole-record `user.groups` lww would suffer (one
+%% node's `[g_a]` clobbering the other's `[g_b]`) is structurally impossible,
+%% because each `(user, group)` fact is its own cell. The remote merge also
+%% delivers the merge event that drives the §9.5 `react_member` RBAC-context
+%% invalidation.
+concurrent_membership_adds_both_survive(Config) ->
+    [N1, N2, N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_member">>,
+    User = <<"mem_user">>,
+
+    NS = erpc:call(N2, ?MODULE, do_namespace, [?MEMBER_TABLE]),
+    ok = erpc:call(N2, ?MODULE, start_collector, [NS]),
+
+    %% Realm with two groups + the user (no groups) on node 1; converge the
+    %% realm, user and groups to the other nodes so a local add can validate the
+    %% group there.
+    ok = erpc:call(
+        N1, ?MODULE, do_create_member_realm, [Uri, User, [<<"g_a">>, <<"g_b">>]]
+    ),
+    [ok = wait_member_converge(N, Uri, User, []) || N <- [N2, N3]],
+    [ok = wait_groups_exist(N, Uri, [<<"g_a">>, <<"g_b">>]) || N <- [N2, N3]],
+
+    %% Independent adds on two different nodes — different facts, no overwrite.
+    ok = erpc:call(N1, ?MODULE, do_add_member, [Uri, User, <<"g_a">>]),
+    ok = erpc:call(N2, ?MODULE, do_add_member, [Uri, User, <<"g_b">>]),
+
+    %% Both facts converge everywhere.
+    [
+        ok = wait_member_converge(N, Uri, User, [<<"g_a">>, <<"g_b">>])
+     || N <- [N1, N2, N3]
+    ],
+
+    %% The membership fact authored on node 1 merged on node 2 and fired a merge
+    %% event (the reverse-band cell key carries the group name as a substring).
+    ok = wait_for_merge_event(N2, <<"g_a">>, 15000),
+    ok.
+
+%% The registry presence machine end-to-end (STORAGE_ARCHITECTURE §9.6). The
+%% `registry` is an EPHEMERAL, memory-topology bondy_db DB; this is the only test
+%% that exercises AAE over that topology (the others use the durable `core`).
+%%
+%% A registration authored on node 1 must:
+%%   1. converge into nodes 2 & 3's ROUTING TRIE (the materialised view the merge
+%%      reactor maintains, separate from the projection AAE merges into) — i.e. a
+%%      peer learns it can route to node 1's callee;
+%%   2. be MASKED on node 2 when node 1 is seen down (presence SUSPEND) and
+%%      RESTORED when it returns (presence RESUME) — without node 1 re-asserting,
+%%      which is what makes a partition heal transparent to a connected client;
+%%   3. be removed cluster-wide when node 1 DELETEs it (the `clear` rides AAE and
+%%      every peer's merge reactor drops it from its trie).
+registry_registration_converges_and_presence(Config) ->
+    [N1, N2, N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_registry">>,
+    Proc = <<"com.example.aae_proc">>,
+
+    %% Realm authored on node 1, converged everywhere (registrations are scoped to
+    %% it; the realm rides the durable core).
+    ok = erpc:call(N1, ?MODULE, do_create_simple_realm, [Uri]),
+
+    %% A registration on node 1 must appear in every node's trie (1 match each).
+    ok = erpc:call(N1, ?MODULE, do_add_registration, [Uri, Proc]),
+    ?assertEqual(1, erpc:call(N1, ?MODULE, do_reg_count, [Uri, Proc])),
+    [ok = wait_reg_count(N, Uri, Proc, 1) || N <- [N2, N3]],
+
+    %% Presence SUSPEND: tell node 2 that node 1 is down → its entry is masked
+    %% (out of the routing trie), retained for a RESUME.
+    Owner = erpc:call(N2, ?MODULE, do_owner_node, [Uri, Proc]),
+    ?assert(Owner =/= undefined andalso Owner =/= node()),
+    ok = erpc:call(N2, ?MODULE, do_signal, [{nodedown, Owner}]),
+    ok = wait_reg_count(N2, Uri, Proc, 0),
+
+    %% Presence RESUME: node 1 returns → node 2 unmasks it back into the trie,
+    %% WITHOUT node 1 re-asserting (node 1 was never told anything).
+    ok = erpc:call(N2, ?MODULE, do_signal, [{nodeup, Owner}]),
+    ok = wait_reg_count(N2, Uri, Proc, 1),
+
+    %% DELETE on node 1 converges: the `clear` rides AAE and every peer's merge
+    %% reactor drops it from its trie.
+    ok = erpc:call(N1, ?MODULE, do_remove_registration, [Uri, Proc]),
+    [ok = wait_reg_count(N, Uri, Proc, 0) || N <- [N1, N2, N3]],
+    ok.
+
+%% react_user fires cross-node on a real user DELETE (STORAGE_ARCHITECTURE §9.5):
+%% a user removed on node 1 must drive node 2's merge reactor to close that user's
+%% local sessions (`bondy.user.deleted`). The delete arrives as bondy_db's
+%% short-form `clear` op, so this guards the reactor against the wire op-shape the
+%% unit test cannot observe. We record the close call on node 2 — the actual
+%% teardown is `bondy_session_manager`'s job, covered elsewhere; the point here is
+%% that the remote merge reaches `react_user` with the right realm + user.
+remote_user_delete_closes_peer_sessions(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_userdel">>,
+    User = <<"victim">>,
+
+    %% Realm + user on node 1.
+    ok = erpc:call(N1, ?MODULE, do_create_user_realm, [Uri, User]),
+
+    %% Record close_sessions on node 2, then converge the user there.
+    ok = erpc:call(N2, ?MODULE, do_arm_close_recorder, []),
+    try
+        ok = wait_user_exists(N2, Uri, User),
+        %% Delete on node 1 → the `clear` rides AAE → node 2's react_user closes
+        %% the user's sessions for the realm (recorded here).
+        ok = erpc:call(N1, ?MODULE, do_delete_user, [Uri, User]),
+        ok = wait_close_recorded(N2, Uri, User)
+    after
+        ok = erpc:call(N2, ?MODULE, do_disarm_close_recorder, [])
+    end.
+
 %% The revocation zookie across nodes (STORAGE_ARCHITECTURE §9.2/§9.3): a JWT
 %% minted on node 1 authenticates on node 2 once the realm/user converge AND the
 %% AE fence is fresh; after a credential change on node 1 bumps the user cell's
@@ -296,6 +414,84 @@ wait_token_version_loop(Node, Uri, User, Expected, Deadline) ->
     end.
 
 %% @private
+%% Polls `Node` until the user's derived group set (read from the membership
+%% relation) equals `Expected` (sorted), forcing a sync tick each round.
+wait_member_converge(Node, Uri, User, Expected) ->
+    Sorted = lists:sort(Expected),
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, ?MODULE, do_member_groups, [Uri, User]) end,
+        Sorted,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% Polls `Node` until every group in `Groups` exists in the realm (replicated
+%% via AAE), forcing a sync tick each round.
+wait_groups_exist(Node, Uri, Groups) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, ?MODULE, do_groups_exist, [Uri, Groups]) end,
+        true,
+        Node,
+        Deadline
+    ).
+
+%% @private
+wait_until_eq(Fun, Expected, Node, Deadline) ->
+    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
+    case catch Fun() of
+        Expected ->
+            ok;
+        Other ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true -> error({wait_eq_timeout, Node, Expected, Other});
+                false ->
+                    timer:sleep(250),
+                    wait_until_eq(Fun, Expected, Node, Deadline)
+            end
+    end.
+
+%% @private
+%% Polls `Node` until the user exists locally (replicated via AAE), forcing a sync
+%% tick each round.
+wait_user_exists(Node, Uri, User) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, ?MODULE, do_user_exists, [Uri, User]) end,
+        true,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% Polls `Node` until its merge reactor has called `close_sessions` for the user
+%% (i.e. a peer's user delete drove the §9.5 reaction here), forcing a sync tick
+%% each round.
+wait_close_recorded(Node, Uri, User) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, ?MODULE, do_close_recorded, [Uri, User]) end,
+        true,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% Polls `Node` until its routing trie holds exactly `Count` registrations
+%% matching the procedure (the merge reactor / presence machine having
+%% converged), forcing a sync tick each round.
+wait_reg_count(Node, Uri, Proc, Count) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, ?MODULE, do_reg_count, [Uri, Proc]) end,
+        Count,
+        Node,
+        Deadline
+    ).
+
+%% @private
 apply_on(Node, Table, Band, Key, Val) ->
     erpc:call(Node, ?MODULE, do_apply, [Table, Band, Key, Val]).
 
@@ -388,6 +584,132 @@ table_handle(Table) ->
 %% @private
 do_namespace(Table) ->
     bondy_db:namespace(table_handle(Table)).
+
+%% @private
+do_create_simple_realm(Uri) ->
+    _ = bondy_realm:create(Uri),
+    ok.
+
+%% @private
+%% Add a callback registration owned by THIS node for `Proc`. A callback ref is
+%% node-bound and process-independent, so the entry survives the erpc worker
+%% exiting and is seen as remote (owner = this node) on the other nodes.
+do_add_registration(Uri, Proc) ->
+    Ref = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
+    Opts = #{match => <<"exact">>, invoke => <<"single">>},
+    case bondy_registry:add(registration, Uri, Proc, Opts, Ref) of
+        {ok, _, _} -> ok;
+        {ok, _} -> ok;
+        Other -> error({registration_add_failed, Other})
+    end.
+
+%% @private
+do_remove_registration(Uri, Proc) ->
+    case do_reg_entries(Uri, Proc) of
+        [Entry | _] -> bondy_registry:remove(Entry);
+        [] -> ok
+    end,
+    ok.
+
+%% @private
+do_reg_count(Uri, Proc) ->
+    length(do_reg_entries(Uri, Proc)).
+
+%% @private
+do_owner_node(Uri, Proc) ->
+    case do_reg_entries(Uri, Proc) of
+        [Entry | _] -> bondy_registry_entry:node(Entry);
+        [] -> undefined
+    end.
+
+%% @private
+do_reg_entries(Uri, Proc) ->
+    case bondy_registry:match(registration, Uri, Proc) of
+        L when is_list(L) -> L;
+        {L, _Cont} when is_list(L) -> L;
+        _ -> []
+    end.
+
+%% @private
+%% Deliver a synthetic Partisan membership event to this node's registry server
+%% (the presence SUSPEND / RESUME seam, normally fed by `partisan:monitor_nodes`).
+do_signal(Msg) ->
+    bondy_registry ! Msg,
+    ok.
+
+%% @private
+do_create_user_realm(Uri, User) ->
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        description => <<"user-delete cluster test realm">>,
+        security_enabled => true,
+        authmethods => [?PASSWORD_AUTH],
+        users => [
+            #{username => User, password => <<"victim_pass_123">>, groups => []}
+        ]
+    }),
+    ok.
+
+%% @private
+do_delete_user(Uri, User) ->
+    bondy_rbac_user:remove(Uri, User).
+
+%% @private
+do_user_exists(Uri, User) ->
+    case bondy_rbac_user:lookup(Uri, User) of
+        {ok, _} -> true;
+        _ -> false
+    end.
+
+%% @private
+%% Override `close_sessions/3` on this node so a reactor call is recorded (and
+%% has no side effect — there is no live session). `no_link` keeps the mock
+%% installed after the erpc worker that armed it exits.
+do_arm_close_recorder() ->
+    _ = (catch meck:unload(bondy_rbac_user)),
+    ok = meck:new(bondy_rbac_user, [passthrough, no_link]),
+    ok = meck:expect(bondy_rbac_user, close_sessions, fun(_, _, _) -> ok end),
+    ok.
+
+%% @private
+do_close_recorded(Uri, User) ->
+    meck:called(bondy_rbac_user, close_sessions, [Uri, User, '_']).
+
+%% @private
+do_disarm_close_recorder() ->
+    _ = (catch meck:unload(bondy_rbac_user)),
+    ok.
+
+%% @private
+do_create_member_realm(Uri, User, Groups) ->
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        description => <<"membership cluster test realm">>,
+        security_enabled => true,
+        authmethods => [?PASSWORD_AUTH],
+        groups => [#{name => G} || G <- Groups],
+        users => [
+            #{username => User, password => <<"mem_pass_123">>, groups => []}
+        ]
+    }),
+    ok.
+
+%% @private
+do_add_member(Uri, User, Group) ->
+    bondy_rbac_user:add_group(Uri, User, Group).
+
+%% @private
+%% The user's derived groups (from the membership relation), sorted; or the
+%% lookup error when the user has not converged yet.
+do_member_groups(Uri, User) ->
+    case bondy_rbac_user:lookup(Uri, User) of
+        {ok, U} -> lists:sort(bondy_rbac_user:groups(U));
+        Other -> Other
+    end.
+
+%% @private
+do_groups_exist(Uri, Groups) ->
+    lists:all(fun(G) -> bondy_rbac_group:exists(Uri, G) end, Groups).
 
 %% @private
 do_set_max_lag(Ms) ->

@@ -45,6 +45,15 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
 -define(REFRESH_TOKEN_TTL, bondy_config:get([oauth2, refresh_token_duration])).
 -define(REFRESH_TOKEN_LEN, bondy_config:get([oauth2, refresh_token_length])).
 -define(MAX_TOKENS, bondy_config:get([oauth2, max_tokens_per_user])).
+%% Legacy-backup compatibility (bondy_export legacy import): a pre-existing
+%% (plum_db-era) refresh token is a bare opaque string that the current,
+%% self-describing token format cannot locate. On import we store a pointer from
+%% that string to the imported token's `{key, id}` under a `legacy:`-prefixed key
+%% in this same table (never read by the token-set paths). The first refresh that
+%% presents the legacy string resolves it through the pointer, issues a current
+%% token, and clears the pointer — so a legacy token works exactly once.
+-define(LEGACY_POINTER, legacy_refresh_pointer).
+-define(LEGACY_KEY_PREFIX, "legacy:").
 
 -define(OPTS_VALIDATOR, #{
     expiry_time_secs => #{
@@ -119,6 +128,8 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
 
 -export([cleanup/0]).
 -export([issue/3]).
+%% Exported for the legacy-backup import translator (bondy_export).
+-export([import_legacy/1]).
 -export([lookup/2]).
 -export([lookup/3]).
 -export([refresh/2]).
@@ -240,6 +251,80 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
     end.
 
 -doc """
+Imports a single legacy (plum_db-era) refresh token, reconstructing a current
+token for the subject and storing it in the subject's token set, plus a pointer
+from the bare legacy refresh-token string to that token so the first refresh that
+presents the legacy string resolves (see `refresh/2`).
+
+The user and the auth realm must already exist (users are imported before this
+runs; realms are recreated from configuration). `authgrants` are read from the
+current RBAC state. Returns `{error, user_not_found}` (skipped) when the subject
+was not imported.
+""".
+-spec import_legacy(Spec :: map()) -> ok | {error, term()}.
+
+import_legacy(#{
+    authrealm := AuthRealmUri,
+    refresh_token := RefreshToken,
+    username := Username,
+    client_id := ClientId,
+    device_id := DeviceId,
+    groups := Groups,
+    meta := Meta,
+    expires_in := ExpiresIn,
+    issued_at := IssuedAt
+}) ->
+    AuthId = string:casefold(Username),
+    try bondy_rbac_user:lookup(AuthRealmUri, AuthId) of
+        {error, not_found} ->
+            {error, user_not_found};
+        {ok, _} ->
+            Realm = bondy_realm:fetch(AuthRealmUri),
+            Kid = bondy_realm:get_random_kid(Realm),
+            TokenId = bondy_uuidv7:format(bondy_uuidv7:new()),
+            AuthGrants = [
+                bondy_rbac:externalize_grant(X)
+             || X <- bondy_rbac:user_grants(AuthRealmUri, AuthId)
+            ],
+            T = #{
+                type => ?MODULE,
+                version => ?VERSION,
+                id => TokenId,
+                grant_type => password,
+                token_type => refresh,
+                refresh_expires_in => ExpiresIn,
+                access_expires_in => get_access_expires_in(password),
+                issued_on => bondy_config:nodestring(),
+                issued_at => IssuedAt,
+                kid => Kid,
+                issuer => AuthRealmUri,
+                authrealm => AuthRealmUri,
+                authid => AuthId,
+                authscope => bondy_auth_scope:new(AuthRealmUri, ClientId, DeviceId),
+                authroles => Groups,
+                authgrants => AuthGrants,
+                token_version => user_token_version(AuthRealmUri, AuthId),
+                meta => Meta,
+                refresh_token => RefreshToken,
+                created_at => IssuedAt,
+                refreshed_at => IssuedAt
+            },
+            Table = table(),
+            Key = store_key(AuthId),
+            Set0 = fetch_set(Table, AuthRealmUri, Key),
+            Set1 = bondy_oauth_token_set:add(Set0, T),
+            {_Truncated, Set} = bondy_oauth_token_set:truncate(Set1, ?MAX_TOKENS),
+            ok = bondy_db:apply(Table, AuthRealmUri, Key, {set, Set}),
+            ok = write_legacy_pointer(AuthRealmUri, RefreshToken, Key, TokenId),
+            ok
+    catch
+        throw:not_found ->
+            {error, no_such_realm};
+        Class:Reason ->
+            {error, {Class, Reason}}
+    end.
+
+-doc """
 """.
 -spec refresh(Realm :: bondy_realm:uri(), RefreshToken :: binary()) ->
     {ok, t()} | {error, oauth2_invalid_grant}.
@@ -249,11 +334,16 @@ refresh(RealmUri, RefreshToken) when
 ->
     maybe
         {ok, AuthRealmUri} ?= get_authrealm_uri(RealmUri),
-        {ok, Components} ?= bondy_oauth_refresh_token:parse(RefreshToken),
+        {ok, {Components, IsLegacy}} ?=
+            resolve_components(AuthRealmUri, RefreshToken),
         {ok, {T, Set}} ?= find_in_set(AuthRealmUri, Components),
         ok ?= check_expired(T),
         {ok, _} ?= check_authid(T, AuthRealmUri),
-        do_refresh(T, Set)
+        {ok, NewT} ?= do_refresh(T, Set),
+        %% A legacy token works exactly once: clear its pointer now that the
+        %% client has received a current-format token.
+        ok = maybe_clear_legacy(IsLegacy, AuthRealmUri, RefreshToken),
+        {ok, NewT}
     else
         {error, user_not_found} ->
             %% We do not remove tokens, as this should have been done by
@@ -273,7 +363,8 @@ refresh(RealmUri, RefreshToken) when
 lookup(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
     maybe
         {ok, AuthRealmUri} ?= get_authrealm_uri(RealmUri),
-        {ok, Components} ?= bondy_oauth_refresh_token:parse(RefreshToken),
+        {ok, {Components, _IsLegacy}} ?=
+            resolve_components(AuthRealmUri, RefreshToken),
         {ok, {T, _Set}} ?= find_in_set(AuthRealmUri, Components),
         {ok, T}
     else
@@ -344,9 +435,12 @@ server and does not influence the revocation response.
 revoke(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
     maybe
         {ok, AuthRealmUri} ?= get_authrealm_uri(RealmUri),
-        {ok, Components} ?= bondy_oauth_refresh_token:parse(RefreshToken),
+        {ok, {Components, IsLegacy}} ?=
+            resolve_components(AuthRealmUri, RefreshToken),
         {ok, {T, Set}} ?= find_in_set(AuthRealmUri, Components),
-        do_revoke(T, Set)
+        ok ?= do_revoke(T, Set),
+        ok = maybe_clear_legacy(IsLegacy, AuthRealmUri, RefreshToken),
+        ok
     else
         {error, user_not_found} ->
             %% We do not remove tokens, as this should have been done by
@@ -776,6 +870,49 @@ enqueue(Job, Report) ->
 %% @private
 gen_refresh_token(Key) ->
     bondy_oauth_refresh_token:new(Key).
+
+%% @private
+%% Resolves a presented refresh token to the `{key, id}` components used to find
+%% it in the subject's set. A current token self-describes (it parses); a legacy
+%% (imported) token is a bare string resolved through its pointer. The boolean
+%% flags whether the resolution was legacy, so the caller can clear the pointer
+%% on a successful refresh / revoke.
+resolve_components(AuthRealmUri, RefreshToken) ->
+    case bondy_oauth_refresh_token:parse(RefreshToken) of
+        {ok, Components} ->
+            {ok, {Components, false}};
+        {error, _} ->
+            case read_legacy_pointer(AuthRealmUri, RefreshToken) of
+                {ok, Components} ->
+                    {ok, {Components, true}};
+                error ->
+                    {error, invalid_token}
+            end
+    end.
+
+%% @private
+legacy_key(RefreshToken) ->
+    <<?LEGACY_KEY_PREFIX, RefreshToken/binary>>.
+
+%% @private
+write_legacy_pointer(AuthRealmUri, RefreshToken, StoreKey, TokenId) ->
+    Pointer = #{type => ?LEGACY_POINTER, key => StoreKey, id => TokenId},
+    bondy_db:apply(table(), AuthRealmUri, legacy_key(RefreshToken), {set, Pointer}).
+
+%% @private
+read_legacy_pointer(AuthRealmUri, RefreshToken) ->
+    case bondy_db:read(table(), AuthRealmUri, legacy_key(RefreshToken)) of
+        {ok, {#{type := ?LEGACY_POINTER, key := Key, id := Id}, _Hlc}} ->
+            {ok, #{key => Key, id => Id}};
+        _ ->
+            error
+    end.
+
+%% @private
+maybe_clear_legacy(false, _AuthRealmUri, _RefreshToken) ->
+    ok;
+maybe_clear_legacy(true, AuthRealmUri, RefreshToken) ->
+    bondy_db:apply(table(), AuthRealmUri, legacy_key(RefreshToken), clear).
 
 %% @private
 cleanup_expired_tokens(Stats0) ->

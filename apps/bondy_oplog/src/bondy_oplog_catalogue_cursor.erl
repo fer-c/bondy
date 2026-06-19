@@ -77,6 +77,13 @@ snapshot is a moving target across peer restarts.
     bucket :: binary(),
     last_key :: undefined | binary(),
     watermark :: non_neg_integer(),
+    %% Remaining `(NS, Bucket)` targets still to walk after the current one.
+    %% A collapsed per-shard instance carries one target per table on the
+    %% shard (each its own entity-type bucket and, on a memory topology, its
+    %% own projection handle); `next_target/1` pops the head into the current
+    %% `ns`/`bucket` when the current target's keyspace is exhausted. Empty
+    %% for a single-target (`mint/6`) session — the legacy single-bucket walk.
+    remaining = [] :: [{atom(), binary()}],
     expires_at :: integer()
 }).
 
@@ -106,6 +113,8 @@ snapshot is a moving target across peer restarts.
 
 %% Cursor API (direct ETS, no gen_server roundtrip)
 -export([mint/6]).
+-export([mint/7]).
+-export([next_target/1]).
 -export([lookup/1]).
 -export([advance/2]).
 -export([discard/1]).
@@ -168,7 +177,27 @@ requests.
     Watermark :: non_neg_integer()
 ) -> cursor().
 
-mint(InstanceId, NS, Index, Shard, Bucket, Watermark) when
+mint(InstanceId, NS, Index, Shard, Bucket, Watermark) ->
+    mint(InstanceId, NS, Index, Shard, Bucket, Watermark, []).
+
+?DOC("""
+As `mint/6`, but seeds the cursor with `Remaining` additional `(NS, Bucket)`
+targets to walk after the current one — the multi-target walk a collapsed
+per-shard instance uses to stream every table on the shard through one
+session. `next_target/1` pops the head of `Remaining` into the current
+`ns`/`bucket` when the current target's keyspace is exhausted.
+""").
+-spec mint(
+    instance_id(),
+    NS :: atom(),
+    Index :: atom(),
+    Shard :: non_neg_integer(),
+    Bucket :: binary(),
+    Watermark :: non_neg_integer(),
+    Remaining :: [{atom(), binary()}]
+) -> cursor().
+
+mint(InstanceId, NS, Index, Shard, Bucket, Watermark, Remaining) when
     is_binary(InstanceId),
     is_atom(NS),
     is_atom(Index),
@@ -176,7 +205,8 @@ mint(InstanceId, NS, Index, Shard, Bucket, Watermark) when
     Shard >= 0,
     is_binary(Bucket),
     is_integer(Watermark),
-    Watermark >= 0
+    Watermark >= 0,
+    is_list(Remaining)
 ->
     Cursor = crypto:strong_rand_bytes(16),
     Row = #cursor{
@@ -188,10 +218,40 @@ mint(InstanceId, NS, Index, Shard, Bucket, Watermark) when
         bucket = Bucket,
         last_key = undefined,
         watermark = Watermark,
+        remaining = Remaining,
         expires_at = erlang:monotonic_time(millisecond) + ttl_ms()
     },
     true = ets:insert(?TABLE, Row),
     Cursor.
+
+?DOC("""
+Advance the cursor to its next `(NS, Bucket)` target: pops the head of
+`remaining` into the current `ns`/`bucket`, resets `last_key` to start the new
+target from its lowest key, and refreshes the expiry deadline. Returns the new
+cursor state, `done` when no targets remain (the whole shard has been walked),
+or `not_found` if the cursor was reaped. Keeps the same opaque cursor token —
+only its server-side state moves — so the initiator chains requests unchanged.
+""").
+-spec next_target(cursor()) -> {ok, cursor_state()} | done | not_found.
+
+next_target(Cursor) when is_binary(Cursor) ->
+    case ets:lookup(?TABLE, Cursor) of
+        [] ->
+            not_found;
+        [#cursor{remaining = []}] ->
+            done;
+        [#cursor{remaining = [{NS, Bucket} | Rest]} = Row] ->
+            Now = erlang:monotonic_time(millisecond),
+            NewRow = Row#cursor{
+                ns = NS,
+                bucket = Bucket,
+                last_key = undefined,
+                remaining = Rest,
+                expires_at = Now + ttl_ms()
+            },
+            true = ets:insert(?TABLE, NewRow),
+            {ok, row_to_map(NewRow)}
+    end.
 
 ?DOC("""
 Resolves a cursor. Expired rows are eagerly deleted and reported as

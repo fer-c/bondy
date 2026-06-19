@@ -40,12 +40,16 @@ declarations_test_() ->
             ?assertEqual(true, maps:get(migrated, Spec, false)),
             ?assertEqual([], maps:get(indexes, Spec, []))
         end},
-        {"group membership is a core aw fold (the §3 split table)", fun() ->
+        {"group membership is a durable core ew fold (cell-per-fact)", fun() ->
+            %% Authoritative cell-per-fact add-wins membership (ew_flag); the
+            %% forward + reverse presence cells live here (design §3 / §11).
             Spec = maps:get(security_group_members, ByName),
             ?assertEqual(core, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
             ?assertEqual(realm, maps:get(shard_by, Spec)),
-            ?assertEqual(aw, maps:get(fold, Spec))
+            ?assertEqual(ew, maps:get(fold, Spec)),
+            ?assertEqual(true, maps:get(migrated, Spec, false)),
+            ?assertEqual(true, maps:get(publish, Spec, false))
         end},
         {"ticket/oauth_token/realm shard by key", fun() ->
             %% ticket/oauth_token prioritise point lookup; bondy_realm is a
@@ -77,17 +81,20 @@ declarations_test_() ->
             ?assertEqual(lww, fold(ByName, security_user_grants)),
             ?assertEqual(lww, fold(ByName, security_sources))
         end},
-        {"registry tables are ephemeral lww, migrated, by_session index",
+        {"registry tables are ephemeral lww, migrated, published, by_session",
             fun() ->
-                %% Cut over to bondy_db (D-7): storage-only `lww` (the presence-FSM
-                %% is deferred to oplog.aae), provisioned (`migrated`), with the
-                %% `by_session` reverse index for session-close cleanup.
+                %% Cut over to bondy_db (D-7): `lww` IS the presence state machine
+                %% (keys unique by SessionId — set=live, clear=dead), provisioned
+                %% (`migrated`), `publish => true` wires the merge-side reactor that
+                %% maintains the routing trie from peers' registrations (§9.6), with
+                %% the `by_session` reverse index for session-close cleanup.
                 ?assert(
                     lists:all(
                         fun(S) ->
                             maps:get(fold, S) =:= lww andalso
                                 maps:get(durability, S) =:= ephemeral andalso
                                 maps:get(migrated, S, false) =:= true andalso
+                                maps:get(publish, S, false) =:= true andalso
                                 [by_session] =:=
                                     [
                                         bondy_oplog_index_spec:name(I)
@@ -188,11 +195,12 @@ provision_all() ->
             #{entity_type := bondy_subscription, db_name := registry},
             ?CAT:table(bondy_subscription)
         ),
-        %% Fold → CRDT wiring: the membership table carries the aw_map CRDT;
-        %% lww tables resolve to lww_register. (No mv table is provisioned —
-        %% grants + sources were cut as lww per the CRDT-fork resolution.)
+        %% Fold → CRDT wiring: the membership table carries the ew_flag CRDT
+        %% (cell-per-fact add-wins); lww tables resolve to lww_register. (No mv
+        %% table is provisioned — grants + sources were cut as lww per the
+        %% CRDT-fork resolution.)
         ?assertMatch(
-            #{crdt_module := bondy_oplog_crdt_aw_map},
+            #{crdt_module := bondy_oplog_crdt_ew_flag},
             bondy_db:info(?CAT:table(security_group_members))
         ),
         ?assertMatch(
@@ -219,9 +227,9 @@ provision_all() ->
 
 %% Default (flag off): only the migrated domains' tables (api_gateway,
 %% bondy_realm, bondy_bridge_relay, bondy_ticket, bondy_oauth_token,
-%% security_users, security_groups, security_user_grants, security_group_grants,
-%% security_sources, retained_messages) are opened; the core DB still comes up
-%% to host them, but not-yet-migrated tables stay shut.
+%% security_users, security_groups, security_group_members, security_user_grants,
+%% security_group_grants, security_sources, retained_messages) are opened; the
+%% core DB still comes up to host them, but any not-yet-migrated table stays shut.
 migrated_only() ->
     Tmp = make_tmpdir(),
     set_env(false, 1, Tmp),
@@ -282,11 +290,13 @@ migrated_only() ->
             #{entity_type := bondy_subscription, db_name := registry},
             ?CAT:table(bondy_subscription)
         ),
-        %% Not-yet-migrated core tables are NOT opened.
-        %% security_group_members reverse-index stays dormant (members live on
-        %% the user side until the oplog.aae phase) — the sole core table still
-        %% on plum_db.
-        ?assertEqual(undefined, ?CAT:table(security_group_members)),
+        %% security_group_members is now a migrated domain (the authoritative
+        %% cell-per-fact membership relation), so it is opened even with the
+        %% `oplog.catalog` flag off.
+        ?assertMatch(
+            #{entity_type := security_group_members, db_name := core},
+            ?CAT:table(security_group_members)
+        ),
         ?assertMatch(
             #{provision_all := false, core := #{kind := db}}, ?CAT:info()
         )

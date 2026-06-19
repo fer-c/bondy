@@ -10,8 +10,11 @@
 
 -define(REALM, <<"com.example.export_test">>).
 
+-define(TOKEN_REALM, <<"com.example.export_token">>).
+-define(TOKEN_USER, <<"tokuser">>).
+
 all() ->
-    [export_import_roundtrip].
+    [export_import_roundtrip, legacy_token_refresh_roundtrip].
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -74,6 +77,65 @@ export_import_roundtrip(Config) ->
     ?assertMatch({ok, {UVal, _}}, bondy_db:read(UsersTab, ?REALM, UKey)),
     ?assertMatch({ok, {BVal, _}}, bondy_db:read(BridgeTab, <<>>, BKey)),
     ok.
+
+%% A legacy refresh-token string, imported via bondy_oauth_token:import_legacy/1,
+%% must resolve on its first refresh (yielding a current self-describing token)
+%% and then be one-time: the legacy string fails afterwards, the new token works.
+legacy_token_refresh_roundtrip(_Config) ->
+    ok = ensure_realm(?TOKEN_REALM),
+    ok = ensure_user(?TOKEN_REALM, ?TOKEN_USER),
+
+    Now = erlang:system_time(second),
+    Legacy = <<"LEGACYrefreshTOKENstring0123456789abcd">>,
+    Spec = #{
+        authrealm => ?TOKEN_REALM,
+        refresh_token => Legacy,
+        username => ?TOKEN_USER,
+        client_id => <<"test_client">>,
+        device_id => all,
+        groups => [],
+        meta => #{},
+        expires_in => 3600,
+        issued_at => Now
+    },
+
+    %% Import the legacy token.
+    ?assertEqual(ok, bondy_oauth_token:import_legacy(Spec)),
+
+    %% First refresh with the bare legacy string resolves via the pointer and
+    %% returns a current, self-describing refresh token.
+    {ok, NewToken} = bondy_oauth_token:refresh(?TOKEN_REALM, Legacy),
+    NewRefresh = bondy_oauth_token:to_refresh_token(NewToken),
+    ?assertNotEqual(Legacy, NewRefresh),
+    ?assertMatch(<<"bondy:rtoken:", _/binary>>, NewRefresh),
+
+    %% One-time: the legacy string no longer resolves (pointer cleared).
+    ?assertMatch({error, _}, bondy_oauth_token:refresh(?TOKEN_REALM, Legacy)),
+
+    %% The upgraded token continues to work.
+    ?assertMatch({ok, _}, bondy_oauth_token:refresh(?TOKEN_REALM, NewRefresh)),
+    ok.
+
+%% @private
+ensure_realm(Uri) ->
+    case bondy_realm:exists(Uri) of
+        true ->
+            ok;
+        false ->
+            _ = bondy_realm:create(#{uri => Uri, security_enabled => true}),
+            ok
+    end.
+
+%% @private
+ensure_user(Realm, Username) ->
+    case bondy_rbac_user:lookup(Realm, Username) of
+        {ok, _} ->
+            ok;
+        {error, not_found} ->
+            User = bondy_rbac_user:new(#{username => Username, groups => []}),
+            {ok, _} = bondy_rbac_user:add(Realm, User),
+            ok
+    end.
 
 %% @private
 %% Polls the (async) export/import worker until it returns to idle.

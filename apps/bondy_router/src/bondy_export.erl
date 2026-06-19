@@ -31,11 +31,29 @@ tables are not exported.
 Import detects the file header. Files written by this module carry
 `format => bondy_db_export`, `vsn => "2.0.0"`. The legacy `plum_db`-format
 backups produced by the former `bondy_backup` module (`format => dvvset_log`,
-`vsn =< "1.2.0"`) are recognised but importing them is **not yet supported**:
-`import/1` rejects such a file with `{error, {legacy_format_unsupported, Vsn}}`
-(`status/1` still reports its header). Translating them to `bondy_db` is parked
-pending a real fixture to verify the per-domain key/value reshape — see the
-§11.4 removal roadmap.
+`vsn =< "1.2.0"`) are translated on the fly: each legacy record
+`{{{Prefix, Sub}, Key}, Object}` is resolved from its `dvvset` (last-writer-wins
+by the stored modification timestamp; tombstones are skipped) and reshaped into
+the current `bondy_db` `{Table, Band, Key, Value}` layout.
+
+The translated domains are the durable identity / RBAC model, the API gateway
+specs, and OAuth refresh tokens: `security_users` and `security_groups` (upgraded
+via each module's `from_term/1`), `security_{user,group}_grants` and
+`security_sources` (re-keyed through the live `encode_key/1`), `api_gateway`
+specs (global band), and `oauth2_refresh_tokens` — the latest non-expired refresh
+token per `(realm, user)` is reconstructed into the current per-subject token set
+plus a pointer from the bare legacy token string, so the first refresh that
+presents it resolves and transparently upgrades the client to the current token
+format (see `bondy_oauth_token:import_legacy/1`); expired tokens are dropped.
+
+The following are intentionally **skipped** (counted by reason, never
+mis-written):
+
+- **realms** — the legacy `#realm{}` record has no upgrade path and carries
+  security material best managed by configuration; recreate realms from config.
+  The per-realm *data* (users, groups, grants, sources, tokens) still imports,
+  because it is banded by the realm URI, independent of the realm record.
+- **`security_status`** — dead; the live flag is the realm's `security_enabled`.
 
 The administrative WAMP procedures are `bondy.export.create`,
 `bondy.export.status` and `bondy.export.import`; the former `bondy.backup.*`
@@ -44,6 +62,7 @@ procedures are kept as deprecated aliases.
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
+-include("bondy_db_tables.hrl").
 
 %% The current (bondy_db) export file format + version.
 -define(EXPORT_FORMAT, bondy_db_export).
@@ -124,6 +143,9 @@ procedures are kept as deprecated aliases.
 -export([status/0]).
 -export([status/1]).
 -export([start_link/0]).
+%% Exported for testing the legacy-format translation without a running import.
+-export([legacy_translate/4]).
+-export([resolve_object/1]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -250,6 +272,18 @@ handle_info({export_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
 handle_info({import_reply, {ok, Counters}, Pid}, #state{pid = Pid} = State) ->
     #{read_count := N, written_count := M} = Counters,
     Secs = erlang:system_time(second) - State#state.timestamp,
+    _ =
+        case maps:get(skipped, Counters, #{}) of
+            Skipped when map_size(Skipped) > 0 ->
+                ?LOG_NOTICE(#{
+                    description =>
+                        "Import skipped some legacy records by reason",
+                    filename => State#state.filename,
+                    skipped => Skipped
+                });
+            _ ->
+                ok
+        end,
     ok = notify_import_finished([State#state.filename, Secs, N, M]),
     {noreply, State#state{status = undefined, pid = undefined}};
 handle_info({import_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
@@ -469,7 +503,8 @@ do_import_aux(Log) ->
     end.
 
 %% @private
-import_chunk(eof, _, Log, Counters) ->
+import_chunk(eof, Mode, Log, Counters0) ->
+    Counters = maybe_flush_tokens(Mode, Counters0),
     ok = disk_log:close(Log),
     {ok, Counters};
 import_chunk({error, _} = Error, _, Log, _) ->
@@ -494,10 +529,9 @@ import_chunk({Cont, Terms}, Mode, Log, Counters0) ->
 import_mode(#{format := ?EXPORT_FORMAT, vsn := Vsn}) when Vsn >= ?EXPORT_VSN ->
     new;
 import_mode(#{format := ?LEGACY_FORMAT, vsn := Vsn}) ->
-    %% Old plum_db-format backups are recognised but their translation to
-    %% bondy_db is parked pending a fixture (see the moduledoc). Reject loudly
-    %% rather than silently mis-placing data.
-    throw({legacy_format_unsupported, Vsn});
+    %% Old plum_db-format backup: translate each record on the fly (see the
+    %% moduledoc and `legacy_translate/4`).
+    {legacy, Vsn};
 import_mode(H) ->
     throw({invalid_header, H}).
 
@@ -506,6 +540,8 @@ import_mode(H) ->
 %% Value}`, re-applied as a fresh `{set, Value}`.
 import_terms([], _Mode, Counters) ->
     {ok, Counters};
+import_terms([Term | T], {legacy, _} = Mode, Counters) ->
+    import_terms(T, Mode, import_legacy(Term, Counters));
 import_terms([{entry, Name, Band, Key, Value} | T], new, Counters) ->
     import_terms(T, new, apply_entry(Name, Band, Key, Value, Counters));
 import_terms([_Other | T], new, #{read_count := N} = Counters) ->
@@ -523,6 +559,235 @@ apply_entry(Name, Band, Key, Value, #{read_count := N, written_count := M} = C) 
             ok = bondy_db:apply(Table, Band, Key, {set, Value}),
             C#{read_count => N + 1, written_count => M + 1}
     end.
+
+%% =============================================================================
+%% PRIVATE: LEGACY (plum_db / bondy_backup) IMPORT
+%% =============================================================================
+
+%% @private
+%% Translates and applies one legacy `{{{Prefix, Sub}, Key}, Object}` record.
+%% Every record counts as read; an applied record additionally bumps
+%% `written_count`; everything else is tallied under `skipped` by reason.
+import_legacy(Term, C0) ->
+    C = bump(read_count, C0),
+    do_import_legacy(Term, C).
+
+%% @private
+do_import_legacy({{{Prefix, Sub}, Key}, {object, _} = Object}, C) ->
+    try resolve_object(Object) of
+        deleted ->
+            skip(tombstone, C);
+        {ok, Payload} ->
+            case legacy_translate(Prefix, Sub, Key, Payload) of
+                {entry, Table, Band, Key1, Value1} ->
+                    apply_legacy(Table, Band, Key1, Value1, C);
+                {oauth_token, AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec} ->
+                    accumulate_token(
+                        AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec, C
+                    );
+                {skip, Reason} ->
+                    skip(Reason, C)
+            end
+    catch
+        _:_ ->
+            skip(translate_error, C)
+    end;
+do_import_legacy(_Other, C) ->
+    skip(unrecognised_term, C).
+
+%% @private
+split_oauth_sub(Sub) ->
+    %% The legacy oauth sub-prefix is `<<"Realm,Issuer">>`; the realm URI is
+    %% comma-free, so the first comma separates the two.
+    case binary:split(Sub, <<",">>) of
+        [AuthRealm, ClientId] -> {AuthRealm, ClientId};
+        [AuthRealm] -> {AuthRealm, all}
+    end.
+
+%% @private
+%% Keeps the latest non-expired legacy refresh token per (realm, user) in the
+%% `tokens` accumulator. They are materialised at end of import (`flush_tokens/1`)
+%% rather than per-record, so each subject ends with a single current token.
+accumulate_token(AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec, C) ->
+    case IssuedAt + ExpiresIn =< erlang:system_time(second) of
+        true ->
+            skip(token_expired, C);
+        false ->
+            Tokens = maps:get(tokens, C, #{}),
+            MapKey = {AuthRealm, AuthId},
+            case maps:get(MapKey, Tokens, undefined) of
+                {Prev, _} when Prev >= IssuedAt ->
+                    C;
+                _ ->
+                    C#{tokens => Tokens#{MapKey => {IssuedAt, Spec}}}
+            end
+    end.
+
+%% @private
+maybe_flush_tokens({legacy, _}, C) ->
+    flush_tokens(C);
+maybe_flush_tokens(_Mode, C) ->
+    C.
+
+%% @private
+%% Materialises the accumulated latest-per-user tokens via bondy_oauth_token
+%% (which builds the current token + the legacy-string pointer). Drops the
+%% internal accumulator from the counters before returning.
+flush_tokens(#{tokens := Tokens} = C0) ->
+    C = maps:remove(tokens, C0),
+    maps:fold(
+        fun(_MapKey, {_IssuedAt, Spec}, Acc) ->
+            case bondy_oauth_token:import_legacy(Spec) of
+                ok ->
+                    bump(written_count, Acc);
+                {error, Reason} ->
+                    skip({token_import, Reason}, Acc)
+            end
+        end,
+        C,
+        Tokens
+    );
+flush_tokens(C) ->
+    C.
+
+%% @private
+apply_legacy(Table, Band, Key, Value, C) ->
+    case bondy_namespace_catalog:table(Table) of
+        undefined ->
+            skip({table_not_provisioned, Table}, C);
+        Handle ->
+            ok = bondy_db:apply(Handle, Band, Key, {set, Value}),
+            bump(written_count, C)
+    end.
+
+-doc """
+Resolves a legacy plum_db object (a `dvvset`) to its live payload, unwrapping the
+`{Value, ModifiedTimestamp}` storage wrapper the former `bondy_backup` used.
+Returns `deleted` when every sibling is a tombstone (or there is no value);
+otherwise `{ok, Value}`, resolving concurrent siblings last-writer-wins by the
+wrapped modification timestamp.
+""".
+-spec resolve_object(Object :: {object, term()}) ->
+    {ok, term()} | deleted.
+
+resolve_object({object, {Entries, _Deferred}}) ->
+    Live = [
+        {Payload, Ts}
+     || {_Dot, _Counter, Values} <- Entries,
+        {Payload, Ts} <- Values,
+        Payload =/= '$deleted'
+    ],
+    case Live of
+        [] ->
+            deleted;
+        _ ->
+            {Payload, _Ts} = lists:last(lists:keysort(2, Live)),
+            {ok, Payload}
+    end.
+
+-doc """
+Maps one legacy plum_db `{Prefix, SubPrefix, Key, Value}` to the current
+`bondy_db` `{entry, Table, Band, Key, Value}` layout, or `{skip, Reason}` for an
+intentionally-unmigrated domain (see the moduledoc). The reshape per domain:
+
+- per-realm security tables band by the realm URI (the legacy `SubPrefix`);
+- grants / sources re-key through the live `encode_key/1`;
+- users / groups upgrade their value via the module's `from_term/1`;
+- `api_gateway` specs live under the global band.
+""".
+-spec legacy_translate(
+    Prefix :: atom(),
+    SubPrefix :: term(),
+    Key :: term(),
+    Value :: term()
+) ->
+    {entry, atom(), binary(), term(), term()} | {skip, term()}.
+
+legacy_translate(security_users, Realm, Username, Payload) when is_binary(Realm) ->
+    {entry, ?BONDY_DB_USER_TAB, Realm, Username,
+        bondy_rbac_user:from_term({Username, Payload})};
+legacy_translate(security_groups, Realm, Name, Payload) when is_binary(Realm) ->
+    {entry, ?BONDY_DB_GROUP_TAB, Realm, Name,
+        bondy_rbac_group:from_term({Name, Payload})};
+legacy_translate(security_user_grants, Realm, {_Role, Resource} = K, Perms) when
+    is_binary(Realm), is_list(Perms)
+->
+    {entry, ?BONDY_DB_USER_GRANT_TAB, Realm, bondy_rbac:encode_key(K),
+        #{resource => Resource, permissions => Perms}};
+legacy_translate(security_group_grants, Realm, {_Role, Resource} = K, Perms) when
+    is_binary(Realm), is_list(Perms)
+->
+    {entry, ?BONDY_DB_GROUP_GRANT_TAB, Realm, bondy_rbac:encode_key(K),
+        #{resource => Resource, permissions => Perms}};
+legacy_translate(security_sources, Realm, LegacyKey, Source) when
+    is_binary(Realm), is_map(Source), is_tuple(LegacyKey)
+->
+    %% The legacy key leads with the Username (a binary, or `all`/`anonymous`);
+    %% the mask + method come from the value, which the current source map also
+    %% carries. The current value additionally needs the username field.
+    Username = element(1, LegacyKey),
+    AMask = maps:get(cidr, Source),
+    Authmethod = maps:get(authmethod, Source),
+    EncKey = bondy_rbac_source:encode_key({Username, AMask, Authmethod}),
+    {entry, ?BONDY_DB_SOURCE_TAB, Realm, EncKey, Source#{username => Username}};
+legacy_translate(security_sources, _Realm, _Key, _Value) ->
+    %% A pre-v1.1 source: a `{Username, CIDR}` key with an `{Authmethod, Opts}`
+    %% value (rather than the v1.1 `{Username, CIDR, Authmethod}` key + source
+    %% map). In practice these are superseded by the v1.1 map-form entries, so we
+    %% skip rather than synthesise a partial source map.
+    {skip, legacy_source_format};
+legacy_translate(api_gateway, api_specs, Id, Spec) when
+    is_binary(Id), is_map(Spec)
+->
+    {entry, api_gateway, <<>>, Id, Spec};
+%% Intentionally skipped domains (see the moduledoc).
+legacy_translate(security_status, _, _, _) ->
+    {skip, security_status_dead};
+legacy_translate(oauth2_refresh_tokens, Sub, RefreshToken, Rec) when
+    is_binary(Sub) andalso
+        is_binary(RefreshToken) andalso
+        is_tuple(Rec) andalso
+        element(1, Rec) =:= bondy_oauth2_token andalso
+        tuple_size(Rec) =:= 8
+->
+    %% Sub = `<<"Realm,Issuer">>`; Rec = `{bondy_oauth2_token, Issuer(client),
+    %% Username, Groups, Meta, ExpiresIn, IssuedAt, IsActive}`. We carry the
+    %% parsed fields up; the import loop keeps the latest non-expired token per
+    %% (realm, user) and flushes via `bondy_oauth_token:import_legacy/1`.
+    {AuthRealm, ClientId} = split_oauth_sub(Sub),
+    {bondy_oauth2_token, _Issuer, Username, Groups, Meta, ExpiresIn, IssuedAt,
+        _Active} = Rec,
+    AuthId = string:casefold(Username),
+    DeviceId = maps:get(<<"client_device_id">>, Meta, all),
+    Spec = #{
+        authrealm => AuthRealm,
+        refresh_token => RefreshToken,
+        username => Username,
+        client_id => ClientId,
+        device_id => DeviceId,
+        groups => Groups,
+        meta => Meta,
+        expires_in => ExpiresIn,
+        issued_at => IssuedAt
+    },
+    {oauth_token, AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec};
+legacy_translate(oauth2_refresh_tokens, _, _, _) ->
+    {skip, oauth_token_unparsable};
+legacy_translate(bondy_realm, _, _, _) ->
+    {skip, realm_recreate_from_config};
+legacy_translate(security, realms, _, _) ->
+    {skip, realm_recreate_from_config};
+legacy_translate(Prefix, _, _, _) ->
+    {skip, {unsupported_prefix, Prefix}}.
+
+%% @private
+bump(Key, C) ->
+    maps:update_with(Key, fun(N) -> N + 1 end, 1, C).
+
+%% @private
+skip(Reason, C) ->
+    Skipped = maps:get(skipped, C, #{}),
+    C#{skipped => maps:update_with(Reason, fun(N) -> N + 1 end, 1, Skipped)}.
 
 %% =============================================================================
 %% PRIVATE: STATUS / HEADER

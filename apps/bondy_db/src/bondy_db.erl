@@ -131,6 +131,7 @@ it).
 -export([tick/1]).
 -export([apply/4]).
 -export([apply_batch/4]).
+-export([apply_many/1]).
 -export([map_update/4]).
 -export([counter_inc/4]).
 -export([probe_write/1]).
@@ -781,6 +782,122 @@ apply(
                     ok
             end,
             Result
+    end.
+
+-doc """
+Atomically apply a batch of events spanning several entities (tables) of the
+same DB, grouped onto one WAL frame per shard.
+
+Each write is `{Table, Realm, Key, Event}` — the same arguments `apply/4` takes,
+self-describing so a single batch can mix tables. The batch is grouped by the
+oplog instance (shard) its writes route to, and each shard's group is appended
+as ONE atomic WAL frame (`bondy_oplog:append_many/2` is all-or-nothing). The
+atomicity guarantee is therefore **per shard**: every write that lands on a shard
+becomes durable together or not at all.
+
+Co-located aggregates are the motivating case. Under aggregate-root placement a
+subject's facts across tables — e.g. its `user`, `grants`, and `sources` — share
+a shard (same `(Realm, Subject)` hash), so a batch confined to one subject is a
+**single frame, fully atomic across the entities**. A batch that fans out across
+shards commits one atomic frame per shard; a mid-batch failure leaves the
+already-appended shards durable (there is no cross-shard rollback). Blocks on
+every touched instance's drain, so a subsequent `read/3` observes every write
+(read-your-writes).
+
+A `tier_2` (causal-context-stamped) table is refused with
+`{error, {tier_2_batch_unsupported, _}}`: its per-cell context read cannot be
+folded into one frame — apply those cells individually with `apply/4`.
+
+Returns `ok` once every shard frame is durable and committed, or `{error, _}`.
+An empty batch is `ok`.
+""".
+-spec apply_many(
+    Writes :: [
+        {Table :: table(), Realm :: realm(), Key :: binary(), Event :: term()}
+    ]
+) -> ok | {error, term()}.
+
+apply_many([]) ->
+    ok;
+apply_many(Writes) when is_list(Writes) ->
+    case group_batch(Writes, #{}) of
+        {ok, Groups} ->
+            commit_batch_groups(maps:to_list(Groups));
+        {error, _} = Err ->
+            Err
+    end.
+
+%% @private
+%% Resolve each write to its shard instance and `{Op, Meta}` item, accumulating
+%% `#{InstanceId => [Item]}` so co-located writes share one frame. Per-bucket
+%% arrival order is preserved (reverse on exit). tier_2 tables are refused — the
+%% batch path stamps no per-cell causal context.
+group_batch([], Acc) ->
+    {ok, maps:map(fun(_K, Items) -> lists:reverse(Items) end, Acc)};
+group_batch([{Table, Realm, Key, Event} | Rest], Acc) when
+    is_map(Table) andalso is_binary(Realm) andalso is_binary(Key)
+->
+    case maps:get(causal_tier, Table, tier_0) of
+        tier_2 ->
+            {error,
+                {tier_2_batch_unsupported,
+                    maps:get(namespace, Table, undefined)}};
+        _ ->
+            #{
+                db_topology := Topology,
+                table_state := TableState,
+                entity_type := EntityType
+            } = Table,
+            Bucket = Topology:bucket_for(EntityType, Realm, TableState),
+            SKey = cell_key(Topology, Realm, Key),
+            InstanceId = instance_for_shard(
+                Table, shard_for(Table, Realm, Key)
+            ),
+            Item = {{cell_apply, Bucket, SKey, Event}, undefined},
+            Acc1 = maps:update_with(
+                InstanceId, fun(L) -> [Item | L] end, [Item], Acc
+            ),
+            group_batch(Rest, Acc1)
+    end;
+group_batch([Bad | _], _Acc) ->
+    {error, {invalid_batch_write, Bad}}.
+
+%% @private
+%% Append each shard group's atomic frame (pipelining the WAL appends), then
+%% await each touched instance's drain so the whole batch is read-your-writes.
+commit_batch_groups(Groups) ->
+    case append_batch_groups(Groups, []) of
+        {ok, Instances} ->
+            await_instances(Instances);
+        {error, _} = Err ->
+            Err
+    end.
+
+%% @private
+append_batch_groups([], Acc) ->
+    {ok, Acc};
+append_batch_groups([{InstanceId, Items} | Rest], Acc) ->
+    try bondy_oplog:append_many(InstanceId, Items) of
+        {error, _} = Err ->
+            Err;
+        _Keys ->
+            append_batch_groups(Rest, [InstanceId | Acc])
+    catch
+        exit:{noproc, _} ->
+            {error, {instance_unavailable, InstanceId}};
+        exit:{shutdown, _} ->
+            {error, {instance_unavailable, InstanceId}}
+    end.
+
+%% @private
+await_instances([]) ->
+    ok;
+await_instances([InstanceId | Rest]) ->
+    case await(InstanceId) of
+        ok ->
+            await_instances(Rest);
+        {error, _} = Err ->
+            Err
     end.
 
 %% @private
@@ -1878,7 +1995,8 @@ provision_shard(
     TableState,
     Shard
 ) ->
-    InstanceId = encode_instance_id(DbName, EntityType, Shard),
+    Strategy = instances_strategy(Topology),
+    InstanceId = instance_id_for(Strategy, DbName, EntityType, Shard),
     case Topology:route(Shard, TableState) of
         {ok, ProjAdapter, ProjHandle} ->
             case acquire_cache(Topology, TableState, NS, ?INDEX, Shard) of
@@ -1911,6 +2029,25 @@ provision_shard(
                         %% MST — see `bondy_oplog_applier:primary_cell_directory/4`.
                         primary_cell_scope =>
                             Topology:primary_cell_scope(TableState),
+                        %% Per-table routing config persisted so a multiplexed
+                        %% (`per_shard`) instance can rebuild its cell-apply
+                        %% source from the registry alone after a subtree restart
+                        %% (`bondy_oplog_applier:rebuild_dir_source/4`). The
+                        %% bucket is the realm-independent entity-type tag the
+                        %% multiplexer routes on; `undefined` for a single-table
+                        %% (`per_table_shard`) instance. `publish_ns` and
+                        %% `secondary_indexes` make the restart-rebuilt ctx keep
+                        %% emitting merge events and dispatching index ops.
+                        cell_apply_bucket =>
+                            case Strategy of
+                                per_shard -> collapse_bucket(EntityType);
+                                _ -> undefined
+                            end,
+                        publish_ns => maps:get(
+                            publish_ns, maps:get(applier, OplogOpts, #{}),
+                            undefined
+                        ),
+                        secondary_indexes => SecIndexes,
                         %% Bind the registry monitor to the topology's
                         %% long-lived owner (the calling process when the
                         %% topology has none), so the row survives the
@@ -1924,10 +2061,12 @@ provision_shard(
                         )
                     of
                         ok ->
-                            start_shard_instance(
+                            start_or_join_shard_instance(
+                                Strategy,
                                 NS,
                                 InstanceId,
                                 Shard,
+                                EntityType,
                                 FoldModule,
                                 OplogOpts,
                                 SecIndexes,
@@ -2108,9 +2247,20 @@ start_shard_instance(
     SecIndexes,
     CacheHandle,
     Topology,
-    TableState
+    TableState,
+    MaybeBucket
 ) ->
-    CallerApplier = maps:get(applier, OplogOpts, #{}),
+    CallerApplier0 = maps:get(applier, OplogOpts, #{}),
+    %% A founding bucket (`per_shard` strategy) starts the applier's cell-apply
+    %% source in `{dir, _}` mode keyed by this table's entity-type bucket, so
+    %% sibling tables can join the shared instance via
+    %% `bondy_oplog_instance:register_table/4`. `undefined` (`per_table_shard`)
+    %% keeps the single-table source, byte-identical to the pre-collapse path.
+    CallerApplier =
+        case MaybeBucket of
+            undefined -> CallerApplier0;
+            Bucket -> CallerApplier0#{cell_apply_bucket => Bucket}
+        end,
     Pinned = #{
         fold_module => FoldModule,
         %% This shard's read-side AE freshness target: the applier bumps it on
@@ -2132,6 +2282,115 @@ start_shard_instance(
             ok = release_cache(Topology, TableState, CacheHandle),
             Err
     end.
+
+%% @private
+%% A topology's instance-mapping strategy, defaulting to `per_table_shard`.
+%% Delegates to the shared resolver so the provisioning path and the topology
+%% manifest agree.
+instances_strategy(Topology) ->
+    bondy_db_topology:instances_strategy(Topology).
+
+%% @private
+instance_id_for(per_shard, DbName, _EntityType, Shard) ->
+    encode_instance_id(DbName, Shard);
+instance_id_for(_PerTableShard, DbName, EntityType, Shard) ->
+    encode_instance_id(DbName, EntityType, Shard).
+
+%% @private
+%% The realm-independent entity-type bucket the `per_shard` multiplexer routes
+%% on. Equals `bondy_db_topology_shared_shards:bucket_for/3`, the same value the
+%% write path stamps into every `{cell_apply, Bucket, _, _}` event for this
+%% table — so the applier's directory key matches the events it must route.
+collapse_bucket(EntityType) ->
+    atom_to_binary(EntityType, utf8).
+
+%% @private
+%% Provision this table's `bondy_oplog` instance for `Shard` under the topology's
+%% instance-mapping strategy. `per_table_shard` starts a dedicated instance;
+%% `per_shard` founds the shared instance with this table as the seed, or — when
+%% a sibling table already founded it — joins it by registering this table's
+%% entity-type bucket. Both return `{ok, InstanceId, CacheHandle}` so the caller
+%% accumulates the shard's instance id and cache handle uniformly.
+start_or_join_shard_instance(
+    per_shard,
+    NS,
+    InstanceId,
+    Shard,
+    EntityType,
+    FoldModule,
+    OplogOpts,
+    SecIndexes,
+    CacheHandle,
+    Topology,
+    TableState
+) ->
+    Bucket = collapse_bucket(EntityType),
+    case bondy_oplog_instance:whereis(InstanceId) of
+        undefined ->
+            %% First table on this shard: found the shared instance, seeding its
+            %% cell-apply directory with this table's bucket.
+            start_shard_instance(
+                NS,
+                InstanceId,
+                Shard,
+                FoldModule,
+                OplogOpts,
+                SecIndexes,
+                CacheHandle,
+                Topology,
+                TableState,
+                Bucket
+            );
+        _Pid ->
+            %% A sibling already founded the shard instance: register this
+            %% table's bucket so its events route to this table's projection.
+            %% Carry the caller's applier opts through verbatim — they hold
+            %% `publish_ns`/`publish_fun` (a `publish => true` table's
+            %% merge-event emission) and `oldstate_cache`, which
+            %% `resolve_cell_apply_ctx/1` reads off these opts. `fold_module`
+            %% comes from the registry entry, not here. Without this, a sibling
+            %% table that opted into publishing would silently stop firing
+            %% remote-merge reactor events.
+            CallerApplier = maps:get(applier, OplogOpts, #{}),
+            TableOpts = CallerApplier#{secondary_indexes => SecIndexes},
+            case
+                bondy_oplog_instance:register_table(
+                    InstanceId, Bucket, {NS, ?INDEX, Shard}, TableOpts
+                )
+            of
+                ok ->
+                    {ok, InstanceId, CacheHandle};
+                {error, _} = Err ->
+                    ok = bondy_oplog_core_registry:unregister(NS, ?INDEX, Shard),
+                    ok = release_cache(Topology, TableState, CacheHandle),
+                    Err
+            end
+    end;
+start_or_join_shard_instance(
+    _PerTableShard,
+    NS,
+    InstanceId,
+    Shard,
+    _EntityType,
+    FoldModule,
+    OplogOpts,
+    SecIndexes,
+    CacheHandle,
+    Topology,
+    TableState
+) ->
+    start_shard_instance(
+        NS,
+        InstanceId,
+        Shard,
+        FoldModule,
+        OplogOpts,
+        SecIndexes,
+        CacheHandle,
+        Topology,
+        TableState,
+        undefined
+    ).
 
 %% @private
 %% Three-step per-shard teardown shared by primary shards and index shards:
@@ -2161,16 +2420,66 @@ teardown_shard_common(
 
 %% @private
 teardown_shard(NS, Shard, InstanceIds, CacheHandles, Topology, TableState) ->
-    teardown_shard_common(
-        NS,
-        ?INDEX,
-        Shard,
-        InstanceIds,
-        fun bondy_oplog:stop_instance/1,
-        CacheHandles,
-        Topology,
-        TableState
-    ).
+    case instances_strategy(Topology) of
+        per_shard ->
+            teardown_shared_shard(
+                NS, Shard, InstanceIds, CacheHandles, Topology, TableState
+            );
+        _ ->
+            teardown_shard_common(
+                NS,
+                ?INDEX,
+                Shard,
+                InstanceIds,
+                fun bondy_oplog:stop_instance/1,
+                CacheHandles,
+                Topology,
+                TableState
+            )
+    end.
+
+%% @private
+%% Refcounted teardown of a shard instance shared by several tables (`per_shard`
+%% strategy). Drops this table's routing from the shared instance, unregisters
+%% its read-side registry entry, and releases its cache — then stops the shared
+%% instance only once no other table's entry still references it (mirroring the
+%% shared Bookie, which stays up until DB shutdown). Best-effort throughout: a
+%% dead instance or stale handle never aborts the teardown (it is also the
+%% rollback path for a half-built table).
+teardown_shared_shard(NS, Shard, InstanceIds, CacheHandles, Topology, TableState) ->
+    Bucket = collapse_bucket(maps:get(entity_type, TableState)),
+    InstanceId = maps:get(Shard, InstanceIds, undefined),
+    _ =
+        case InstanceId of
+            undefined ->
+                ok;
+            _ ->
+                _ = bondy_oplog_instance:unregister_table(InstanceId, Bucket),
+                ok
+        end,
+    _ = bondy_oplog_core_registry:unregister(NS, ?INDEX, Shard),
+    _ =
+        case maps:get(Shard, CacheHandles, undefined) of
+            undefined ->
+                ok;
+            CacheHandle ->
+                _ = release_cache(Topology, TableState, CacheHandle),
+                ok
+        end,
+    _ =
+        case InstanceId of
+            undefined ->
+                ok;
+            _ ->
+                case bondy_oplog_core_registry:instance_id_in_use(InstanceId) of
+                    true ->
+                        ok;
+                    false ->
+                        _ = bondy_oplog:stop_instance(InstanceId),
+                        ok
+                end
+        end,
+    ok.
 
 %% =============================================================================
 %% PRIVATE — secondary index provisioning
@@ -2269,11 +2578,14 @@ provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
     SecShardCount = maps:get(sec_shard_count, Spec, DefaultShardCount),
     CoalesceMs = bondy_oplog_index_spec:coalesce_ms(Spec),
     {Topology, EffState} = effective_topology(index_backend(Backend, Spec), Db),
+    DbName = maps:get(name, Db),
+    Strategy = instances_strategy(Topology),
     case Topology:open_table(Name, SecShardCount, #{}, EffState) of
         {ok, TableState, _NewState} ->
             case
                 provision_index_shards(
-                    NS, Name, SecShardCount, CoalesceMs, Topology, TableState
+                    NS, Name, SecShardCount, CoalesceMs, Topology, TableState,
+                    DbName, Strategy
                 )
             of
                 {ok, CacheHandles, Writers} ->
@@ -2295,13 +2607,14 @@ provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
 
 %% @private
 provision_index_shards(
-    NS, Name, SecShardCount, CoalesceMs, Topology, TableState
+    NS, Name, SecShardCount, CoalesceMs, Topology, TableState, DbName, Strategy
 ) ->
     provision_seq(
         SecShardCount,
         fun(Shard) ->
             provision_index_shard(
-                NS, Name, SecShardCount, CoalesceMs, Topology, TableState, Shard
+                NS, Name, SecShardCount, CoalesceMs, Topology, TableState,
+                DbName, Strategy, Shard
             )
         end,
         fun(S, Caches, Writers) ->
@@ -2319,8 +2632,10 @@ provision_index_shards(
 %% `set_writer_pid/4` stamp lands) drains dispatched index ops into the
 %% projection.
 provision_index_shard(
-    NS, Name, SecShardCount, CoalesceMs, Topology, TableState, Shard
+    NS, Name, SecShardCount, CoalesceMs, Topology, TableState,
+    DbName, Strategy, Shard
 ) ->
+    WriterKey = writer_key_for(Strategy, DbName, NS, Name, Shard),
     case Topology:route(Shard, TableState) of
         {ok, ProjAdapter, ProjHandle} ->
             case acquire_cache(Topology, TableState, NS, Name, Shard) of
@@ -2348,6 +2663,13 @@ provision_index_shard(
                         %% `{suffix, Name}` on a single-table handle.
                         index_clear_scope =>
                             Topology:index_clear_scope(Name, TableState),
+                        %% The secondary-writer grouping key. A `per_shard`
+                        %% backend shares one writer across every index of every
+                        %% table on the shard; `per_table_shard` gives this index
+                        %% shard its own. Recorded on the entry so a writer can
+                        %% self-heal its stream set and the facade can refcount
+                        %% the writer's teardown.
+                        writer_key => WriterKey,
                         owner => Owner
                     },
                     case
@@ -2357,9 +2679,18 @@ provision_index_shard(
                     of
                         ok ->
                             case
-                                start_index_writer(NS, Name, Shard, CoalesceMs)
+                                find_or_start_index_writer(
+                                    WriterKey, Shard, CoalesceMs
+                                )
                             of
                                 {ok, WriterPid} ->
+                                    %% Stamp the (possibly shared) writer onto
+                                    %% this stream synchronously, so the next
+                                    %% index shard's find-or-start sees it and a
+                                    %% dispatch can route here immediately.
+                                    _ = bondy_oplog_core_registry:set_writer_pid(
+                                        NS, Name, Shard, WriterPid
+                                    ),
                                     {ok, CacheHandle, WriterPid};
                                 {error, _} = Err ->
                                     _ = bondy_oplog_core_registry:unregister(
@@ -2384,8 +2715,42 @@ provision_index_shard(
     end.
 
 %% @private
-start_index_writer(NS, Name, Shard, CoalesceMs) ->
-    Args0 = #{ns => NS, index_name => Name, shard => Shard},
+%% Find the live `bondy_oplog_secondary_writer` already driving `WriterKey`, or
+%% start one. Discovery is via the registry — the same registry-as-membership
+%% pattern the primary collapse uses (`bondy_oplog_instance:whereis/1`): a
+%% sibling index shard provisioned earlier under the same key stamped its
+%% writer's pid onto its row, which `index_entries_for_writer/1` returns. Index
+%% provisioning is serialised under `open_table/7`, and the founding shard's
+%% `set_writer_pid/4` stamp is synchronous, so this needs no in-flight
+%% accumulator: by the time a joining index shard runs, the founding one's row
+%% already carries the live pid. On a `per_table_shard` backend the key is
+%% unique per index shard, so this always starts a fresh writer.
+find_or_start_index_writer(WriterKey, Shard, CoalesceMs) ->
+    case live_writer_for(WriterKey) of
+        {ok, Pid} ->
+            {ok, Pid};
+        none ->
+            start_index_writer(WriterKey, Shard, CoalesceMs)
+    end.
+
+%% @private
+live_writer_for(WriterKey) ->
+    Entries = bondy_oplog_core_registry:index_entries_for_writer(WriterKey),
+    Pids = [
+        P
+     || E <- Entries,
+        P <- [bondy_oplog_core_registry:entry_writer_pid(E)],
+        is_pid(P),
+        is_process_alive(P)
+    ],
+    case Pids of
+        [Pid | _] -> {ok, Pid};
+        [] -> none
+    end.
+
+%% @private
+start_index_writer(WriterKey, Shard, CoalesceMs) ->
+    Args0 = #{writer_key => WriterKey, shard => Shard},
     Args =
         case CoalesceMs of
             undefined -> Args0;
@@ -2419,25 +2784,70 @@ teardown_indexes(NS, IndexMap) ->
     ).
 
 %% @private
+%% Refcounted teardown of an index shard whose `bondy_oplog_secondary_writer`
+%% may be shared by several index shards (`per_shard`) or its own
+%% (`per_table_shard`). Drops this shard's registry entry + cache, then stops the
+%% writer only once no index shard still references its `writer_key` — exactly as
+%% `teardown_shared_shard/6` refcounts a shared primary instance. For a unique
+%% (`per_table_shard`) key the refcount degenerates to "stop now". Best-effort
+%% throughout (it is also the rollback path for a half-built index).
 teardown_index_shard(
     NS, Name, Shard, CacheHandles, Writers, Topology, TableState
 ) ->
     %% Clean-shutdown sequence: durably flush this shard's writer and stamp its
     %% clean flag BEFORE the writer/registry row are torn down, so a graceful
     %% close leaves the index complete-to-head and the next open trusts it
-    %% (`cold_start_indexes/2`). Must precede `teardown_shard_common`, which
-    %% unregisters the entry whose projection handle the flag is written through.
+    %% (`cold_start_indexes/2`). Must precede the unregister, which drops the
+    %% entry whose projection handle the flag is written through.
     ok = flush_and_mark_clean(NS, Name, Shard, Writers),
-    teardown_shard_common(
-        NS,
-        Name,
-        Shard,
-        Writers,
-        fun bondy_oplog_secondary_sup:stop_writer/1,
-        CacheHandles,
-        Topology,
-        TableState
-    ).
+    %% Read the writer's grouping key + live pid off the row before it is
+    %% unregistered (the refcount and the stop both need them).
+    {WriterKey, WriterPid} =
+        case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
+            {ok, Entry} ->
+                {
+                    bondy_oplog_core_registry:entry_writer_key(Entry),
+                    bondy_oplog_core_registry:entry_writer_pid(Entry)
+                };
+            not_found ->
+                {undefined, undefined}
+        end,
+    _ = bondy_oplog_core_registry:unregister(NS, Name, Shard),
+    case maps:get(Shard, CacheHandles, undefined) of
+        undefined ->
+            ok;
+        CacheHandle ->
+            _ = release_cache(Topology, TableState, CacheHandle),
+            ok
+    end,
+    maybe_stop_index_writer(WriterKey, WriterPid, Shard, Writers),
+    ok.
+
+%% @private
+%% Stop the index writer only once its `writer_key` is no longer referenced by
+%% any registry entry. `undefined` key means the row was already gone (an
+%% idempotent re-teardown) — the writer was handled when its last referencing
+%% entry went, so there is nothing to do.
+maybe_stop_index_writer(undefined, _WriterPid, _Shard, _Writers) ->
+    ok;
+maybe_stop_index_writer(WriterKey, WriterPid, Shard, Writers) ->
+    case bondy_oplog_core_registry:writer_key_in_use(WriterKey) of
+        true ->
+            ok;
+        false ->
+            Pid =
+                case WriterPid of
+                    P when is_pid(P) -> P;
+                    _ -> maps:get(Shard, Writers, undefined)
+                end,
+            case Pid of
+                P2 when is_pid(P2) ->
+                    _ = bondy_oplog_secondary_sup:stop_writer(P2),
+                    ok;
+                _ ->
+                    ok
+            end
+    end.
 
 %% @private
 %% `flush_sync` the shard's writer (so its coalesce buffer reaches disk) then
@@ -2469,7 +2879,9 @@ index_descriptors(Specs, DefaultShardCount, Topology) ->
     %% inside one realm. Scalar indexes keep their term-first layout regardless
     %% (realm-scoped via the equality sub-band, `index_eq_bounds/4`). `?FOLDS_REALM`
     %% is defined later in the file, so the comparison is inlined here.
-    RealmFolded = Topology =:= bondy_db_topology_shared_shards,
+    RealmFolded =
+        Topology =:= bondy_db_topology_shared_shards orelse
+            Topology =:= bondy_db_topology_memory,
     [
         #{
             index_name => bondy_oplog_index_spec:name(Spec),
@@ -2979,19 +3391,25 @@ realm_prefix(Realm, _Depth) ->
 %% @private
 %% Realm separation (G-1). The topology does pure shard placement and never
 %% sees realms — see `bondy_db_topology:route/2`: "realm separation is done
-%% above the topology, by the facade folding Realm into the cell key". Only
-%% `shared_shards` needs this: its Bucket is just the EntityType, so two realms
-%% with the same Key would otherwise collide on one cell. The other topologies
-%% (`per_entity`, `memory`, `single_bookie`) put the realm in the Bucket, so
-%% their cells are already realm-separated and their Key is passed through
-%% verbatim (keeping their shard formula `phash2({Bucket, Key})` unchanged).
+%% above the topology, by the facade folding Realm into the cell key". The
+%% bucket-as-entity-type topologies need this: their Bucket is just the
+%% EntityType (so a `per_shard` instance can multiplex tables by bucket), and
+%% two realms with the same Key would otherwise collide on one cell — so the
+%% facade folds Realm into the key instead. `shared_shards` and `memory` are
+%% these. The remaining topologies (`per_entity`, `single_bookie`) put the realm
+%% in the Bucket, so their cells are already realm-separated and their Key is
+%% passed through verbatim (keeping their shard formula `phash2({Bucket, Key})`
+%% unchanged).
 %%
 %% A NUL separator isolates the realm prefix for realm-scoped range scans
 %% (`list/2`): realm URIs are NUL-free text, so `[<<Realm,0>>, <<Realm,1>>)`
 %% captures exactly that realm's keys, and the original key is recovered by
 %% stripping the known `byte_size(Realm) + 1` prefix (the key's own bytes,
 %% which MAY contain NULs, are preserved verbatim after the separator).
--define(FOLDS_REALM(Topology), Topology =:= bondy_db_topology_shared_shards).
+-define(FOLDS_REALM(Topology),
+    (Topology =:= bondy_db_topology_shared_shards orelse
+        Topology =:= bondy_db_topology_memory)
+).
 
 cell_key(Topology, Realm, Key) when is_binary(Realm), is_binary(Key) ->
     case ?FOLDS_REALM(Topology) of
@@ -3163,6 +3581,9 @@ composite_row(false, _Realm, Arity, SecKey, Columns) ->
     {Cols, bondy_oplog_index_spec:decode_projection(Columns)}.
 
 %% @private
+%% Per-table-shard instance id (`DbName/EntityType/Shard`): one oplog instance
+%% (WAL + MST + applier) per table per shard. Used by the `per_table_shard`
+%% topologies.
 encode_instance_id(DbName, EntityType, Shard) ->
     iolist_to_binary([
         atom_to_binary(DbName, utf8),
@@ -3170,6 +3591,54 @@ encode_instance_id(DbName, EntityType, Shard) ->
         atom_to_binary(EntityType, utf8),
         $/,
         integer_to_binary(Shard)
+    ]).
+
+%% @private
+%% Per-shard instance id (`DbName/Shard`): one oplog instance shared by every
+%% table on the shard, routed by the entity-type bucket. Used by the `per_shard`
+%% topology (`shared_shards`). Dropping the entity type collapses the WAL/MST
+%% paths to `wal/<DbName>/<Shard>` and `mst/.../<DbName>/<Shard>` — the instance
+%% appends `/<InstanceId>` to the shared base path, so the shard owns one WAL and
+%% one MST regardless of how many tables it carries.
+encode_instance_id(DbName, Shard) ->
+    iolist_to_binary([
+        atom_to_binary(DbName, utf8),
+        $/,
+        integer_to_binary(Shard)
+    ]).
+
+%% @private
+%% The grouping key of the `bondy_oplog_secondary_writer` that drives an index
+%% shard — the secondary-side twin of `instance_id_for/4`. `per_shard` collapses
+%% every index of every table on a secondary shard onto one writer
+%% (`DbName/idx/SecShard`); `per_table_shard` keeps one writer per index shard
+%% (`NS/IndexName/idx/SecShard`). The two forms have different arity, so they
+%% never collide.
+writer_key_for(per_shard, DbName, _NS, _IName, SecShard) ->
+    encode_writer_key(DbName, SecShard);
+writer_key_for(_PerTableShard, _DbName, NS, IName, SecShard) ->
+    encode_writer_key(NS, IName, SecShard).
+
+%% @private
+%% Per-shard secondary-writer key (`DbName/idx/SecShard`): one writer shared by
+%% every index of every table on the shard, demuxing by `(NS, IndexName)` stream.
+encode_writer_key(DbName, SecShard) ->
+    iolist_to_binary([
+        atom_to_binary(DbName, utf8),
+        "/idx/",
+        integer_to_binary(SecShard)
+    ]).
+
+%% @private
+%% Per-table-shard secondary-writer key (`NS/IndexName/idx/SecShard`): one writer
+%% per index shard (a degenerate single-stream directory).
+encode_writer_key(NS, IName, SecShard) ->
+    iolist_to_binary([
+        atom_to_binary(NS, utf8),
+        $/,
+        atom_to_binary(IName, utf8),
+        "/idx/",
+        integer_to_binary(SecShard)
     ]).
 
 %% @private

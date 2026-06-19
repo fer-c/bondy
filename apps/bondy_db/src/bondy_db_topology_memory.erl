@@ -76,17 +76,22 @@ in the owner, a write+read driven through the surviving substrate keeps
 working after the `open_table/3` caller is gone — full ephemeral
 survival, not just the projection.
 
-## Bucket
+## Bucket and instance strategy
 
-Bucket is the Realm verbatim. Each `(EntityType, Shard)` has its own table
-(EntityType is implicit in the table), so the Bucket only needs to isolate
-realms inside it — exactly like `bondy_db_topology_per_entity`.
+Bucket is the entity type — exactly like `bondy_db_topology_shared_shards` —
+and the realm is folded into the cell key by the facade (G-1). This lets the
+topology declare `instances_strategy/0 => per_shard`: one oplog instance
+(WAL + MST + applier) per shard, shared by every table on it and multiplexed by
+the entity-type bucket. The per-`(EntityType, Shard)` ETS projections stay
+separate (each table routes to its own handle); only the replication log is
+shared per shard.
 """).
 
 -export([init/2]).
 -export([open_table/4]).
 -export([route/2]).
 -export([bucket_for/3]).
+-export([instances_strategy/0]).
 -export([index_clear_scope/2]).
 -export([primary_cell_scope/1]).
 -export([close_table/2]).
@@ -143,11 +148,27 @@ route(Shard, #{shards := Shards}) when is_integer(Shard) ->
     end.
 
 -doc """
-Each `(EntityType, Shard)` has its own table, so the Bucket only needs to
-isolate realms inside it — the Realm verbatim.
+The entity-type as a binary — exactly like `bondy_db_topology_shared_shards`.
+
+The bucket carries the entity type (not the realm) so a `per_shard` instance can
+multiplex its tables by bucket; the realm is folded into the cell key by the
+facade (G-1) instead, isolating realms there. Each `(EntityType, Shard)` still
+has its own ETS table, so the bucket also keeps a table's cells contiguous
+within it.
 """.
-bucket_for(_EntityType, Realm, _TableState) when is_binary(Realm) ->
-    Realm.
+bucket_for(EntityType, Realm, _TableState) when
+    is_atom(EntityType), is_binary(Realm)
+->
+    atom_to_binary(EntityType, utf8).
+
+-doc """
+One oplog instance per shard, shared by every table on it and multiplexed by the
+entity-type bucket — the same collapse `bondy_db_topology_shared_shards` uses.
+The per-table ETS projections stay separate (each table routes to its own
+handle); only the WAL/MST/applier are shared per shard.
+""".
+instances_strategy() ->
+    per_shard.
 
 -doc """
 Memory gives each `(EntityType, Shard)` its own ETS table (the ETS projection

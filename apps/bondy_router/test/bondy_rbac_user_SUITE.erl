@@ -32,6 +32,7 @@ all() ->
         remove_user,
         list_members,
         group_deletion_cleans_members,
+        membership_is_relation_authoritative,
         token_version
     ].
 
@@ -531,6 +532,35 @@ group_deletion_cleans_members(_) ->
         {[], undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})
     ).
 
+%% Membership is authoritative in the cell-per-fact `security_group_members`
+%% relation, NOT in the user record: the API surfaces a user's groups (derived
+%% on read), but the persisted user cell carries no `groups` field, so there is
+%% no second, divergence-prone copy. Removing a membership drops it from the
+%% derived set.
+membership_is_relation_authoritative(_) ->
+    U = <<"rel_auth_user">>,
+    G = <<"rel_auth_group">>,
+    ok = add_group(?REALM1_URI, G),
+    ok = add_member(?REALM1_URI, U, [G]),
+
+    %% The API surfaces the derived group set.
+    ?assertEqual(
+        [G], bondy_rbac_user:groups(bondy_rbac_user:fetch(?REALM1_URI, U))
+    ),
+
+    %% The persisted user CELL has NO `groups` key — membership lives only in
+    %% the relation.
+    Table = bondy_namespace_catalog:table(security_users),
+    {ok, {Value, _Hlc}} = bondy_db:read(Table, ?REALM1_URI, U),
+    ?assert(is_map(Value)),
+    ?assertNot(maps:is_key(groups, Value)),
+
+    %% Retracting the membership drops it from the derived set.
+    ok = bondy_rbac_user:remove_group(?REALM1_URI, U, G),
+    ?assertEqual(
+        [], bondy_rbac_user:groups(bondy_rbac_user:fetch(?REALM1_URI, U))
+    ).
+
 token_version(_) ->
     U = <<"tv_user_1">>,
     ok = add_member(?REALM1_URI, U, []),
@@ -582,8 +612,8 @@ add_member(RealmUri, Username, Groups) ->
     {ok, _} = bondy_rbac_user:add(RealmUri, User),
     ok.
 
-%% Flush the by_group index so an immediately-following members/3 read
-%% reflects the writes above (the index is maintained asynchronously).
+%% Membership now lives in the cell-per-fact `security_group_members` relation,
+%% written synchronously (read-your-writes), so there is no asynchronous index
+%% to flush before a members/3 read.
 flush_member_index() ->
-    Table = bondy_namespace_catalog:table(security_users),
-    ok = bondy_db:await_index(Table, by_group).
+    ok.

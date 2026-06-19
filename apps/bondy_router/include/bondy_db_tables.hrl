@@ -18,6 +18,7 @@
 -define(BONDY_DB_REALM_TAB, bondy_realm).
 -define(BONDY_DB_USER_TAB, security_users).
 -define(BONDY_DB_GROUP_TAB, security_groups).
+-define(BONDY_DB_GROUP_MEMBERS_TAB, security_group_members).
 -define(BONDY_DB_GROUP_GRANT_TAB, security_group_grants).
 -define(BONDY_DB_USER_GRANT_TAB, security_user_grants).
 -define(BONDY_DB_SOURCE_TAB, security_sources).

@@ -118,6 +118,16 @@ without protocol changes.
 -record(fused_drain, {
     iter :: term() | undefined,
     cell_apply_ctx :: map() | undefined,
+    %% Per-bucket apply-context source for the cell-apply mux, mirroring the
+    %% applier's `cell_apply_source`. `{single, Ctx}` (one table per fused
+    %% instance — today's default) routes every bucket to `Ctx`;
+    %% `{dir, #{Bucket => Ctx}}` (a multiplexing per-shard fused instance)
+    %% routes each bucket to its own table's ctx. Seeded at `maybe_init_fused/2`
+    %% from `cell_apply_bucket`; extended at runtime via the instance's
+    %% `register_table/4` / `unregister_table/2` calls. `cell_apply_ctx` above
+    %% stays the founding ctx for the `cell_apply_ctx = undefined` guard clauses.
+    cell_apply_source = {single, undefined} ::
+        bondy_oplog_cell_apply:ctx_source(),
     consumer_offset :: term(),
     uncommitted = 0 :: non_neg_integer(),
     commit_every :: pos_integer(),
@@ -421,6 +431,7 @@ without protocol changes.
 %% once at its `init/1` so it can re-verify signatures (S1) in its own
 %% process before dispatching events to the instance.
 -export([get_validator/1]).
+-export([replay_pairs/2]).
 
 %% Operator-facing trigger that asks the applier to refresh its
 %% validator snapshot by calling the optional
@@ -446,6 +457,8 @@ without protocol changes.
 -export([lifecycle_state/1]).
 -export([install_catalogue_batch/2]).
 -export([finalize_catalogue_bootstrap/3]).
+-export([register_table/4]).
+-export([unregister_table/2]).
 
 %% Registry helpers
 -export([whereis/1]).
@@ -1160,6 +1173,28 @@ get_validator(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, get_validator, infinity).
 
 ?DOC("""
+Folds the instance's MST for the durable applier's cold-replay and returns the
+`{Key, Value}` pairs to re-apply, together with the current root.
+
+This runs **inside the instance gen_server** on purpose: the instance owns the
+MST page store, and a sealed pack is read through a raw file descriptor that is
+bound to the process that opened it. The applier (a different process) must not
+fold the MST itself — `prim_file:pread/3` on the instance's fd from the applier
+fails with `not_on_controlling_process`. The applier therefore delegates the
+fold here and applies the returned pairs to its projection.
+
+Returns `{ok, no_change}` when the MST root has not moved since `LastRoot`, or
+`{ok, {CurrentRoot, Pairs}}` otherwise (a full fold when `LastRoot` is
+`undefined`, an incremental diff otherwise — see
+`bondy_oplog_applier:diff_pairs/3`).
+""").
+-spec replay_pairs(pid(), bondy_mst:hash() | undefined) ->
+    {ok, no_change} | {ok, {bondy_mst:hash(), [{term(), term()}]}}.
+
+replay_pairs(Pid, LastRoot) when is_pid(Pid) ->
+    gen_server:call(Pid, {replay_pairs, LastRoot}, infinity).
+
+?DOC("""
 Asks the per-instance applier to refresh its validator snapshot by
 calling `bondy_oplog_validator:refresh/1` on the current snapshot.
 
@@ -1575,6 +1610,78 @@ install_catalogue_batch(Pid, ModeAndCells) when is_pid(Pid) ->
             {error, instance_not_found}
     end.
 
+
+?DOC("""
+Adds a table to a shard instance shared by several tables (the one-log-per-shard
+multiplexer). `Bucket` is the table's entity-type tag, `Target` its
+`{Namespace, primary, Shard}` core-registry triple, and `TableOpts` the
+cell-apply opts (`fold_module`, `secondary_indexes`). After this call the
+instance routes events carrying `Bucket` to `Target`'s projection. The founding
+table is registered when the instance starts (via `cell_apply_bucket`); this
+adds siblings at runtime. Dispatches to the fused instance gen_server or the
+applier depending on the instance's drain topology, so callers need not know it.
+""").
+-spec register_table(
+    InstanceId :: instance_id(),
+    Bucket :: binary(),
+    Target :: {atom(), atom(), non_neg_integer()},
+    TableOpts :: map()
+) -> ok | {error, term()}.
+
+register_table(InstanceId, Bucket, Target, TableOpts) when
+    is_binary(InstanceId) andalso is_binary(Bucket) andalso is_map(TableOpts)
+->
+    case bondy_oplog_registry:fused(InstanceId) of
+        true ->
+            case ?MODULE:whereis(InstanceId) of
+                undefined ->
+                    {error, instance_not_running};
+                Pid ->
+                    gen_server:call(
+                        Pid, {register_table, Bucket, Target, TableOpts}, infinity
+                    )
+            end;
+        _ ->
+            case bondy_oplog_registry:applier_pid(InstanceId) of
+                undefined ->
+                    {error, instance_not_running};
+                ApplierPid ->
+                    bondy_oplog_applier:register_table(
+                        ApplierPid, Bucket, Target, TableOpts
+                    )
+            end
+    end.
+
+
+?DOC("""
+Removes a table previously added with `register_table/4` from a shared shard
+instance. Events carrying `Bucket` are then dropped (logged) until the bucket is
+re-registered. Dispatches to the fused instance gen_server or the applier
+depending on the instance's drain topology.
+""").
+-spec unregister_table(InstanceId :: instance_id(), Bucket :: binary()) ->
+    ok | {error, term()}.
+
+unregister_table(InstanceId, Bucket) when
+    is_binary(InstanceId) andalso is_binary(Bucket)
+->
+    case bondy_oplog_registry:fused(InstanceId) of
+        true ->
+            case ?MODULE:whereis(InstanceId) of
+                undefined ->
+                    {error, instance_not_running};
+                Pid ->
+                    gen_server:call(Pid, {unregister_table, Bucket}, infinity)
+            end;
+        _ ->
+            case bondy_oplog_registry:applier_pid(InstanceId) of
+                undefined ->
+                    {error, instance_not_running};
+                ApplierPid ->
+                    bondy_oplog_applier:unregister_table(ApplierPid, Bucket)
+            end
+    end.
+
 ?DOC("""
 Finalises a catalogue-snapshot bootstrap session.
 
@@ -1902,6 +2009,15 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
     FD = #fused_drain{
         iter = undefined,
         cell_apply_ctx = CellCtx,
+        %% Rebuild the full per-bucket directory from the registry (every
+        %% primary entry sharing this instance's id), so a collapsed per-shard
+        %% fused instance restores routing for EVERY table on the shard after a
+        %% restart — not just the founding one whose opts the supervisor
+        %% replays. A single-table fused instance keeps the keyless
+        %% `{single, CellCtx}` source. Mirrors the applier's self-healing init.
+        cell_apply_source = bondy_oplog_applier:build_cell_apply_source(
+            State#state.instance_id, CellCtx, ApplierOpts
+        ),
         consumer_offset = bondy_oplog_wal_state:new_consumer_offset(),
         commit_every = maps:get(commit_every, ApplierOpts, ?FUSED_COMMIT_EVERY),
         apply_batch_max = maps:get(
@@ -2066,6 +2182,66 @@ do_handle_call({append_many, Items}, _From, State0) ->
     end;
 do_handle_call(get_validator, _From, State) ->
     {reply, {State#state.validator_module, State#state.validator_state}, State};
+do_handle_call(
+    {register_table, _Bucket, _Target, _TableOpts},
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    %% Only a fused instance routes table registration here; the applier path
+    %% handles non-fused instances. Surface an explicit error if mis-routed.
+    {reply, {error, not_fused}, State};
+do_handle_call(
+    {register_table, Bucket, Target, TableOpts}, _From, State
+) ->
+    FD0 = State#state.fused_drain,
+    Opts = TableOpts#{cell_apply_target => Target},
+    case bondy_oplog_applier:resolve_cell_apply_ctx(Opts) of
+        {ok, Ctx} ->
+            Source = bondy_oplog_mux:put(
+                FD0#fused_drain.cell_apply_source, Bucket, Ctx
+            ),
+            AeTargets = lists:usort([Target | FD0#fused_drain.ae_targets]),
+            %% Mirror the applier: publish the unioned AE-freshness targets to
+            %% the instance registry so the AE heartbeat / isolated bump
+            %% (`bondy_oplog_sync_session:do_bump_ae_targets/2`) freshens this
+            %% sibling table's shard too.
+            ok = bondy_oplog_registry:set_ae_targets(
+                State#state.instance_id, AeTargets
+            ),
+            FD = FD0#fused_drain{
+                cell_apply_source = Source, ae_targets = AeTargets
+            },
+            {reply, ok, State#state{fused_drain = FD}};
+        {error, _} = Err ->
+            {reply, Err, State}
+    end;
+do_handle_call(
+    {unregister_table, _Bucket}, _From, #state{fused_drain = undefined} = State
+) ->
+    {reply, {error, not_fused}, State};
+do_handle_call({unregister_table, Bucket}, _From, State) ->
+    FD0 = State#state.fused_drain,
+    Source = bondy_oplog_mux:remove(
+        FD0#fused_drain.cell_apply_source, Bucket
+    ),
+    FD = FD0#fused_drain{cell_apply_source = Source},
+    {reply, ok, State#state{fused_drain = FD}};
+do_handle_call({replay_pairs, _LastRoot}, _From, #state{mst = undefined} = State) ->
+    {reply, {ok, no_change}, State};
+do_handle_call(
+    {replay_pairs, LastRoot}, _From, #state{mst = MST, instance_id = Id} = State
+) ->
+    %% Fold runs in THIS (the MST-owning) process; see `replay_pairs/2`.
+    CurrentRoot = bondy_mst:root(MST),
+    Reply =
+        case CurrentRoot of
+            LastRoot ->
+                {ok, no_change};
+            _ ->
+                Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
+                {ok, {CurrentRoot, Pairs}}
+        end,
+    {reply, Reply, State};
 do_handle_call(drain_install_queue, _From, State) ->
     %% Synchronisation barrier for the applier's commit boundary.
     %% Calls jump past casts in the mailbox order, so by the time
@@ -2725,8 +2901,8 @@ fused_apply_batch(#state{fused_drain = FD, instance_id = Id} = State0, Batch) ->
                 State1;
             _ ->
                 {CellEvents, _Other} = fused_partition_cells(Verified),
-                ok = bondy_oplog_cell_apply:apply_cell_batch(
-                    FD#fused_drain.cell_apply_ctx, Id, CellEvents
+                ok = bondy_oplog_cell_apply:apply_cell_batch_mux(
+                    FD#fused_drain.cell_apply_source, Id, CellEvents
                 ),
                 StateA = install_local_batch(State1, Verified),
                 PublishT0 = erlang:monotonic_time(microsecond),
@@ -2990,7 +3166,8 @@ fused_replay_cell_events(
 ) ->
     State;
 fused_replay_cell_events(
-    #state{mst = MST, instance_id = Id, fused_drain = FD} = State
+    #state{mst = MST, instance_id = Id, origin = Origin, fused_drain = FD} =
+        State
 ) ->
     LastRoot = FD#fused_drain.last_replayed_root,
     CurrentRoot = bondy_mst:root(MST),
@@ -2999,8 +3176,8 @@ fused_replay_cell_events(
             State;
         _ ->
             Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
-            _ = bondy_oplog_cell_apply:apply_cell_pairs(
-                FD#fused_drain.cell_apply_ctx, Id, Pairs
+            _ = bondy_oplog_cell_apply:apply_cell_pairs_mux(
+                FD#fused_drain.cell_apply_source, Id, Pairs, Origin
             ),
             %% Reads of a peer-authored value just became answerable — bump
             %% the AE-freshness shards so a secondary-index read does not
@@ -4410,7 +4587,7 @@ backstop_index_rebuild(Entry) ->
 %% about-to-be-truncated range `(W0, Frontier]` (`undefined` W0 = from the
 %% start). Mirrors `events_in_open_range/3` but yields the
 %% projection-apply pairs (no `event_from_value/2` wrapping) that the
-%% applier's `apply_cell_pairs/3` consumes. Folds the (bounded) live tree;
+%% applier's `apply_cell_pairs/4` consumes. Folds the (bounded) live tree;
 %% it reaches sealed pages, so it must run in the instance that owns their
 %% fds — never off-process.
 pairs_in_open_range(MST, undefined, Frontier) ->

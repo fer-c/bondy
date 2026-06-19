@@ -167,7 +167,7 @@ sequenceDiagram
     CA->>Cache: invalidate touched (Bucket, Key)s
 ```
 
-Three load-bearing details:
+Four load-bearing details:
 
 - **Writes are batched, not per-event.** All new frames in the batch
   go to the projection in one `put_batch` (for leveled, one
@@ -182,6 +182,15 @@ Three load-bearing details:
   and new cell values against the table's index specs and dispatches
   `index_entry` ops to the per-shard secondary writer
   ([chapter 03](03_bondy_db.md)).
+- **A peer's change is announced here.** When the batch being applied
+  is a *remote* merge (a peer's write arriving via anti-entropy) and the
+  table opted in with `publish => true`, the engine emits a
+  `bondy_oplog_core:publish_merge/4` event per touched cell — the remote
+  half of the change-notification seam ([chapter 03](03_bondy_db.md#change-notification)).
+  A node's *own* writes are announced separately by the applier's
+  `publish_batch` (the local tag), because their side-effects already
+  ran inline at the call site; the merge tag is what lets a node react
+  to what a peer did.
 
 The applier also keeps an in-memory `fold_state`
 (`apply_fold_batch/3`) for bare single-CRDT instances that have no
@@ -396,8 +405,8 @@ moduledoc):
 | `max_install_in_flight` | 64 | cap on outstanding install batches at the instance |
 | `cell_apply_target` | (registry-resolved) | which (projection, cache, kernel, overlay) handle to write |
 | `oldstate_cache` | on for durable (leveled) tables; off for ets/ephemeral (bare applier default `false`) | write-through frame cache in front of the projection reads |
-| `publish_fun`, `publish_ns` | undefined | per-cell publish hook |
-| `ae_targets` | [] | freshness counters to bump per applied event |
+| `publish_fun`, `publish_ns` | undefined | per-cell local-write publish hook (`publish_ns` also gates the remote merge-event emission in the cell-apply engine) |
+| `ae_targets` | [] | the `(NS, primary, Shard)` freshness refs stamped after a committed batch; `bondy_db` sets them at instance birth, and the sync session stamps the same refs every round (the heartbeat, [chapter 03](03_bondy_db.md#the-freshness-fence)) |
 
 ## Write→readable latency telemetry
 
@@ -459,8 +468,9 @@ Implementation:
   `resume_position/2`.
 - `bondy_oplog_cell_apply.erl` — the shared per-cell engine
   (`apply_cell_batch/3`, `compute_one_cell/12`,
-  `invalidate_cache/4`, secondary-index dispatch); called by the
-  applier here and by the fused instance inline.
+  `invalidate_cache/4`, secondary-index dispatch, and the remote
+  merge-event emission `maybe_collect_merge` / `publish_merges`);
+  called by the applier here and by the fused instance inline.
 - `bondy_oplog_cell_kernel.erl` — the CRDT seam the engine drives
   ([chapter 05](05_crdt_model.md)).
 - `bondy_oplog_instance.erl` — `install_local_batch` handler,

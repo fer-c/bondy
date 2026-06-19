@@ -21,7 +21,7 @@
  {<<"bloomfi">>,
   {git,"https://github.com/Leapsight/bloomfi.git",
        {ref,"d09a310876ea82e49aa984d8d385725918c8d7c1"}},
-  1},
+  0},
  {<<"brod">>,{pkg,<<"brod">>,<<"4.4.2">>},0},
  {<<"certifi">>,{pkg,<<"certifi">>,<<"2.12.0">>},1},
  {<<"cowboy">>,{pkg,<<"cowboy">>,<<"2.13.0">>},0},

@@ -194,23 +194,54 @@ wall-clock predicate on `bondy_oplog_core`:
 bondy_oplog_core:ensure_fresh([users, grants], milliseconds(1000)).
 ```
 
-Each `(NS, Index, Shard)` triple registers an **`ae_atomics`** ref
-(a one-element atomics array; see `bondy_oplog_core_registry.erl`),
-bumped to a monotonic-ms timestamp every time the applier completes
-an AE round for that shard (`bump_ae/3`). The predicate is
-wait-free: read the atomic, subtract from `now`, compare to MaxLag.
+Each `(NS, primary, Shard)` registers an **`ae_atomics`** ref (a
+one-element atomics array; see `bondy_oplog_core_registry.erl`) holding
+the wall-clock time at which that shard last proved itself in contact
+with its peers. The predicate is wait-free: read the atomic, subtract
+from `now`, compare to MaxLag. The fence inspects **primary shards
+only** (`primary_shards_for/1`) — auth reads primary cells; a secondary
+index has its own `max_lag` path.
+
+The subtle part is *what advances the timestamp*. Two writers stamp it,
+and the second is the one that makes the fence usable:
+
+- the **applier**, after it commits a batch for the shard (data flowed,
+  so the shard is current);
+- the **sync session**, at the end of every completed anti-entropy round
+  — *including an empty round* where the peer had nothing new
+  (`bump_ae_on_sync/2`, [chapter 01](01_bondy_oplog.md)).
+
+Without the second writer a low-churn shard — exactly the security
+tables — would decay to "stale" the moment writes stopped, even on a
+perfectly healthy cluster, and the fence would refuse all auth. The
+per-round heartbeat is what lets an idle shard keep proving liveness. The
+targets a round freshens are fixed at instance birth (`ae_targets`), so
+there is no window in which a shard is live but unstamped.
+
+A node that cannot reach a peer must not stamp itself fresh — otherwise a
+partitioned replica would happily authenticate against stale data. An
+**isolation policy** decides whether a round may certify freshness:
+
+| Policy | A round certifies freshness when… |
+|---|---|
+| `refuse` (default) | the round actually reached a peer (`synced`). A solo node never certifies — it fences closed. |
+| `proceed` | always — availability over consistency for a single-node or trusted deployment. |
+| `quorum` | the node can see a strict majority of the membership. |
+
+The policy lives on the freshness-*production* side (the sync session),
+so the read path stays one atomic read with no policy logic on it.
 
 ```mermaid
 flowchart LR
-    NS[namespaces in scope] --> SHARDS["shards for each (NS, primary, Shard)"]
+    NS[namespaces in scope] --> SHARDS["primary shards for each NS<br/>(primary_shards_for/1)"]
     SHARDS --> READA["read ae_atomics ref"]
     READA --> CHECK["now - last_ae < MaxLag ?"]
     CHECK -->|all true| OK[ok]
     CHECK -->|some false| STALE["{stale, [NS, ...]}"]
 ```
 
-This is the load-bearing primitive for security consistency. The
-auth path is:
+This is the load-bearing primitive for security consistency. The auth
+path verifies the token locally, fences, then reads:
 
 ```mermaid
 sequenceDiagram
@@ -219,12 +250,12 @@ sequenceDiagram
     participant Core as bondy_oplog_core
     participant FRESH as ensure_fresh
 
-    Client->>Auth: present JWT
+    Client->>Auth: present credential
     Auth->>Auth: verify signature + expiry (local)
     Auth->>FRESH: bondy_oplog_core:ensure_fresh([users, grants], 1s)
     alt stale
         FRESH-->>Auth: {stale, [...]}
-        Auth-->>Client: wamp.error.security_unavailable
+        Auth-->>Client: refuse — temporarily_unavailable
     else fresh
         FRESH-->>Auth: ok
         Auth->>Core: bondy_oplog_core:read(users, primary, Subject)
@@ -233,10 +264,16 @@ sequenceDiagram
     end
 ```
 
-Crucially, the predicate is **independent of the projection that
-might be stale**. Whether or not the projection has been updated,
-the `ae_atomics` timestamp tells you when the shard last completed
-a full anti-entropy round with its peers.
+A stale node refuses *every* authentication method with a single generic
+reason, `temporarily_unavailable` (an HTTP `503` or a WAMP abort) — the
+client retries after a short delay rather than being told its credential
+is wrong.
+
+Crucially, the predicate is **independent of the projection that might be
+stale**. Whether or not the projection has been updated, the `ae_atomics`
+timestamp tells you when the shard last completed a full anti-entropy
+round with its peers — which is the thing a security decision actually
+needs to know.
 
 ## `read_batch/2` — atomic-as-of-fence reads
 
@@ -269,6 +306,47 @@ flowchart LR
 - The caller observes per-cell HLCs and can compute skew.
 - This is *consistent-as-of-now* with skew detection — not
   MVCC-as-of-historical-T.
+
+## Change notification
+
+A read tells you the value now; sometimes a consumer needs to *react* the
+moment a value changes — and, in particular, to distinguish a change it
+made itself from one a peer made. `bondy_oplog_core` exposes a
+subscription seam for exactly that:
+
+```erlang
+{ok, Ref} = bondy_oplog_core:subscribe(NS, all),
+%% ... your process now receives, per change to NS:
+%%   {bondy_oplog_core_event,       NS, Key, Hlc, Op}  — a local write
+%%   {bondy_oplog_core_merge_event, NS, Key, Hlc, Op}  — a peer's write, merged via AE
+```
+
+The two tags carry the **same** `(Key, Op)` shape — `Op` is
+`{set, Hlc, Value}` for a write or `clear` for a delete — so a reactor
+can match one tag or both. The distinction is the whole point:
+
+- A **local** write already ran its side-effects inline at the call site
+  (that is where the application code is). A reactor that cares only
+  about its own node ignores the local tag.
+- A **merge** event is how a node learns of a change that originated on a
+  *peer* and arrived through anti-entropy — the substrate's equivalent of
+  an "on-merge" hook. It is emitted from the one place a remote write
+  reaches the projection (the cell-apply engine, [chapter 04](04_applier.md)),
+  so it covers every replay path.
+
+Notification is **opt-in per table**: only a table opened with `publish
+=> true` emits, and emission costs nothing on tables that do not. The
+dispatcher (`bondy_oplog_core_dispatcher`) fans out in the publishing
+process with a plain `erlang:send/2` — no extra hop, no mailbox in the
+write path. For a realm-folded (`shared_shards`) table the `Key` in the
+event is the folded `<<Realm, 0, Key>>`; the reactor splits it to recover
+the realm.
+
+The canonical consumer is a single node-local reactor that turns a peer's
+change into a local effect — closing sessions when a peer deletes a user
+or realm, re-evaluating cached authorization when a peer changes a grant.
+[Chapter 07](07_app_developers_tour.md#5-reacting-to-a-peers-change)
+works that example through the Bondy Router tables.
 
 ## Secondary indexes
 
@@ -363,11 +441,39 @@ Ranges respect the same fold contract as point reads, only batched.
 
 - **Tables** — like SQL tables but realm-scoped.
 - **Topologies** — pluggable strategies for which Bookie owns which
-  shard. Three ship: `bondy_db_topology_single_bookie`,
-  `bondy_db_topology_per_entity`,
-  `bondy_db_topology_shared_shards`. The leveled-backed three share
-  their Bookie/directory plumbing via
-  `bondy_db_topology_leveled_common`.
+  shard, and how a cell key is formed. Four ship:
+  `bondy_db_topology_single_bookie`, `bondy_db_topology_per_entity`,
+  `bondy_db_topology_shared_shards` (the three leveled-backed durable
+  topologies, sharing their Bookie/directory plumbing via
+  `bondy_db_topology_leveled_common`), and `bondy_db_topology_memory`
+  (an in-RAM ETS provider for ephemeral tables).
+
+### Realm folding
+
+How the realm enters the cell key is **topology-decided**, and it matters
+because the security and routing tables are multi-tenant. Under
+`shared_shards` every table multiplexes onto one shard set, so the realm
+is **folded into the key** — a cell is stored at `<<Realm, 0, Key>>`
+(realm URIs are NUL-free, so the separator is unambiguous). Two realms
+writing the same logical key land on distinct cells, with no chance of
+collision. Under `per_entity` and `memory` the realm is already the
+bucket, so the key is stored verbatim. A reactor or operator reading a
+raw cell key recovers the realm by splitting at the first NUL; the rest
+is the table's own key.
+
+### The topology manifest
+
+A durable DB's keying configuration — partition strategy, shard count,
+each table's `shard_by` / aggregate-root — determines *where on disk*
+every cell lives. Change it after data exists and reads silently miss.
+`bondy_db_manifest` defends against that: the first time a durable DB
+opens it **freezes** that configuration to an on-disk manifest, and every
+subsequent boot reconciles the running config against it. A mismatch is
+reported per the `oplog.core.on_topology_mismatch` policy (`warn` by
+default, `stop` to refuse the boot). Ephemeral DBs (the registry — wiped
+on restart) keep no manifest. The `core` DB's partition strategy
+(`partition_strategy`, default `aggregate`) is part of the frozen set:
+it is what decides which shard a `(realm, key)` write routes to.
 
 ```mermaid
 flowchart LR
@@ -387,8 +493,10 @@ The registry entry per `(NS, Index, Shard)` carries:
 - `overlay` — the per-instance ETS overlay tid.
 - `crdt_module` — the per-table CRDT ([chapter 05](05_crdt_model.md));
   a legacy `fold_module` label resolves to its native twin.
-- `ae_atomics` — the wait-free freshness ref read by
-  `ensure_fresh/2` and bumped by `bump_ae/3` after each AE round.
+- `ae_atomics` — the wait-free freshness ref read by `ensure_fresh/2`,
+  stamped both by the applier on commit and by the sync session at the
+  end of every round (the per-round heartbeat). The `(NS, primary,
+  Shard)` targets are fixed at instance birth (`ae_targets`).
 - For secondary-index shards, additionally a `writer_pid` and an
   `inflight_ref` (the in-flight counter + `needs_rebuild` flag);
   primary shards carry an `instance_id` so a rebuild can find the
@@ -454,8 +562,13 @@ read/write API here is unchanged.
   Leveled get + a tiny overlay fold.
 - **HLC is always returned.** Causality is part of the API.
 - **Bounded staleness is a per-shard concern.** `ensure_fresh/2`
-  reads the per-shard `ae_atomics` ref; auth namespaces declare it
-  required, routing namespaces don't.
+  reads the per-shard primary `ae_atomics` ref, stamped by both the
+  applier (on commit) and the sync session (every round, the heartbeat);
+  auth namespaces fence on it, routing namespaces don't.
+- **Changes can be subscribed to.** A `publish => true` table emits a
+  local `{bondy_oplog_core_event, …}` and a remote
+  `{bondy_oplog_core_merge_event, …}` per change; a node-local reactor
+  turns a peer's change into a local effect.
 - **The applier is the only writer to the projection.** Readers
   share that handle through the registry.
 - **Cache coherence is by invalidation.** The applier deletes the
@@ -480,14 +593,22 @@ Implementation:
 
 - `bondy_db.erl` — the consumer facade (tables, realms, topology).
 - `bondy_oplog_core.erl` — substrate read API: `read/3`,
-  `read_batch/2`, `ensure_fresh/2`, `range/4`, `write_through/5`.
+  `read_batch/2`, `ensure_fresh/2`, `range/4`, `write_through/5`; the
+  change-notification facade `subscribe/2`, `publish/4`,
+  `publish_merge/4`.
 - `bondy_oplog_core_registry.erl` — per-(NS, Index, Shard) handle
-  store + `bump_ae/3`.
+  store; `primary_shards_for/1` (the fence scope) + the `ae_atomics`
+  stamping.
+- `bondy_oplog_core_dispatcher.erl` — the subscription dispatcher and
+  the `bondy_oplog_core_event` / `bondy_oplog_core_merge_event` tags.
 - `bondy_db_topology_single_bookie.erl`,
   `bondy_db_topology_per_entity.erl`,
-  `bondy_db_topology_shared_shards.erl` — three ship-with
-  topologies; shared leveled/Bookie plumbing lives in
-  `bondy_db_topology_leveled_common.erl`.
+  `bondy_db_topology_shared_shards.erl` — the three durable topologies
+  (shared leveled/Bookie plumbing in
+  `bondy_db_topology_leveled_common.erl`); `bondy_db_topology_memory.erl`
+  is the in-RAM provider for ephemeral tables.
+- `bondy_db_manifest.erl` — the on-disk topology manifest that freezes a
+  durable DB's keying configuration and reconciles it on every boot.
 - `bondy_oplog_db_overlay.erl` — `{{Bucket, Key}, EventHlc, EventKey}`
   ETS overlay with match-spec range reads.
 - `bondy_oplog_cache_adapter.erl` + `bondy_oplog_cache_ets.erl`

@@ -174,6 +174,7 @@ Indeces for matching bondy_registry_entry(s).
 %% ENTRY API
 -export([add/2]).
 -export([add_indices/2]).
+-export([delete_indices/2]).
 -export([remove/2]).
 -export([remove/3]).
 -export([dirty_delete/2]).
@@ -1323,7 +1324,13 @@ store_indices(#bondy_registry_store{} = Store, Entry) ->
             add_wildcard_subscription_index(Store, Entry)
     end.
 
-%% @private
+-doc """
+Removes an entry's in-memory match indices (trie / ETS bags) ONLY — it does not
+touch the per-node remote index nor the bondy_db projection. Used by the
+presence-FSM masking path (`bondy_registry_partition:mask/2`) to make a remote
+entry unselectable for routing while retaining it, and by `remove/3` / `take/3`
+as the index half of a full delete.
+""".
 -spec delete_indices(Store :: t(), Entry :: entry()) -> ok | {error, any()}.
 
 delete_indices(Store, Entry) ->

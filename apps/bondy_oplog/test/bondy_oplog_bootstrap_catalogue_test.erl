@@ -218,6 +218,14 @@ setup_instance() ->
     {Cache, Proj} = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
         fold_module => lww_register,
+        %% A distinct origin per instance — these model two separate replicas,
+        %% which in production carry distinct persisted origins. Without it both
+        %% ephemeral instances inherit `bondy_oplog_origin:default()` and their
+        %% first append can mint an identical `(HLC, Origin, Seq)` event key for
+        %% the SHARED `k1` cell, which the MST merge correctly rejects as a
+        %% `divergent_value`. (The persistent variant gets distinct origins for
+        %% free via its distinct `storage_path`.)
+        origin => bondy_oplog_origin:new(),
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }

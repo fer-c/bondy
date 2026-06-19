@@ -79,8 +79,6 @@ classDiagram
       +gc_threshold(state) hlc | undefined °
       +value_equals_state() bool °
       +order_independent() bool °
-      +state_to_ops(old, new) [op] °
-      +merge_values(key, v1, v2) merged °
       +context_of(state) context °tier_2
       +reap_origins(state, retired) {state, reaped} °tier_2
     }

@@ -106,6 +106,20 @@ end.
 ok = bondy_oplog:await_apply(InstanceId, 5000).
 ```
 
+### Change notification
+
+```erlang
+%% opt in per table: open_table(.., #{publish => true})
+{ok, Ref} = bondy_oplog_core:subscribe(NS, all),
+%%   {bondy_oplog_core_event,       NS, Key, Hlc, Op}  — local write
+%%   {bondy_oplog_core_merge_event, NS, Key, Hlc, Op}  — peer write (AE)
+ok = bondy_oplog_core:unsubscribe(Ref).
+```
+
+The merge tag fires only for writes a peer made (reacted to via
+anti-entropy); a node's own writes deliver the local tag. See
+[bondy_db read side](03_bondy_db.md#change-notification).
+
 ## Operations
 {: .col-2}
 

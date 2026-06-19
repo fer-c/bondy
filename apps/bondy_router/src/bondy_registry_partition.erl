@@ -74,6 +74,10 @@
 -export([continuation_info/1]).
 -export([dirty_delete/2]).
 -export([dirty_delete/3]).
+-export([index_remote/2]).
+-export([mask/2]).
+-export([remove_indices/2]).
+-export([unmask/2]).
 -export([find/1]).
 -export([find/3]).
 -export([find/4]).
@@ -238,6 +242,53 @@ add_indices(Partition, Entry) when is_pid(Partition) ->
         _ = add_remote_index(Entry),
         ok
     end).
+
+-doc """
+Adds ONLY the per-node remote index for a remote entry, leaving the match
+indices (trie / ETS bags) untouched. Used by the presence-FSM reactor to record
+a peer's replicated entry whose owner node is currently down: the entry is
+retained (and enumerable per node for a later `unmask/2` or EVICT) but not
+selectable for routing. The bondy_db projection is not touched (the AAE merge
+already wrote it).
+""".
+-spec index_remote(Partition :: pid(), Entry :: entry()) -> ok.
+
+index_remote(Partition, Entry) when is_pid(Partition) ->
+    _ = add_remote_index(Entry),
+    ok.
+
+-doc """
+Masks a remote entry for routing (presence SUSPEND, design §9.6): removes its
+match indices (trie / ETS bags) so it is no longer selectable, while LEAVING the
+per-node remote index and the bondy_db projection in place so `unmask/2` can
+restore it when the owner node returns. Idempotent.
+""".
+-spec mask(Partition :: pid(), Entry :: entry()) -> ok | {error, any()}.
+
+mask(Partition, Entry) when is_pid(Partition) ->
+    bondy_registry_store:delete_indices(store(Partition), Entry).
+
+-doc """
+Restores a previously `mask/2`-ed remote entry's match indices (presence RESUME,
+design §9.6). The per-node remote index was retained by the mask, so only the
+match indices are re-added. Does not touch the bondy_db projection. Idempotent.
+""".
+-spec unmask(Partition :: pid(), Entry :: entry()) -> ok | {error, any()}.
+
+unmask(Partition, Entry) when is_pid(Partition) ->
+    bondy_registry_store:add_indices(store(Partition), Entry).
+
+-doc """
+Removes a remote entry's in-memory indices (match indices AND the per-node remote
+index) WITHOUT touching the bondy_db projection — the AAE merge of the owner's
+`clear` (a DELETE / self-clean / EVICT, design §9.6) already removed the
+projection cell, and this brings the materialised view into line. Idempotent.
+""".
+-spec remove_indices(Partition :: pid(), Entry :: entry()) -> ok | {error, any()}.
+
+remove_indices(Partition, Entry) when is_pid(Partition) ->
+    Result = bondy_registry_store:delete_indices(store(Partition), Entry),
+    resulto:then(Result, fun(_) -> delete_remote_index(Entry) end).
 
 -doc "".
 -spec remove(Partition :: pid(), Entry :: entry()) -> ok.

@@ -77,6 +77,13 @@ Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
     realm_prefix_depth := pos_integer(),
     hash_algo := atom(),
     key_encoding_version := pos_integer(),
+    %% How tables map onto oplog instances (`bondy_db_topology:instances_strategy/1`):
+    %% `per_table_shard` (one instance per table per shard) or `per_shard` (all
+    %% tables on a shard share one instance, the one-log-per-shard collapse).
+    %% Frozen because switching it re-homes a shard's WAL/MST onto a different
+    %% instance id — an on-disk layout change that must be caught, not silently
+    %% applied.
+    instances_strategy := atom(),
     tables := #{atom() => table_freeze()}
 }.
 
@@ -224,7 +231,8 @@ diff(Configured0, OnDisk) when is_map(Configured0) andalso is_map(OnDisk) ->
     Configured = finalize(Configured0),
     Scalars = [
         db, topology_module, partition_strategy, shard_count,
-        realm_prefix_depth, hash_algo, key_encoding_version
+        realm_prefix_depth, hash_algo, key_encoding_version,
+        instances_strategy
     ],
     ScalarDivs = [
         {K, maps:get(K, Configured, undefined), maps:get(K, OnDisk, undefined)}
@@ -321,7 +329,14 @@ write(Dir, Manifest) when is_map(Manifest) ->
 finalize(Frozen) when is_map(Frozen) ->
     Frozen#{
         hash_algo => ?HASH_ALGO,
-        key_encoding_version => ?KEY_ENCODING_VERSION
+        key_encoding_version => ?KEY_ENCODING_VERSION,
+        %% Derived from the topology module — a property of the bondy_db code,
+        %% not an independent deployment choice — so it is stamped here next to
+        %% the other substrate invariants.
+        instances_strategy =>
+            bondy_db_topology:instances_strategy(
+                maps:get(topology_module, Frozen)
+            )
     }.
 
 

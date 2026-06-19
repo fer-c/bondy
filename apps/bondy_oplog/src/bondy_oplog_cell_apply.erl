@@ -31,7 +31,7 @@ behaviour is byte-identical.
     %% (`bondy_oplog_core:publish_merge/4`) so node-local reactors can react to
     %% peer-originated changes. `undefined` (the default) disables emission —
     %% set only for tables opened with `publish => true`. Only the replay
-    %% (`apply_cell_pairs/3`) path emits; local writes use the applier's
+    %% (`apply_cell_pairs/4`) path emits; local writes use the applier's
     %% `publish_batch`.
     publish_ns => atom() | undefined,
     %% Cache adapter pair captured at init time so the applier can
@@ -66,12 +66,25 @@ behaviour is byte-identical.
     %% Defaults to `?DEFAULT_MAX_INFLIGHT` when absent.
     max_inflight => non_neg_integer()
 }.
+%% The cell-apply context multiplexer — a `bondy_oplog_mux:t()` whose key is the
+%% event's `Bucket` (entity type) and whose value is that table's
+%% `cell_apply_ctx()`. `{single, Ctx}` is the one-table-per-instance case (every
+%% bucket resolves to the same ctx, byte-identical to the pre-mux path);
+%% `{dir, Map}` is the per-shard multiplexer keyed by bucket. Consumed by both
+%% the applier (durable + non-fused ephemeral) and the fused instance, which each
+%% hold a `ctx_source()` and dispatch through `apply_cell_batch_mux/3` /
+%% `apply_cell_pairs_mux/4`.
+-type ctx_source() :: bondy_oplog_mux:t().
 
 -export_type([cell_apply_ctx/0]).
 -export_type([index_descriptor/0]).
+-export_type([ctx_source/0]).
 
 -export([apply_cell_batch/3]).
--export([apply_cell_pairs/3]).
+-export([apply_cell_batch_mux/3]).
+-export([apply_cell_pairs/4]).
+-export([apply_cell_pairs_mux/4]).
+-export([build_source/2]).
 -export([compute_one_cell/12]).
 -export([oldstate_cache_new/2]).
 -export([oldstate_cache_put_entries/2]).
@@ -583,8 +596,12 @@ dispatch_one_index(NS, IName, SecShard, Ops, MaxHlc, Cap, Bypass) ->
                             _ = bondy_oplog_core_registry:index_inflight_add(
                                 Entry, NumOps
                             ),
+                            %% Tag the batch with its `(NS, IndexName)` stream:
+                            %% the writer is shared across every index shard on
+                            %% its `writer_key` and demuxes the ops back to each
+                            %% stream's projection.
                             bondy_oplog_secondary_writer:enqueue(
-                                Pid, Ops, MaxHlc
+                                Pid, {NS, IName}, Ops, MaxHlc
                             );
                         false ->
                             secondary_saturation_drop(
@@ -629,16 +646,21 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
 %% peer-event replay that overflows a writer is dropped and self-heals via
 %% a marked rebuild. The full-rebuild path no longer routes through here —
 %% it re-indexes from the converged projection (`reindex_from_projection/3`).
-apply_cell_pairs(Ctx, Id, Pairs) ->
+apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
     CacheAdapter = maps:get(cache_adapter, Ctx, undefined),
     CacheHandle = maps:get(cache_handle, Ctx, undefined),
     HighWaterRef = maps:get(high_water_ref, Ctx, undefined),
     OldStateCache = maps:get(oldstate_cache, Ctx, undefined),
     SecIdx = sec_idx(Ctx),
-    %% When set (table opened with `publish => true`), every cell this replay
-    %% writes is published as a remote-merge event so node-local reactors can
-    %% react to peer-originated changes. `undefined` ⇒ no emission, zero cost.
+    %% When set (table opened with `publish => true`), every PEER-authored cell
+    %% this replay writes is published as a remote-merge event so node-local
+    %% reactors can react to peer-originated changes. `undefined` ⇒ no emission,
+    %% zero cost. The replay diff can also sweep up locally-authored cells (a
+    %% shared per-shard instance replays one MST whenever ANY of its tables
+    %% merges a peer root); those were already published locally via
+    %% `publish_batch`, so they are filtered here by `LocalOrigin` — only a cell
+    %% whose event-key origin differs from this node's own origin is a true merge.
     PublishNs = maps:get(publish_ns, Ctx, undefined),
     try
         {LocalWrites, MaxHlc, N, IdxAcc, PubAcc} = lists:foldl(
@@ -670,8 +692,14 @@ apply_cell_pairs(Ctx, Id, Pairs) ->
                     of
                         {ok, NewFrame, NewHlc, IdxOps} ->
                             WAcc1 = WAcc#{{Bucket, CellKey} => NewFrame},
+                            %% Only a peer-authored cell is a true merge; a
+                            %% locally-authored cell swept into the diff was
+                            %% already published locally.
+                            CellPublishNs = merge_publish_ns(
+                                PublishNs, MstKey, LocalOrigin
+                            ),
                             PAcc1 = maybe_collect_merge(
-                                PublishNs,
+                                CellPublishNs,
                                 PAcc,
                                 Bucket,
                                 CellKey,
@@ -751,6 +779,125 @@ apply_cell_pairs(Ctx, Id, Pairs) ->
                 stacktrace => S
             }),
             0
+    end.
+
+%% @private
+%% Per-bucket multiplexing front-ends for `apply_cell_batch/3` and
+%% `apply_cell_pairs/4`. A shard instance shared by several tables receives
+%% events for more than one `Bucket` (entity type); these group the batch by
+%% bucket and apply each group under that bucket's `cell_apply_ctx`, resolved
+%% from a `ctx_source()`:
+%%
+%%   `{single, Ctx}` — one table per instance (today): every bucket resolves to
+%%       the same ctx. With a single bucket this is byte-identical to calling
+%%       `apply_cell_batch/3` / `apply_cell_pairs/4` directly.
+%%   `{dir, Map}`    — a `#{Bucket => Ctx}` directory: each bucket resolves to
+%%       its own table's ctx (the per-shard-instance multiplexer).
+%%
+%% A bucket with no ctx under a `{dir, _}` source is logged and skipped (its
+%% cells re-apply on the next replay); `{single, undefined}` is the
+%% no-cell-apply instance and is a silent no-op.
+apply_cell_batch_mux({single, undefined}, _Id, _Events) ->
+    ok;
+apply_cell_batch_mux(Source, Id, Events) ->
+    lists:foreach(
+        fun({Bucket, Group}) ->
+            case bondy_oplog_mux:resolve(Source, Bucket) of
+                undefined ->
+                    log_missing_ctx(Id, Bucket, length(Group));
+                Ctx ->
+                    ok = apply_cell_batch(Ctx, Id, Group)
+            end
+        end,
+        bondy_oplog_mux:group_by(Events, fun event_bucket/1)
+    ),
+    ok.
+
+%% @private
+%% As `apply_cell_batch_mux/3`, for the replay/merge path; returns the total
+%% number of cells applied across all bucket groups.
+apply_cell_pairs_mux({single, undefined}, _Id, _Pairs, _LocalOrigin) ->
+    0;
+apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
+    lists:foldl(
+        fun({Bucket, Group}, Acc) ->
+            case bondy_oplog_mux:resolve(Source, Bucket) of
+                undefined ->
+                    log_missing_ctx(Id, Bucket, length(Group)),
+                    Acc;
+                Ctx ->
+                    Acc + apply_cell_pairs(Ctx, Id, Group, LocalOrigin)
+            end
+        end,
+        0,
+        bondy_oplog_mux:group_by(Pairs, fun pair_bucket/1)
+    ).
+
+-doc """
+Build the initial `ctx_source()` for the cell-apply mux. A `cell_apply_bucket`
+in `Opts` (a `bondy_db`-provisioned table that may later share its shard
+instance) starts the source in `{dir, _}` mode keyed by that bucket, so
+`source_put/3` can add sibling tables. Without it — the single-table and
+raw-instance callers — the source stays `{single, Ctx}` (every bucket routes to
+the one ctx), byte-identical to the pre-mux behaviour. A `CellCtx` of `undefined`
+is the no-cell-apply instance.
+""".
+-spec build_source(
+    CellCtx :: cell_apply_ctx() | undefined, Opts :: map()
+) -> ctx_source().
+
+build_source(undefined, _Opts) ->
+    bondy_oplog_mux:single(undefined);
+
+build_source(CellCtx, Opts) ->
+    case maps:get(cell_apply_bucket, Opts, undefined) of
+        Bucket when is_binary(Bucket) ->
+            bondy_oplog_mux:dir([{Bucket, CellCtx}]);
+        _ ->
+            bondy_oplog_mux:single(CellCtx)
+    end.
+
+%% @private
+event_bucket(Event) ->
+    case bondy_oplog_event:op(Event) of
+        {cell_apply, Bucket, _Key, _FoldEvent} -> {ok, Bucket};
+        _ -> skip
+    end.
+
+%% @private
+pair_bucket(
+    {_MstKey, {{cell_apply, Bucket, _CellKey, _FoldEvent}, _Meta, _Prev, _Sig}}
+) ->
+    {ok, Bucket};
+pair_bucket(_) ->
+    skip.
+
+%% @private
+log_missing_ctx(Id, Bucket, Count) ->
+    ?LOG_WARNING(#{
+        description =>
+            "bondy_oplog_cell_apply: no cell-apply context for bucket; "
+            "cells skipped (they re-apply on the next replay).",
+        instance_id => Id,
+        bucket => Bucket,
+        count => Count
+    }).
+
+%% @private
+%% The publish namespace to use for ONE replayed cell: the table's `PublishNs`
+%% only when the cell was peer-authored (its event-key origin differs from this
+%% node's `LocalOrigin`), else `undefined` (suppress emission). A locally
+%% authored cell — which a shared per-shard instance can sweep into a replay diff
+%% triggered by a sibling table's peer merge — was already published locally via
+%% the applier's `publish_batch`, so re-publishing it as a "merge" would be a
+%% spurious, duplicate reactor event. `LocalOrigin = undefined` (no origin known)
+%% degrades to publishing all, preserving the pre-filter behaviour.
+merge_publish_ns(undefined, _MstKey, _LocalOrigin) ->
+    undefined;
+merge_publish_ns(PublishNs, MstKey, LocalOrigin) ->
+    case bondy_oplog_event:key_origin(MstKey) of
+        LocalOrigin -> undefined;
+        _ -> PublishNs
     end.
 
 %% @private

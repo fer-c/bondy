@@ -240,15 +240,23 @@ the chapters that follow make sense:
    [chapter 05](05_crdt_model.md).)
 4. **Two-sided API.** `bondy_oplog` for writes, `bondy_db` for reads.
    Applications never read from the oplog.
-5. **No consensus.** Convergence is by anti-entropy over the MST,
-   plus a wall-clock **freshness fence** for namespaces that need
-   bounded staleness (e.g. auth).
+5. **No consensus.** Convergence is by anti-entropy over the MST
+   (carried, in a Bondy deployment, over Partisan), plus a wall-clock
+   **freshness fence** for namespaces that need bounded staleness (e.g.
+   auth). The fence is fed by a per-round heartbeat: every completed sync
+   round stamps the shard as "in contact with its peers," so an idle
+   security shard can still prove its liveness.
 6. **The MST is bounded.** Once peers confirm they have an event,
    it is physically removed from the MST and folded into a single
    per-instance snapshot via `bondy_oplog_compaction`. A fully
    converged cluster's live MST is empty; new replicas bootstrap
    from a snapshot, not from the full history
    ([chapter 06](06_compaction_and_bootstrap.md)).
+7. **Changes are observable.** A table can opt into change
+   notification: every write publishes a node-local event, and writes
+   that arrive from a *peer* through anti-entropy publish a distinct
+   *merge* event — the seam a node-local reactor uses to act on what
+   another node did ([chapter 03](03_bondy_db.md#change-notification)).
 
 ## Where next?
 

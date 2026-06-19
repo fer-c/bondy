@@ -22,6 +22,9 @@ is ignored here.
 | `bondy_realm`           | delete        | close this node's sessions for the realm (`wamp.close.close_realm`) |
 | `security_user_grants`  | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) |
 | `security_group_grants` | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) |
+| `security_group_members`| add/remove    | invalidate this node's cached RBAC contexts for the realm (§9.5) |
+| `bondy_registration`    | create/delete | add / remove the peer's registration in this node's routing trie |
+| `bondy_subscription`    | create/delete | add / remove the peer's subscription in this node's routing trie |
 
 The split mirrors the authn-vs-authz distinction in the local write path: an
 **authentication-level** change (a user or realm *delete*) tears the affected
@@ -30,6 +33,25 @@ sessions down, whereas an **authorization** change (a grant `set` or a revoke
 re-reads the subject's current grants. Grant invalidation is realm-wide because a
 group-grant change affects every member; over-invalidating unaffected sessions
 costs only a one-time context rebuild, so both grant tables share one reaction.
+
+## Registry reactions (presence, §9.6)
+
+The `registry` tables are an AP namespace whose routing trie is a materialised
+view *separate* from the bondy_db projection that anti-entropy merges into. A
+peer's registration therefore reaches this node's projection via AAE, but its
+trie — what routing actually selects — only learns of it here. A `set` (CREATE)
+adds the entry to the trie when its owner node is currently connected, or records
+it masked (per-node remote index only) when the owner is down, so a node that
+joins after the owner failed never routes to it. A `clear` (the owner's DELETE /
+self-clean, or a rendezvous-hashed EVICT) removes it. Because a `clear` carries
+no value, the cleared entry is resolved from a small node-local table this reactor
+maintains on each `set` (keyed by the cell's `{namespace, key}`); the bondy_db
+projection cannot serve the lookup, as the merge has already removed the cell.
+
+Node-level masking on `node_down` / `node_up` (presence SUSPEND / RESUME) is
+*not* driven from here — every node derives it from its own Partisan view in
+`bondy_registry`, so it needs no replicated event. Only cluster-wide *removals*
+ride AAE as `clear`s, and those are what this reactor applies.
 
 A peer's user *credential change* (a `set` rather than a `clear`) does not yet
 close sessions here: the merge hook carries no old value, so this node cannot
@@ -55,32 +77,46 @@ the dispatcher is configured to effectively never restart.
 
 -define(RESUBSCRIBE_AFTER, 500).
 
+%% The node-local table that resolves a registry `clear` (a tombstone with no
+%% value) back to the entry it removed, keyed by the cell's `{namespace, key}`.
+%% Populated on every registry `set`; the bondy_db projection cannot serve the
+%% lookup because the merge has already removed the cell. Claimed via
+%% `bondy_table_manager` so it survives a reactor restart.
+-define(REG_ENTRIES_TAB, bondy_aae_registry_entries).
+
 %% One reacted-on bondy_db table. `ns`/`ref` are filled once the namespace
 %% catalogue has provisioned the table and the subscription is established;
 %% until then they are `undefined` and the subscription is retried.
 -record(sub, {
     table :: atom(),
     label :: string(),
-    kind  :: user | realm | grant,
+    kind  :: user | realm | grant | member | registry,
     ns    :: atom() | undefined,
     ref   :: reference() | undefined
 }).
 
 -record(state, {
-    subs = [] :: [#sub{}]
+    subs = [] :: [#sub{}],
+    %% The registry tombstone resolver (see ?REG_ENTRIES_TAB).
+    entries :: ets:table()
 }).
 
 %% API
 -export([start_link/0]).
+-export([remote_entries_of/1]).
 
 -ifdef(TEST).
 %% Exposed for unit testing the reaction logic without a running cluster.
 -export([react_user/2]).
 -export([react_realm/2]).
 -export([react_grant/2]).
+-export([react_member/2]).
+-export([react_registry/4]).
+-export([owner_up/1]).
 -export([unfold_user_key/1]).
 -export([unfold_realm_key/1]).
 -export([unfold_grant_key/1]).
+-export([unfold_member_key/1]).
 -endif.
 
 %% GEN_SERVER CALLBACKS
@@ -101,12 +137,40 @@ the dispatcher is configured to effectively never restart.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+-doc """
+Returns the registry entries this node holds that are owned by `Node`, taken from
+the reactor's tombstone table (every peer registration this node has merged is
+recorded there on its `set`). This is the authoritative by-owner enumeration the
+registry presence machine (`bondy_registry`) masks / unmasks / evicts on a
+membership change — it does not depend on the registry's per-node index. Returns
+`[]` before the reactor has started.
+""".
+-spec remote_entries_of(node()) -> [bondy_registry_entry:t()].
+
+remote_entries_of(Node) ->
+    case ets:whereis(?REG_ENTRIES_TAB) of
+        undefined ->
+            [];
+        _ ->
+            ets:foldl(
+                fun({_K, Entry}, Acc) ->
+                    case catch bondy_registry_entry:node(Entry) of
+                        Node -> [Entry | Acc];
+                        _ -> Acc
+                    end
+                end,
+                [],
+                ?REG_ENTRIES_TAB
+            )
+    end.
+
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
 init([]) ->
-    {ok, #state{subs = reacted_tables()}, {continue, subscribe}}.
+    Entries = ensure_entries_table(),
+    {ok, #state{subs = reacted_tables(), entries = Entries}, {continue, subscribe}}.
 
 handle_continue(subscribe, State) ->
     {noreply, subscribe(State)}.
@@ -171,8 +235,37 @@ reacted_tables() ->
             table = ?BONDY_DB_GROUP_GRANT_TAB,
             label = "security_group_grants",
             kind = grant
+        },
+        #sub{
+            table = ?BONDY_DB_GROUP_MEMBERS_TAB,
+            label = "security_group_members",
+            kind = member
+        },
+        #sub{
+            table = ?BONDY_DB_REGISTRATION_TAB,
+            label = "bondy_registration",
+            kind = registry
+        },
+        #sub{
+            table = ?BONDY_DB_SUBSCRIPTION_TAB,
+            label = "bondy_subscription",
+            kind = registry
         }
     ].
+
+%% @private
+%% The registry tombstone resolver, claimed so it outlives a reactor restart.
+ensure_entries_table() ->
+    Opts = [
+        set,
+        {keypos, 1},
+        named_table,
+        public,
+        {read_concurrency, true},
+        {write_concurrency, true}
+    ],
+    {ok, Tab} = bondy_table_manager:add_or_claim(?REG_ENTRIES_TAB, Opts),
+    Tab.
 
 %% @private
 %% (Re)subscribe to every reacted-on namespace whose table the catalogue has
@@ -210,7 +303,7 @@ ensure_subscribed(#sub{table = Table, label = Label} = Sub) ->
 %% @private
 %% Route a delivered merge event to the reaction for its namespace. An event for
 %% a namespace not (yet) bound — or with no reaction — is ignored.
-react(NS, Key, Op, #state{subs = Subs}) ->
+react(NS, Key, Op, #state{subs = Subs, entries = Entries}) ->
     case lists:keyfind(NS, #sub.ns, Subs) of
         #sub{kind = user} ->
             react_user(Key, Op);
@@ -218,13 +311,21 @@ react(NS, Key, Op, #state{subs = Subs}) ->
             react_realm(Key, Op);
         #sub{kind = grant} ->
             react_grant(Key, Op);
+        #sub{kind = member} ->
+            react_member(Key, Op);
+        #sub{kind = registry} ->
+            react_registry(Entries, NS, Key, Op);
         false ->
             ok
     end.
 
 %% @private
 %% React to a remote security_users change. A `clear` (delete) closes this
-%% node's sessions for the user; a `set` is a no-op here (see moduledoc).
+%% node's sessions for the user; a `set` is a no-op here (see moduledoc). The
+%% delete arrives as bondy_db's short-form `clear` atom (the explicit
+%% `{clear, Hlc}` form is accepted too).
+react_user(Key, clear) ->
+    react_user(Key, {clear, undefined});
 react_user(Key, {clear, _Hlc}) ->
     {RealmUri, Username} = unfold_user_key(Key),
     ?LOG_INFO(#{
@@ -239,7 +340,11 @@ react_user(_Key, _Op) ->
 
 %% @private
 %% React to a remote bondy_realm change. A `clear` (delete) closes this node's
-%% sessions for the realm; a `set` (create / update) is a no-op here.
+%% sessions for the realm; a `set` (create / update) is a no-op here. The delete
+%% arrives as bondy_db's short-form `clear` atom (the explicit `{clear, Hlc}`
+%% form is accepted too).
+react_realm(Key, clear) ->
+    react_realm(Key, {clear, undefined});
 react_realm(Key, {clear, _Hlc}) ->
     RealmUri = unfold_realm_key(Key),
     ?LOG_INFO(#{
@@ -266,6 +371,113 @@ react_grant(Key, _Op) ->
         realm_uri => RealmUri
     }),
     bondy_session_manager:invalidate_rbac_all(RealmUri).
+
+%% @private
+%% React to a remote group-membership change (security_group_members). An
+%% `enable` (add) or `disable` (remove) of a membership fact changes the
+%% authorization a cached RBAC context would compute for the affected user, so
+%% it invalidates this node's sessions for the realm in place (§9.5), exactly as
+%% a grant change does — the next authorize re-reads the subject's current
+%% groups. Realm-wide (the merged key carries no usable old value to scope it to
+%% one user). No teardown — `token_version` (advanced by the peer's user-cell
+%% touch, replicated separately) is what forces re-authentication.
+react_member(Key, _Op) ->
+    RealmUri = unfold_member_key(Key),
+    ?LOG_INFO(#{
+        description =>
+            "Invalidating local RBAC contexts after a peer membership change",
+        realm_uri => RealmUri
+    }),
+    bondy_session_manager:invalidate_rbac_all(RealmUri).
+
+%% @private
+%% React to a peer's registry change (bondy_registration / bondy_subscription).
+%% A `set` (CREATE) adds the entry to this node's routing trie when its owner
+%% node is connected, or records it masked (per-node remote index only) when the
+%% owner is down; either way it is remembered in `Entries` so a later `clear` can
+%% be resolved. A `clear` (the owner's DELETE / self-clean, or a rendezvous-hashed
+%% EVICT) removes it from the trie and the remote index. The bondy_db projection
+%% is maintained by the merge itself; only the materialised trie is touched here.
+react_registry(Entries, NS, Key, Op) ->
+    case registry_op(Op) of
+        {set, Value} ->
+            react_registry_set(Entries, NS, Key, Value);
+        clear ->
+            react_registry_clear(Entries, NS, Key);
+        ignore ->
+            ok
+    end.
+
+%% @private
+%% Normalise the fold-event op a registry cell merge delivers. Registry writes use
+%% bondy_db's short forms (`{set, Value}` / `clear`); the explicit `{set, Hlc,
+%% Value}` / `{clear, Hlc}` forms are accepted too. Anything else is ignored — the
+%% reaction MUST be total so an unexpected op never crashes the reactor.
+registry_op({set, Value}) ->
+    {set, Value};
+registry_op({set, _Hlc, Value}) ->
+    {set, Value};
+registry_op(clear) ->
+    clear;
+registry_op({clear, _Hlc}) ->
+    clear;
+registry_op(_) ->
+    ignore.
+
+%% @private
+react_registry_set(Entries, NS, Key, Value) ->
+    case registry_entry(Value) of
+        {ok, Entry} ->
+            true = ets:insert(Entries, {{NS, Key}, Entry}),
+            Partition = bondy_registry:pick_partition(
+                bondy_registry_entry:realm_uri(Entry)
+            ),
+            case owner_up(Entry) of
+                true ->
+                    _ = bondy_registry_partition:add_indices(Partition, Entry),
+                    ok;
+                false ->
+                    %% Owner node is down: retain the entry (enumerable per node
+                    %% for a later RESUME / EVICT) but keep it out of the routing
+                    %% trie (presence SUSPEND for a late-joiner, §9.6).
+                    bondy_registry_partition:index_remote(Partition, Entry)
+            end;
+        error ->
+            ok
+    end.
+
+%% @private
+react_registry_clear(Entries, NS, Key) ->
+    case ets:take(Entries, {NS, Key}) of
+        [{_, Entry}] ->
+            Partition = bondy_registry:pick_partition(
+                bondy_registry_entry:realm_uri(Entry)
+            ),
+            _ = bondy_registry_partition:remove_indices(Partition, Entry),
+            ok;
+        [] ->
+            %% Never saw the matching `set` (e.g. this node started after the
+            %% entry was created and removed), or already removed. The trie has
+            %% nothing to drop.
+            ok
+    end.
+
+%% @private
+%% Whether a registry entry's owning node is currently reachable in this node's
+%% Partisan view. Routing should only select entries whose owner is connected;
+%% an entry owned by a disconnected node is masked. A self-owned entry (only seen
+%% here transiently) counts as up.
+owner_up(Entry) ->
+    Node = bondy_registry_entry:node(Entry),
+    Node =:= partisan:node() orelse partisan:is_connected(Node).
+
+%% @private
+%% The `#entry{}` carried by a registry cell's value (`bondy_registry_store:wrap/1`
+%% stores it under `entry`). Anything else is ignored defensively.
+registry_entry(#{entry := Entry}) ->
+    {ok, Entry};
+registry_entry(_) ->
+    error.
 
 %% @private
 %% security_users is realm-sharded, so its cell key is the G-1 realm-folded
@@ -302,4 +514,17 @@ unfold_grant_key(Key) ->
             RealmUri;
         _ ->
             error({malformed_grant_cell_key, Key})
+    end.
+
+%% @private
+%% security_group_members is realm-banded, so on the folding (`shared_shards`)
+%% core topology a membership cell key is `<<RealmUri, 0, EncodedFactKey>>`. The
+%% realm URI is NUL-free, so the first separator recovers it; the trailing
+%% band-tagged fact key is not needed, as invalidation is realm-wide.
+unfold_member_key(Key) ->
+    case binary:split(Key, <<0>>) of
+        [RealmUri, _EncFactKey] ->
+            RealmUri;
+        _ ->
+            error({malformed_member_cell_key, Key})
     end.

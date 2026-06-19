@@ -170,6 +170,9 @@ end#{
 -export_type([resource/0]).
 
 -export([authorize/2]).
+%% Exported for the legacy-backup import translator (bondy_export): the grant
+%% key must be encoded byte-identically to the live write path.
+-export([encode_key/1]).
 -export([authorize/3]).
 -export([externalize_grant/1]).
 -export([get_anonymous_context/1]).

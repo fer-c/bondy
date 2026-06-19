@@ -579,14 +579,29 @@ format_error(Reason, [{_M, _F, _As, Info} | _]) ->
 %% =============================================================================
 
 init([]) ->
-    %% Every time a node goes up/down we get an info message; on nodedown we
-    %% schedule a prune of that node's (remote) entries. With the registry on
-    %% bondy_db and AAE off there are no replicated remote entries yet, so the
-    %% prune is currently inert; it is the seam where the presence-FSM
-    %% SUSPEND/EVICT lands with oplog.aae (design D-7). The plum_db net-split
-    %% merge-veto machinery (`will_merge`/`on_merge` + the per-node merge-status
-    %% table) is retired with the cut over to bondy_db.
+    %% Cluster node up / down events drive the registry presence machine
+    %% (STORAGE_ARCHITECTURE §9.6). A peer's registrations reach this node's
+    %% bondy_db projection via anti-entropy and its routing trie via
+    %% `bondy_aae_reactor`; here we maintain their node-level liveness:
+    %%
+    %% - `nodedown(N)` SUSPENDs N — masks its entries (out of the routing trie,
+    %%   retained in the projection / per-node index) — and arms an EVICT timer.
+    %% - `nodeup(N)` RESUMEs N — unmasks its entries — and cancels the timer.
+    %% - EVICT (after the grace period, by the rendezvous-hashed cleanup peer)
+    %%   issues a replicated `clear` for a permanently-departed node's entries.
+    %%
+    %% Masking is derived from THIS node's Partisan view, so it needs no
+    %% replicated event; only cluster-wide removals (DELETE, owner self-clean,
+    %% EVICT) ride AAE. The plum_db net-split merge-veto machinery
+    %% (`will_merge`/`on_merge` + the per-node merge-status table) is retired.
     ok = partisan:monitor_nodes(true),
+
+    %% The owner self-cleanup invariant (§9.6.1): periodically DELETE this node's
+    %% own entries whose session is no longer live — the C2/C3 discriminator that
+    %% lets a rebooted node shed the stale registrations a peer would otherwise
+    %% RESUME. First sweep runs shortly after boot, once AAE has had a chance to
+    %% pull this node's pre-restart entries back.
+    _ = erlang:send_after(self_clean_boot_ms(), self(), self_clean),
 
     State = #state{
         start_ts = erlang:system_time(millisecond)
@@ -612,21 +627,50 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-handle_info({nodeup, _Node} = Event, State) ->
+handle_info({nodeup, Node} = Event, State) ->
+    %% A peer (re)connected within the grace period (presence RESUME, §9.6):
+    %% cancel its pending EVICT and unmask its entries back into the routing
+    %% trie. A node that rebooted empty (C3) will shed any now-stale entries via
+    %% the owner self-cleanup sweep on its own side.
     ?LOG_DEBUG(#{event => Event}),
-    {noreply, State};
+    State1 = cancel_evict(Node, State),
+    ok = resume(Node),
+    {noreply, State1};
 handle_info({nodedown, Node} = Event, State) ->
+    %% A peer disconnected (presence SUSPEND, §9.6): mask its entries for routing
+    %% immediately and arm an EVICT timer to GC them if it never returns.
     ?LOG_DEBUG(#{event => Event}),
-    Tref = erlang:send_after(5000, self(), {prune, Node}),
+    ok = suspend(Node),
+    Tref = erlang:send_after(evict_grace_ms(), self(), {evict, Node}),
     Timers = (State#state.timers)#{Node => Tref},
     {noreply, State#state{timers = Timers}};
-handle_info({prune_finished, _Node} = Event, State) ->
+handle_info({evict, Node} = Event, State) ->
+    %% The grace period elapsed (presence EVICT, §9.6). If the node is still gone
+    %% and this node is its rendezvous-hashed cleanup peer, issue a replicated
+    %% `clear` for each of its entries.
     ?LOG_DEBUG(#{event => Event}),
-    {noreply, State};
-handle_info({prune, Node} = Event, State) ->
-    %% A connection with node has gone down
+    Timers = maps:remove(Node, State#state.timers),
+    ok = maybe_evict(Node),
+    {noreply, State#state{timers = Timers}};
+handle_info(self_clean = Event, State) ->
+    %% Owner self-cleanup invariant (§9.6.1). Defensive: a sweep walks the realm
+    %% list and the registry projection, none of which may take the registry
+    %% server down — on any error we simply retry at the steady cadence.
     ?LOG_DEBUG(#{event => Event}),
-    ok = prune(Node),
+    Cleaned =
+        try
+            self_clean()
+        catch
+            Class:Reason:Stacktrace ->
+                ?LOG_WARNING(#{
+                    description => "Registry owner self-cleanup sweep failed",
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                }),
+                0
+        end,
+    _ = erlang:send_after(self_clean_next_ms(Cleaned), self(), self_clean),
     {noreply, State};
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
@@ -1202,72 +1246,192 @@ do_remove_all({[{_EntryKey, Entry} | T], Cont}, SessionId, Fun, Opts, Acc) ->
     end.
 
 %% @private
-prune(Node) when is_atom(Node) ->
-    Nodestring = atom_to_binary(Node, utf8),
-    %% We prune all entries from the trie and plum_db
-    Index = bondy_registry_partition:remote_index(Nodestring),
-    %% TODO use bondy_worker pool
-    From = self(),
-    Fun = fun() -> do_prune(Index, Node, From) end,
-    {_Pid, _Ref} = erlang:spawn_monitor(Fun),
+%% Presence SUSPEND (§9.6): mask every entry owned by a now-disconnected node so
+%% it is no longer selectable for routing, while retaining it for a possible
+%% RESUME. Runs off the registry server (see run_remote_task/2).
+suspend(Node) ->
+    run_remote_task(Node, fun(Partition, Entry) ->
+        _ = bondy_registry_partition:mask(Partition, Entry),
+        ok
+    end).
+
+%% @private
+%% Presence RESUME (§9.6): unmask a reconnected node's entries back into the
+%% routing trie. Entries the node has since shed (owner self-clean) are no longer
+%% in this node's projection, so the per-entry lookup skips them.
+resume(Node) ->
+    run_remote_task(Node, fun(Partition, Entry) ->
+        _ = bondy_registry_partition:unmask(Partition, Entry),
+        ok
+    end).
+
+%% @private
+%% Presence EVICT (§9.6): the grace period elapsed. If the node is still gone and
+%% this node is its rendezvous-hashed cleanup peer, replicate a `clear` for each
+%% of its entries — the clear converges cluster-wide and every node's merge
+%% reactor drops it from its trie.
+maybe_evict(Node) ->
+    case partisan:is_connected(Node) of
+        true ->
+            %% Reconnected between the timer firing and now; nodeup handled it.
+            ok;
+        false ->
+            case is_evict_owner(Node) of
+                true ->
+                    run_remote_task(Node, fun(Partition, Entry) ->
+                        Type = bondy_registry_entry:type(Entry),
+                        _ = bondy_registry_partition:remove(Partition, Entry),
+                        maybe_flush_callee_promises(Type, Entry)
+                    end);
+                false ->
+                    ok
+            end
+    end.
+
+%% @private
+%% Rendezvous hashing (LRW): the surviving node with the highest weight for the
+%% departed node is its single cleanup peer, so the EVICT `clear`s are issued
+%% once cluster-wide rather than once per surviving node. Self is in the
+%% candidate set.
+is_evict_owner(Node) ->
+    Self = partisan:node(),
+    case lrw:top(Node, [Self | partisan:nodes()], 1) of
+        [Self] ->
+            true;
+        _ ->
+            false
+    end.
+
+%% @private
+%% Cancel a node's pending EVICT timer (it reconnected within the grace period).
+cancel_evict(Node, #state{timers = Timers} = State) ->
+    case maps:take(Node, Timers) of
+        {Tref, Timers1} ->
+            _ = erlang:cancel_timer(Tref),
+            State#state{timers = Timers1};
+        error ->
+            State
+    end.
+
+%% @private
+%% Walk a node's remote entries (enumerated via the per-node remote index) and
+%% apply `EntryFun(Partition, Entry)` to each, resolving the full entry from its
+%% realm partition. Runs in a spawned process so a large membership transition
+%% does not block the registry server; the per-entry index ops are process-safe.
+run_remote_task(Node, EntryFun) ->
+    _ = erlang:spawn(fun() -> foreach_remote_entry(Node, EntryFun) end),
     ok.
 
 %% @private
-do_prune(Index, Node, From) when is_atom(Node) ->
-    case bondy_registry_remote_index:match(Index, Node, 100) of
-        ?EOT ->
-            From ! {prune_finished, Node};
-        {L, ?EOT} ->
-            ok = do_prune(Index, Node, From, L),
-            From ! {prune_finished, Node};
-        {L, ETSCont} ->
-            ok = do_prune(Index, Node, From, L),
-            do_prune(Index, Node, From, ETSCont)
+%% Apply `EntryFun(Partition, Entry)` to each entry owned by `Node`. The set of a
+%% node's entries is taken from the AAE reactor's tombstone table (every peer
+%% registration this node merged is recorded there), which is the reliable
+%% by-owner source — the registry's per-node index is not populated for
+%% AAE-merged entries.
+foreach_remote_entry(Node, EntryFun) ->
+    lists:foreach(
+        fun(Entry) ->
+            Partition = pick_partition(Entry),
+            EntryFun(Partition, Entry)
+        end,
+        bondy_aae_reactor:remote_entries_of(Node)
+    ).
+
+%% @private
+%% Owner self-cleanup invariant (§9.6.1): DELETE this node's own registry entries
+%% whose session is no longer live. On a clean reboot the ephemeral projection
+%% starts empty and AAE pulls this node's pre-restart entries back; none has a
+%% live session, so they are cleared — which is what stops a peer from RESUMEing
+%% dead registrations. A `clear` replicates, so peers drop them via the merge
+%% reactor. Returns the number of entries cleaned (drives the sweep cadence).
+self_clean() ->
+    lists:foldl(
+        fun(Realm, Acc) ->
+            RealmUri = bondy_realm:uri(Realm),
+            Acc +
+                self_clean_table(
+                    ?BONDY_DB_REGISTRATION_TAB, registration, RealmUri
+                ) +
+                self_clean_table(
+                    ?BONDY_DB_SUBSCRIPTION_TAB, subscription, RealmUri
+                )
+        end,
+        0,
+        bondy_realm:list()
+    ).
+
+%% @private
+self_clean_table(TabName, Type, RealmUri) ->
+    case bondy_namespace_catalog:table(TabName) of
+        undefined ->
+            0;
+        Table ->
+            case bondy_db:list(Table, RealmUri) of
+                {ok, Rows} ->
+                    lists:foldl(
+                        fun(Row, Acc) ->
+                            Acc + maybe_self_clean(Type, RealmUri, Row)
+                        end,
+                        0,
+                        Rows
+                    );
+                {error, _} ->
+                    0
+            end
     end.
 
 %% @private
-do_prune(_Index, _Node, _From, L) when is_list(L) ->
-    %% Delete them from Plum_db
-    lists:foreach(
-        fun({Type, EntryKey}) ->
-            Partition = pick_partition(EntryKey),
-            Result = bondy_registry_partition:dirty_delete(
-                Partition, Type, EntryKey
-            ),
+maybe_self_clean(Type, RealmUri, {_Key, #{entry := Entry}, _Hlc}) ->
+    case bondy_registry_entry:is_local(Entry) andalso is_stale_session(Entry) of
+        true ->
+            Partition = pick_partition(RealmUri),
+            _ = bondy_registry_partition:remove(Partition, Entry),
+            _ = maybe_flush_callee_promises(Type, Entry),
+            1;
+        false ->
+            0
+    end;
+maybe_self_clean(_Type, _RealmUri, _Row) ->
+    0.
 
-            case Result of
-                {ok, Entry} ->
-                    maybe_flush_callee_promises(Type, Entry);
-                {error, notfound} ->
-                    ?LOG_WARNING(#{
-                        description =>
-                            "Inconsistency between registry indices "
-                            "and plum_db.",
-                        entry_type => Type,
-                        entry_key => EntryKey
-                    });
-                {error, Reason} ->
-                    ?LOG_ERROR(#{
-                        description => "Error while pruning entry",
-                        entry_type => Type,
-                        entry_key => EntryKey,
-                        reason => Reason
-                    })
-            end
-        end,
-        L
-    );
-do_prune(Index, Node, From, ETSCont0) ->
-    case bondy_registry_remote_index:match(ETSCont0) of
-        ?EOT ->
-            From ! {prune_finished, Node};
-        {L, ?EOT} ->
-            ok = do_prune(Index, Node, From, L),
-            From ! {prune_finished, Node};
-        {L, ETSCont} ->
-            ok = do_prune(Index, Node, From, L),
-            do_prune(Index, Node, From, ETSCont)
+%% @private
+%% A session-bound entry whose session is gone is stale. An entry with no session
+%% (a callback / internal handler) is tied to node lifecycle, not a session, so it
+%% is left for clean shutdown to remove.
+is_stale_session(Entry) ->
+    case bondy_registry_entry:session_id(Entry) of
+        undefined ->
+            false;
+        SessionId ->
+            bondy_session:lookup(SessionId) =:= {error, not_found}
     end.
+
+%% @private
+%% Grace before a departed node's entries are EVICTed (default 24h). A node that
+%% reconnects within the grace RESUMEs instead.
+evict_grace_ms() ->
+    application:get_env(
+        bondy_router, registry_presence_evict_after, timer:hours(24)
+    ).
+
+%% @private
+%% Delay from boot to the first owner self-cleanup sweep, giving AAE time to pull
+%% this node's pre-restart entries back.
+self_clean_boot_ms() ->
+    application:get_env(
+        bondy_router, registry_presence_self_clean_boot, timer:seconds(5)
+    ).
+
+%% @private
+%% Cadence of the owner self-cleanup sweep: while a sweep is still shedding stale
+%% entries (a node that just rebooted is converging) keep it tight; once a sweep
+%% finds nothing, fall back to the steady safety-net interval (default 5 min).
+self_clean_next_ms(Cleaned) when Cleaned > 0 ->
+    timer:seconds(5);
+self_clean_next_ms(_) ->
+    application:get_env(
+        bondy_router, registry_presence_self_clean_interval, timer:minutes(5)
+    ).
 
 %% @private
 -doc """

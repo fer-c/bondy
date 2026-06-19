@@ -93,11 +93,23 @@ skip-if-older check on `pre_bootstrap`.
     | {ok, no_snapshot}.
 
 ?DOC("""
-Opens a catalogue-snapshot session on the given instance using the
-default bucket (`<<>>`). See `init/2` for bucket override.
+Opens a catalogue-snapshot session on the given instance, walking EVERY
+table on the shard. A collapsed per-shard instance carries several tables,
+each under its own entity-type bucket (and, on a memory topology, its own
+projection handle); the session streams them all in one cursor, advancing
+from one table to the next as each table's keyspace is exhausted
+(`bondy_oplog_catalogue_cursor:next_target/1`). A single-table instance (no
+per-table bucket on its registry entry) falls back to the legacy
+single-bucket walk over the default bucket (`<<>>`). See `init/2` to snapshot
+one explicit bucket.
 """).
 init(InstanceId) ->
-    init(InstanceId, default_bucket()).
+    case bondy_oplog_instance:crdt_module(InstanceId) of
+        Mod when is_atom(Mod), Mod =/= undefined ->
+            {ok, no_snapshot};
+        undefined ->
+            init_catalogue_multi(InstanceId)
+    end.
 
 -spec init(instance_id(), Bucket :: binary()) ->
     {ok, {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor()}}
@@ -178,6 +190,75 @@ init_catalogue(InstanceId, Bucket) ->
     end.
 
 %% @private
+%% Multi-target init: snapshot every table on the shard. The target set is
+%% derived from the registry (every primary entry sharing the instance's id,
+%% each tagged with its `cell_apply_bucket`), so a collapsed per-shard instance
+%% streams all of its tables; a single-table instance with no per-table bucket
+%% falls back to the legacy single-bucket walk.
+init_catalogue_multi(InstanceId) ->
+    case bondy_oplog_registry:applier_pid(InstanceId) of
+        undefined ->
+            {ok, no_snapshot};
+        ApplierPid ->
+            case bondy_oplog_applier:cell_apply_target(ApplierPid) of
+                undefined ->
+                    {ok, no_snapshot};
+                {ok, {NS, Index, Shard}} ->
+                    Targets = build_targets(InstanceId, NS),
+                    init_with_targets(InstanceId, NS, Index, Shard, Targets)
+            end
+    end.
+
+%% @private
+%% Every `(NS, Bucket)` target on the shard: one per primary table that carries
+%% a `cell_apply_bucket` (a collapsed per-shard instance). When none do — a
+%% single-table or raw registration — fall back to the founding namespace and
+%% the default bucket, which is exactly the legacy single-target walk.
+build_targets(InstanceId, FoundingNS) ->
+    Entries = bondy_oplog_core_registry:primary_entries_for_instance(
+        InstanceId
+    ),
+    Tagged = lists:filtermap(
+        fun(E) ->
+            case bondy_oplog_core_registry:entry_cell_apply_bucket(E) of
+                undefined ->
+                    false;
+                Bucket ->
+                    {NS, _Index, _Shard} =
+                        bondy_oplog_core_registry:entry_key(E),
+                    {true, {NS, Bucket}}
+            end
+        end,
+        Entries
+    ),
+    case Tagged of
+        [] -> [{FoundingNS, default_bucket()}];
+        _ -> lists:usort(Tagged)
+    end.
+
+%% @private
+%% The watermark is read from the founding namespace (it only seeds that
+%% table's freshness mark on finalize; each table's own high-water is advanced
+%% cell-by-cell as the install materialises its cells). The first target is the
+%% current scan position; the rest ride on the cursor for `next_target/1`.
+init_with_targets(InstanceId, FoundingNS, Index, Shard, Targets) ->
+    [{NS1, Bucket1} | Rest] = Targets,
+    case bondy_oplog_core_registry:high_water_hlc(FoundingNS, Index, Shard) of
+        not_found ->
+            {ok, no_snapshot};
+        {ok, no_watermark} ->
+            Cursor = bondy_oplog_catalogue_cursor:mint(
+                InstanceId, NS1, Index, Shard, Bucket1, 0, Rest
+            ),
+            {ok, {0, Cursor}};
+        {ok, Watermark} when is_integer(Watermark) ->
+            Cursor = bondy_oplog_catalogue_cursor:mint(
+                InstanceId, NS1, Index, Shard, Bucket1, Watermark, Rest
+            ),
+            {ok, {Watermark, Cursor}}
+    end.
+
+%% @private
 init_with_target(InstanceId, NS, Index, Shard, Bucket) ->
     case bondy_oplog_core_registry:high_water_hlc(NS, Index, Shard) of
         not_found ->
@@ -228,8 +309,18 @@ do_next(Cursor, CState) ->
                 Adapter:range(Handle, Bucket, Low, High, #{limit => BatchSize})
             of
                 {ok, []} ->
-                    ok = bondy_oplog_catalogue_cursor:discard(Cursor),
-                    {ok, {done, []}};
+                    %% Current target's keyspace exhausted. Advance to the next
+                    %% table on the shard, if any, and scan it; only when no
+                    %% targets remain is the whole shard done.
+                    case bondy_oplog_catalogue_cursor:next_target(Cursor) of
+                        done ->
+                            ok = bondy_oplog_catalogue_cursor:discard(Cursor),
+                            {ok, {done, []}};
+                        not_found ->
+                            {error, cursor_expired};
+                        {ok, NextState} ->
+                            do_next(Cursor, NextState)
+                    end;
                 {ok, Pairs} ->
                     Cells = [{Bucket, K, F} || {K, F} <- Pairs],
                     {LastK, _} = lists:last(Pairs),

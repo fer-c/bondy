@@ -276,9 +276,27 @@ sequenceDiagram
 The session is short-lived and asynchronous. It does not block
 writes, and a failing session is just retried on the next tick.
 
-The transport is pluggable (`bondy_oplog_transport` behaviour). Two
-implementations ship: `bondy_oplog_transport_disterl` (Distributed
-Erlang) and `bondy_oplog_transport_inline` (same-VM, used for tests).
+A successful round does one more thing: it **advances the shard's
+freshness signal**. Each `(NS, primary, Shard)` carries a wait-free
+`ae_atomics` timestamp that `bump_ae_on_sync/2` stamps with the current
+wall-clock time at the end of every completed round — including an
+*empty* round, where the peer had nothing new. That heartbeat is what
+lets a low-churn shard prove it is still in contact with its peers even
+when no event has changed; the read side reads it as the freshness fence
+([chapter 03](03_bondy_db.md)). Whether a round is allowed to certify
+freshness is governed by an **isolation policy** (`refuse` / `proceed` /
+`quorum`): a node that cannot reach a peer does not get to declare its
+own data fresh under the default `refuse`. The policy lives here, on the
+freshness-production side, so the read path stays a single atomic read.
+
+The transport is pluggable (`bondy_oplog_transport` behaviour). Three
+implementations ship: **`bondy_oplog_transport_partisan`** — the
+production transport, which carries sync traffic over the same Partisan
+overlay Bondy already uses for its cluster membership and messaging —
+`bondy_oplog_transport_disterl` (Distributed Erlang), and
+`bondy_oplog_transport_inline` (same-VM, used for tests). Bondy runs on
+Partisan, not Distributed Erlang, so a Bondy deployment uses the
+Partisan transport.
 
 ## Replication is anti-entropy only
 
@@ -466,7 +484,10 @@ Implementation:
 - `bondy_oplog_sync_scheduler.erl` — single global scheduler;
   `run_tick/1`, `dispatch_for/2`.
 - `bondy_oplog_sync_session.erl` — `run/3`, `bootstrap/3`,
-  `pull_until_complete`.
-- `bondy_oplog_transport.erl` (+ `_disterl.erl` / `_inline.erl`) —
-  the transport behaviour and its two implementations.
+  `pull_until_complete`; `bump_ae_on_sync/2` and
+  `maybe_bump_ae_isolated/1` (the per-round freshness heartbeat) and
+  `should_certify_freshness/1` (the isolation policy).
+- `bondy_oplog_transport.erl` (+ `_partisan.erl` / `_disterl.erl` /
+  `_inline.erl`) — the transport behaviour and its three
+  implementations; Bondy uses the Partisan transport.
 - `bondy_oplog_validator.erl` (+ `_crypto.erl` / `_trust.erl`).

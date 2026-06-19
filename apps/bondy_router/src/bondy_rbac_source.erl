@@ -112,6 +112,9 @@ each key and filters. Storage-only (no change reactor).
 -export([add/2]).
 -export([add/3]).
 -export([authmethod/1]).
+%% Exported for the legacy-backup import translator (bondy_export): the source
+%% key must be encoded byte-identically to the live write path.
+-export([encode_key/1]).
 -export([cidr/1]).
 -export([list/1]).
 -export([list/2]).

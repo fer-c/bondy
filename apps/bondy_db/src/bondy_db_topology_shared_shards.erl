@@ -92,6 +92,7 @@ per_entity, since the Bookie already partitions by shard.
 -export([bucket_for/3]).
 -export([index_clear_scope/2]).
 -export([primary_cell_scope/1]).
+-export([instances_strategy/0]).
 -export([close_table/2]).
 -export([shutdown/1]).
 
@@ -154,6 +155,14 @@ facade.
 """.
 bucket_for(EntityType, Realm, _TableState) when is_binary(Realm) ->
     atom_to_binary(EntityType, utf8).
+
+-doc """
+All tables on a shard share one oplog instance, routed by the entity-type
+`Bucket` (`bucket_for/3` is realm-independent and `route/2` hands back one shared
+Bookie per shard). See `bondy_db_topology:instances_strategy/0`.
+""".
+instances_strategy() ->
+    per_shard.
 
 -doc """
 Shared-shards co-locates every entity type in the shared Bookies, so an index

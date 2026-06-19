@@ -392,8 +392,11 @@ ets_backend_e2e({Db, _Sup, _Dir}) ->
     ok = bondy_db:apply(T, <<"r1">>, <<"alice">>, {set, H2, <<"v2">>}),
     ?assertEqual({ok, {<<"v2">>, H2}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     %% Single-shard range over the shard `alice` lives in (the facade
-    %% does not scatter-merge; mirror `range_returns_states`).
-    Shard = erlang:phash2({<<"r1">>, <<"alice">>}, 4),
+    %% does not scatter-merge; mirror `range_returns_states`). Resolve the
+    %% shard via `shard_for/3` rather than hardcoding the placement formula —
+    %% memory now buckets by entity type and folds the realm into the key, so
+    %% the legacy `phash2({Realm, Key})` no longer matches.
+    Shard = bondy_db:shard_for(T, <<"r1">>, <<"alice">>),
     {ok, Rows} = bondy_db:range(
         T, <<"r1">>, <<"a">>, <<"z">>, #{shard => Shard, limit => 100}
     ),

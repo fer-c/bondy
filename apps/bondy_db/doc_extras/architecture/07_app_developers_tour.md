@@ -10,9 +10,9 @@ This one walks through it from your end of the API. The question we
 answer: **given a piece of state you want to replicate, how do you
 turn it into a `bondy_db` table?**
 
-We use the twelve tables Bondy Router maintains today as the worked
-example. By the end, every table will have a one-paragraph
-justification for its CRDT and its topology.
+We use the tables Bondy Router maintains as the worked example. By the
+end, every table will have a one-paragraph justification for its CRDT and
+the DB it lives in.
 
 ## 1. The model, in one picture
 
@@ -92,11 +92,13 @@ flowchart TB
     Q4 -->|no| LWW
 ```
 
-If you are migrating from a fold-era table, the retired types map
-onto survivors like this (a `fold_module` label with a twin still
-works unchanged — it resolves to the byte-identical native CRDT):
+Older material refers to a set of state-based "fold" types that no longer
+exist as separate modules. If you meet one of those names, it maps onto a
+current CRDT like this (the common labels — `lww_register`, `g_set`,
+`pn_counter`, `g_counter` — are still accepted as `fold_module`
+shorthands and resolve to the byte-identical native CRDT):
 
-| retired (no twin) | use instead |
+| older name | use instead |
 |---|---|
 | `presence_basic` | `lww_register` (presence is a register write) |
 | `ttl_presence` | `lww_register` + application-level expiry |
@@ -143,71 +145,75 @@ route to shards and how shards map to Bookies.
 
 ```mermaid
 flowchart LR
-    SHBY["plum_db shard_by"]
-    PFX["shard_by = prefix<br/>(shared prefix lives on one shard)"]
+    SHBY["bondy_db shard_by<br/>(per-table key routing)"]
+    REALM["shard_by = realm<br/>(a realm's cells co-locate)"]
     KEY["shard_by = key<br/>(hash each key independently)"]
 
-    TOPO["bondy_db topology"]
+    TOPO["bondy_db topology<br/>(per-DB)"]
+    SHARED["shared_shards<br/>N shards, hash to one"]
+    MEM["memory<br/>in-RAM, ephemeral tables"]
     PERE["per_entity<br/>one Bookie per (EntityType, Realm)"]
-    SHARED["shared_shards<br/>N Bookies, hash to one"]
     SINGLE["single_bookie<br/>one Bookie per node"]
 
-    SHBY --> PFX
+    SHBY --> REALM
     SHBY --> KEY
-    PFX --> PERE
-    PFX --> SHARED
-    KEY --> SHARED
+    TOPO --> SHARED
+    TOPO --> MEM
+    TOPO --> PERE
     TOPO --> SINGLE
 ```
 
 For app developers, the recommendation is short:
 
-- **Default to `bondy_db_topology_shared_shards`.** Single Bookie
-  pool, predictable footprint, every table multiplexes onto the
-  same physical storage. This is what you want unless a specific
-  table needs isolation.
-- **Reach for `bondy_db_topology_per_entity` when you need
-  operational isolation** — auth grants and security sources are
-  the canonical cases. Cluster ops can quiesce a single
-  `(EntityType, Realm)` Bookie without touching the registry.
+- **Default to `bondy_db_topology_shared_shards` for durable state.** One
+  shard pool, predictable footprint, every table multiplexes onto the
+  same physical storage. This is what Bondy uses for its `core` DB.
+  Because the realm is folded into the cell key here
+  ([chapter 03](03_bondy_db.md#realm-folding)), tenants share shards
+  without colliding.
+- **Use `bondy_db_topology_memory` for ephemeral, session-bound
+  state.** It is what the `registry` DB runs on: in-RAM projection, no
+  disk, the data re-converges from peers on restart.
+- **`per_entity` is available when you need operational isolation** — it
+  gives one Bookie per `(EntityType, Realm)`, so ops can quiesce or
+  migrate a single realm's storage without touching the rest. Bondy does
+  not use it today; everything durable shares the `core` DB.
 - **`single_bookie` is for tests and single-node deployments.**
-  Don't use it in production unless you've measured that you
-  cannot saturate a single Bookie.
 
-`shard_count` sizing rule-of-thumb: **start at the number of peer
-nodes you expect, double on measurement**. Each shard runs its own
-AE sessions; the cluster-wide AE bandwidth is roughly
-`shard_count × write_rate × peer_count`. Eight is a fine starting
-point for most Bondy tables; tickets and tokens benefit from more
-(32–64) because they have high write churn and low per-write
-contention.
+In Bondy, **`shard_count` is a per-DB choice**, not per-table: the `core`
+DB sizes every table the same via `oplog.core.shard_count` (default 16).
+The substrate itself accepts a per-table `shard_count` if a deployment
+wants to size a hot table independently. The sizing trade-off is real
+either way: each shard runs its own AE sessions, so cluster-wide AE
+bandwidth is roughly `shard_count × write_rate × peer_count` — start near
+your peer count and raise it only on measurement. High-churn,
+low-contention tables (tickets, tokens) are the ones that reward more
+shards, which is why they shard by key.
 
 ## 4. The Bondy Router tour
 
-The current Bondy state lives in twelve plum_db prefixes. Mapped
-onto `bondy_db`, each becomes a table. Below, every row gives a
-sample `open_table/3` call, the CRDT choice, the topology choice,
-and the one-line "why".
+Bondy Router declares its state to the substrate through a single
+catalogue (`bondy_namespace_catalog`), which provisions every table at
+boot. Below, each table gets a sample `open_table/3` call, the CRDT it
+runs, the DB it lives in, and the one-line "why". The tables divide
+between **two DBs**: a durable `core` DB (leveled, `shared_shards`) for
+everything that must survive a restart, and an ephemeral `registry` DB
+(in-RAM, `memory` topology) for session-bound routing state.
 
-> **As-built note (PR-Z).** The substrate is now native
-> operation-based CRDTs; the state-based **fold** modules were retired
-> (see [chapter 05](05_crdt_model.md)). The mappings below are
-> illustrative. A legacy `fold_module => lww_register` / `pn_counter` /
-> `g_set` label still works (it resolves to the byte-identical CRDT
-> twin), but the folds with **no twin** were deleted —
-> `orset`/`strict_register`/`ttl_presence`/`presence_basic`/`map_of_fields`
-> no longer exist. Use the surviving CRDTs: `lww_register` for
-> register/presence-style cells, `g_set` for grow-only sets, the native
-> add-wins map (`bondy_oplog_crdt_aw_map`) for observed-remove
-> set/map semantics, `pn_counter`/`g_counter` for counters, and
-> `mv_register` where concurrent siblings must survive.
+> **One CRDT vocabulary.** The substrate has a single catalogue of native
+> operation-based CRDTs ([chapter 05](05_crdt_model.md)); there are no
+> separate state-based "fold" modules. A table names its CRDT with a
+> `crdt_module`, or a short `fold_module` label for the common ones
+> (`lww_register`, `g_set`, `pn_counter`, `g_counter`). The catalogue
+> maps each table's declared *fold class* to a CRDT: `lww` →
+> `lww_register`, `mv` → `mv_register`, `aw` → `aw_map`.
 
-All the tables below live in one DB. Open it once with a **default
-`fold_module`** — the required type label, which every table inherits and
-each table's `crdt_module` overrides:
+The durable tables live in one DB, opened once with a **default
+`fold_module`** — the required type label every table inherits and each
+table's `crdt_module` overrides:
 
 ```erlang
-{ok, Db} = bondy_db:open(bondy, #{
+{ok, Core} = bondy_db:open(core, #{
     topology    => bondy_db_topology_shared_shards,
     fold_module => lww_register   %% required default; per-table crdt_module wins
 }).
@@ -216,160 +222,233 @@ each table's `crdt_module` overrides:
 (`open_table/3` requires a `fold_module`; supplying it once at the DB level
 means the per-table calls below need only their `crdt_module`.)
 
+> **As-built vs. design target.** Several tables below name `lww_register`
+> where their data model would ideally surface concurrent writes as
+> siblings (`mv_register`) or as an observed-remove relation (`aw_map`).
+> That is deliberate: those richer CRDTs only differ from `lww` when two
+> nodes write the *same* cell concurrently, which requires anti-entropy
+> to be exchanging those writes. Bondy runs them as `lww` until that
+> concurrency is enabled, then graduates the declared class. Where a
+> table does this, the tour names both the shipped CRDT and the design
+> target, and why the gap is safe.
+
 ### 4.1 Registrations and subscriptions
 
+These two are the only tables in the **ephemeral `registry` DB**, opened
+on the in-RAM `memory` topology with the fused, mem-WAL stack:
+
 ```erlang
-{ok, Regs} = bondy_db:open_table(Db, bondy_registration, #{
-    crdt_module => bondy_oplog_crdt_lww_register,
-    shard_count => 8
+{ok, Registry} = bondy_db:open(registry, #{
+    topology    => bondy_db_topology_memory,
+    fold_module => lww_register
 }).
-{ok, Subs} = bondy_db:open_table(Db, bondy_subscription, #{
+{ok, Regs} = bondy_db:open_table(Registry, bondy_registration, #{
     crdt_module => bondy_oplog_crdt_lww_register,
-    shard_count => 8
+    indexes     => [#{name => by_session, extract => [session_id]}]
+}).
+{ok, Subs} = bondy_db:open_table(Registry, bondy_subscription, #{
+    crdt_module => bondy_oplog_crdt_lww_register,
+    indexes     => [#{name => by_session, extract => [session_id]}]
 }).
 ```
 
-WAMP registrations and subscriptions are keyed by
-`{Realm, Uri, SessionId, RegistrationId}`. No two writers ever
-target the same cell — uniqueness is structural. The cell is
-present (a `set` value) or withdrawn (a `clear`); the highest-HLC
-write wins. `lww_register` matches that. (The dedicated `presence`
-CRDT was retired in PR-Z — it had no production consumer; a
-set/clear register covers the same need.) RAM-only is fine because
-session-bound state disappears when the session closes; no recovery
-from disk needed.
+A WAMP registration or subscription is bound to a session: when the
+session's transport closes, the entry is gone. Persisting it would only
+resurrect dead, unroutable entries on restart, so the table is
+**ephemeral** — RAM projection, in-memory WAL, no disk anywhere
+([chapter 03](03_bondy_db.md#projection-backend-durable-vs-ephemeral)).
+After a restart the node starts empty and re-converges live entries from
+peers.
+
+The cell is keyed by a random, realm-unique `entry_id` and holds a thin
+record; present (a `set`) or withdrawn (a `clear`), highest-HLC wins, so
+`lww_register` fits. The `by_session` secondary index is what makes
+session teardown cheap: closing a session must remove *all* of its
+entries, and the index turns that from a realm-wide scan into a bounded
+reverse lookup. (The hot routing path is the in-memory trie, not this
+table; the table is the trie's replicated, restart-rebuilt backing.) A
+**presence FSM** — masking a peer's entries while that peer is
+unreachable rather than reading them as live — is the design target for
+this table once anti-entropy is exchanging cross-node entries; today,
+with replication of the registry off, every entry is locally owned and a
+set/clear register is enough.
 
 ### 4.2 Realm
 
 ```erlang
-{ok, Realms} = bondy_db:open_table(Db, bondy_realm, #{
+{ok, Realms} = bondy_db:open_table(Core, bondy_realm, #{
     crdt_module => bondy_oplog_crdt_lww_register,
     shard_count => 4
 }).
 ```
 
 A realm is a single record with security settings, allowed
-authentication methods, default groups, etc. Today Bondy reads,
-modifies, and writes the whole record. `lww_register` matches that
-read-modify-write contract exactly. Same-HLC ties break
-deterministically by lex order on the encoded payload, so two
-concurrent realm edits converge to the same winner on every node.
+authentication methods, default groups, etc. Bondy reads, modifies, and
+writes the whole record, so `lww_register` matches that read-modify-write
+contract exactly. Same-HLC ties break deterministically by lex order on
+the encoded payload, so two concurrent realm edits converge to the same
+winner on every node.
 
-If field-level concurrent edits become a real problem (rare),
-splitting into an `aw_map` (one sub-key per field) is a one-table
-refactor.
+Unlike the per-realm security tables, this one is a **global registry**:
+every realm shares a single constant band, keyed by its URI, so a
+`bondy_db:list/2` over that band enumerates every realm cluster-wide. It
+is also a `publish => true` table — a peer deleting a realm publishes a
+*merge* event, which this node's reactor turns into closing every local
+session on that realm (§5).
+
+If field-level concurrent edits become a real problem (rare), splitting
+into an `aw_map` (one sub-key per field) is a one-table refactor.
 
 ### 4.3 Users
 
 ```erlang
-{ok, Users} = bondy_db:open_table(Db, security_users, #{
+{ok, Users} = bondy_db:open_table(Core, security_users, #{
     crdt_module => bondy_oplog_crdt_lww_register,
     shard_count => 8
 }).
 ```
 
 Same pattern as realms. A user record holds display_name,
-authorized_keys, meta, etc. Today the whole record is replaced on
-every write. `lww_register` is the right shape. The user's group
-membership is **not** stored in this record (see 4.4).
+authorized_keys, groups, meta, etc. The whole record is replaced on every
+write, so `lww_register` is the right shape. Like realms it is `publish
+=> true`: a peer deleting a user publishes a merge event, and this node's
+reactor closes that user's local sessions (§5).
+
+Group membership lives **in this record** (`user.groups`), and a native
+multi-valued `by_group` secondary index over that field
+(`extract => [groups]`) answers the reverse question — "which users are
+in group G" — without scanning every user. The forward write stays a
+plain `lww_register` record replace; the index is maintained for free
+from the old→new diff ([chapter 03](03_bondy_db.md#secondary-indexes)).
+See 4.4 for when membership graduates to its own table.
 
 ### 4.4 Groups and group memberships
 
 ```erlang
-{ok, Groups} = bondy_db:open_table(Db, security_groups, #{
+{ok, Groups} = bondy_db:open_table(Core, security_groups, #{
     crdt_module => bondy_oplog_crdt_lww_register,
     shard_count => 4
 }).
-{ok, Members} = bondy_db:open_table(Db, security_group_members, #{
+{ok, Members} = bondy_db:open_table(Core, security_group_members, #{
     crdt_module => bondy_oplog_crdt_aw_map,
     shard_count => 8
 }).
 ```
 
-This is the one table-shape change from plum_db. Today
-`security_groups` stores the group record **with the members list
-inline**, replaced LWW on every membership change. That works for
-small, slowly-changing groups but loses concurrent member updates
-under contention.
+The group record — name, meta, default policies — is `lww_register` on
+`security_groups`. **Membership** is the interesting part, and it lives
+in two places at two maturity levels.
+
+Today, the authoritative membership is the `user.groups` field on the
+user record (§4.3), with the `by_group` index serving the reverse "who is
+in group G" query. A membership change is therefore an `lww_register`
+write to *one user*, which is exactly right while a user's groups are
+edited by one writer at a time.
+
+`security_group_members` is the **design target** for when that stops
+being true. Modelled as the native add-wins map
+(`bondy_oplog_crdt_aw_map`), it makes membership a first-class relation
+whose concurrent adds and removes converge by observed-remove semantics —
+a concurrent add survives a remove that did not observe it
+([chapter 05](05_crdt_model.md)). The table is declared and provisioned,
+but stays dormant until anti-entropy is exchanging concurrent membership
+edits; an add-wins map only differs from the forward `lww` write under
+exactly that concurrency.
 
 ```mermaid
 flowchart LR
-    OLD["plum_db today<br/>security_groups<br/>(record + members list, lww)"]
-    NEW1["bondy_db<br/>security_groups<br/>(record minus members, lww_register)"]
-    NEW2["bondy_db<br/>security_group_members<br/>(membership relation, aw_map)"]
+    FWD["security_users<br/>user.groups (lww_register)<br/>+ by_group reverse index"]
+    AW["security_group_members<br/>(membership relation, aw_map)<br/>design target — dormant"]
 
-    OLD -->|"split"| NEW1
-    OLD -->|"+"| NEW2
+    FWD -->|"graduates under<br/>concurrent membership edits"| AW
 ```
 
-The migration: keep the group record in `security_groups` with
-`lww_register` (name, meta, default policies); move membership to
-a new `security_group_members` table with the native add-wins map
-(`bondy_oplog_crdt_aw_map`). Concurrent adds and removes converge via
-its observed-remove (add-wins) semantics — a concurrent add survives a
-remove that did not observe it ([chapter 05](05_crdt_model.md)).
-
-This is the recommendation for Bondy: **memberships scale better as a
-dedicated add-wins table** than as a list inside an LWW record.
+The lesson generalises: **memberships scale better as a dedicated
+add-wins relation** than as a list inside an LWW record — but the move
+earns its cost only once concurrent multi-writer edits are real.
 
 ### 4.5 Grants (user and group)
 
 ```erlang
-{ok, UserGrants} = bondy_db:open_table(Db, security_user_grants, #{
-    crdt_module => bondy_oplog_crdt_mv_register,
-    shard_count => 8
+{ok, UserGrants} = bondy_db:open_table(Core, security_user_grants, #{
+    crdt_module    => bondy_oplog_crdt_lww_register,
+    aggregate_root => leading_col,
+    indexes        => grant_indexes()
 }).
-{ok, GroupGrants} = bondy_db:open_table(Db, security_group_grants, #{
-    crdt_module => bondy_oplog_crdt_mv_register,
-    shard_count => 4
+{ok, GroupGrants} = bondy_db:open_table(Core, security_group_grants, #{
+    crdt_module    => bondy_oplog_crdt_lww_register,
+    aggregate_root => leading_col,
+    indexes        => grant_indexes()
 }).
 ```
 
-Authorisation grants are the canonical conflict-surfacing case. Two
-concurrent grants to the same `(Realm, Principal, Resource)` mean
-someone violated single-writer discipline at the management plane.
-With `mv_register` the conflict is *visible*: the read returns both
-siblings and the auth layer refuses/queues/alerts instead of silently
-accepting an LWW winner. (The retired `strict_register` fold raised a
-`conflict` value for same-HLC writes; `mv_register` detects true
-concurrency causally, which is strictly stronger. Same-*event-key*
-duplicates — tampering, not concurrency — already crash loudly via
-the substrate's fixed strict-uniqueness collision rule
-(`bondy_oplog_instance:merge_page_value/3`).)
+Grants ship as `lww_register`, but their data model is the canonical
+**conflict-surfacing** case, so they are the clearest illustration of the
+as-built-vs-design-target gap. Two concurrent grants to the same
+`(Realm, Principal, Resource)` mean someone violated single-writer
+discipline at the management plane. The design target is `mv_register`,
+where that conflict is *visible*: the read returns both siblings and the
+auth layer refuses/queues/alerts instead of silently accepting an LWW
+winner. Until anti-entropy is exchanging concurrent grant writes, two
+nodes cannot actually produce that conflict, so `lww` is observably
+identical and is what runs.
 
-These are the tables where `per_entity` topology pays off: ops can
-quiesce or migrate the grants Bookie for one realm without
-touching anything else.
+Two as-built details matter regardless of the CRDT:
+
+- **The key is an order-preserving composite** `{Rolename, Resource}`,
+  with `aggregate_root => leading_col` so a role's grants co-locate on
+  one shard. "Grants for role R" is then a bounded band range scan rather
+  than a full-table scan.
+- A **`by_resource` secondary index** answers the reverse "grants on
+  resource R", and `publish => true` lets a peer's grant change reach
+  this node: the merge event drives a realm-wide re-evaluation of cached
+  authorization (§5) — an authorization change re-evaluates in place, it
+  does not tear the session down.
+
+`per_entity` topology is available if a deployment needs to quiesce or
+migrate one realm's grants Bookie in isolation, but as-built every
+durable table — grants included — lives on the shared `core` DB.
 
 ### 4.6 Sources
 
 ```erlang
-{ok, Sources} = bondy_db:open_table(Db, security_sources, #{
-    crdt_module => bondy_oplog_crdt_mv_register,
-    shard_count => 4
+{ok, Sources} = bondy_db:open_table(Core, security_sources, #{
+    crdt_module    => bondy_oplog_crdt_lww_register,
+    aggregate_root => leading_col
 }).
 ```
 
-Auth sources pin a `{Realm, Username, CIDR}` to a method. Same
-invariant as grants — concurrent edits to the same source must
-surface as siblings, not silently resolve.
+Auth sources pin a `{Username, CIDR-mask, Method}` to an authentication
+method. Same shape as grants: the design target is `mv_register` (a
+concurrent edit to the same source should surface as siblings), shipped
+as `lww` until that concurrency exists. The key is the order-preserving
+composite `{Username, AddressMask, Authmethod}` with `aggregate_root =>
+leading_col`, so "sources for user U" — the lookup the auth path makes on
+every login — is a bounded username-band range scan. There is no reverse
+index: matching a client address against a stored CIDR is containment,
+not equality, so it cannot ride the equality index.
 
 ### 4.7 API Gateway
 
 ```erlang
-{ok, Gateway} = bondy_db:open_table(Db, api_gateway, #{
+{ok, Gateway} = bondy_db:open_table(Core, api_gateway, #{
     crdt_module => bondy_oplog_crdt_lww_register,
     shard_count => 4
 }).
 ```
 
-Static-ish API config. Writes are rare and almost always come from
-one operator at a time. `lww_register` is plenty.
+Static-ish API config. Writes are rare and almost always come from one
+operator at a time, so `lww_register` is plenty. It is `publish => true`
+for a different reason than the security tables: the cowboy dispatch
+table is derived from this spec, so the reactor rebuilds it whenever the
+spec changes — including when a *peer's* edit arrives via anti-entropy
+(the merge event), which is what keeps every node's HTTP routing
+identical.
 
 ### 4.8 Tickets
 
 ```erlang
-{ok, Tickets} = bondy_db:open_table(Db, bondy_ticket, #{
+{ok, Tickets} = bondy_db:open_table(Core, bondy_ticket, #{
     crdt_module => bondy_oplog_crdt_lww_register,
     shard_count => 32
 }).
@@ -378,12 +457,10 @@ one operator at a time. `lww_register` is plenty.
 Tickets are short-lived auth artefacts with a hard expiry. Two
 properties matter:
 
-1. **TTL eviction is app-level.** The dedicated `ttl_presence` CRDT
-   (which carried an `expiry_hlc` and auto-skipped expired cells) was
-   retired in PR-Z with no twin. A `lww_register` cell holds the
-   ticket; the auth handler enforces expiry on read and clears
-   expired cells (or a periodic sweep does). The expiry HLC can live
-   in the value.
+1. **TTL eviction is app-level.** The substrate has no expiring CRDT; a
+   `lww_register` cell holds the ticket, and the auth handler enforces
+   expiry on read and clears expired cells (or a periodic sweep does).
+   The expiry HLC can live in the value.
 2. **High cardinality, key-independent.** Sharding by key
    (hash) spreads load evenly. 32 shards is a fine starting point;
    tune up if write rates climb.
@@ -391,7 +468,7 @@ properties matter:
 ### 4.9 OAuth tokens
 
 ```erlang
-{ok, Tokens} = bondy_db:open_table(Db, bondy_oauth_token, #{
+{ok, Tokens} = bondy_db:open_table(Core, bondy_oauth_token, #{
     crdt_module => bondy_oplog_crdt_lww_register,
     shard_count => 32
 }).
@@ -415,7 +492,7 @@ Same shape as tickets. Two things worth calling out:
 ### 4.10 Bridge relays
 
 ```erlang
-{ok, Bridges} = bondy_db:open_table(Db, bondy_bridge_relay, #{
+{ok, Bridges} = bondy_db:open_table(Core, bondy_bridge_relay, #{
     crdt_module => bondy_oplog_crdt_lww_register,
     shard_count => 4
 }).
@@ -427,13 +504,13 @@ become a thing.
 
 ### 4.11 When to use a counter (illustrative)
 
-Bondy itself does not ship a counter table yet, but the Tier 1
-folds are domain-neutral and the `pn_counter` fold + `counter_inc/4`
-helper exist so consumers can opt in without writing a custom fold.
-The shape:
+Bondy itself does not ship a counter table yet, but the commutative
+(tier_0) quantity CRDTs are domain-neutral and the `pn_counter` CRDT +
+`counter_inc/4` helper exist so consumers can opt in without writing a
+custom one. The shape:
 
 ```erlang
-{ok, Counters} = bondy_db:open_table(Db, app_counters, #{
+{ok, Counters} = bondy_db:open_table(Core, app_counters, #{
     crdt_module => bondy_oplog_crdt_pn_counter,
     shard_count => 8
 }).
@@ -490,35 +567,83 @@ When *not* to reach for it:
 
 ### 4.12 Summary table
 
-Topology is a **per-DB** choice (set once at `bondy_db:open/2`, not a
-per-table opt). The column below is therefore which *DB* each table
-belongs to: tables that want a different topology live in a separate DB.
+Topology and shard count are **per-DB** choices, set once at
+`bondy_db:open/2`. As-built there are two DBs: the durable `core` DB
+(`shared_shards`, `oplog.core.shard_count` shards, default 16) and the
+ephemeral `registry` DB (`memory`). The column below is which DB each
+table belongs to; where the shipped CRDT differs from the table's data
+model, the **design target** column names what it graduates to once
+concurrent multi-writer is enabled.
 
-| Table | CRDT | shard_count | DB topology |
-|---|---|---|---|
-| `bondy_registration` | `lww_register` (structurally-unique keys) | 8 | shared_shards |
-| `bondy_subscription` | `lww_register` (structurally-unique keys) | 8 | shared_shards |
-| `bondy_realm` | `lww_register` | 4 | shared_shards |
-| `security_users` | `lww_register` | 8 | shared_shards |
-| `security_groups` | `lww_register` | 4 | shared_shards |
-| `security_group_members` | `aw_map` (tier_2) | 8 | shared_shards |
-| `security_user_grants` | `mv_register` (siblings = conflict signal) | 8 | **per_entity** |
-| `security_group_grants` | `mv_register` (siblings = conflict signal) | 4 | **per_entity** |
-| `security_sources` | `mv_register` (siblings = conflict signal) | 4 | **per_entity** |
-| `api_gateway` | `lww_register` | 4 | shared_shards |
-| `bondy_ticket` | `lww_register` + app-level expiry | 32 | shared_shards |
-| `bondy_oauth_token` | `lww_register` + app-level expiry | 32 | shared_shards |
-| `bondy_bridge_relay` | `lww_register` | 4 | shared_shards |
+| Table | CRDT (ships) | Design target | DB | Notes |
+|---|---|---|---|---|
+| `bondy_registration` | `lww_register` | presence FSM | registry (ephemeral) | `by_session` index; structurally-unique keys |
+| `bondy_subscription` | `lww_register` | presence FSM | registry (ephemeral) | `by_session` index |
+| `bondy_realm` | `lww_register` | — | core | global registry; `publish` |
+| `security_users` | `lww_register` | — | core | `publish`; `by_group` membership index |
+| `security_groups` | `lww_register` | — | core | group record |
+| `security_group_members` | `aw_map` | (active under concurrency) | core | dormant; membership lives on `security_users` today |
+| `security_user_grants` | `lww_register` | `mv_register` | core | composite key; `by_resource` index; `publish` |
+| `security_group_grants` | `lww_register` | `mv_register` | core | composite key; `by_resource` index; `publish` |
+| `security_sources` | `lww_register` | `mv_register` | core | composite key |
+| `api_gateway` | `lww_register` | — | core | `publish` (dispatch rebuild) |
+| `bondy_ticket` | `lww_register` + app-level expiry | — | core | `shard_by => key` |
+| `bondy_oauth_token` | `lww_register` + app-level expiry | — | core | `shard_by => key` |
+| `bondy_bridge_relay` | `lww_register` | — | core | node-scoped, read once at boot |
+| `retained_messages` | `lww_register` | — | core | keyed by topic |
 
-Nine tables on `shared_shards`, three (auth grants and sources) on
-`per_entity`. None of Bondy's tables today use the quantity CRDTs —
-`pn_counter`, `g_counter`, `max_register`, `min_register`, and
-`g_set` are available for consumers that need them; the §4.11
-example shows the typical setup. `mv_register` is available where an
-application would rather resolve siblings itself than accept an LWW
-winner.
+Everything durable is one `shared_shards` DB; only the session-bound
+routing tables are split out, into the ephemeral `registry` DB. None of
+Bondy's tables today use the quantity CRDTs — `pn_counter`, `g_counter`,
+`max_register`, `min_register`, and `g_set` are available for consumers
+that need them; the §4.11 example shows the typical setup. `mv_register`
+and `aw_map` are the declared targets for the grant/source and membership
+tables, currently run as `lww` (see §4.5 for why that is safe today).
 
-## 5. Patterns you'll keep using
+## 5. Reacting to a peer's change
+
+The security tables are where two substrate facilities — the freshness
+fence ([chapter 03](03_bondy_db.md#the-freshness-fence)) and change
+notification ([chapter 03](03_bondy_db.md#change-notification)) — earn
+their keep, because a security decision must stay correct across nodes
+*without* waiting for global consensus. Bondy composes them into a
+single discipline: **fence the read, version the token, react to the
+merge.**
+
+**Fence the read.** Before any authentication, the auth path calls
+`bondy_oplog_core:ensure_fresh([users, grants], 1s)`. If this node's
+security shards have not heard from their peers within the bound, it
+refuses with `temporarily_unavailable` rather than authenticate against
+possibly-stale data. The check is one wait-free atomic read.
+
+**Version the token.** A user cell's HLC is a monotonic revocation
+counter — it advances on every write to that user. Bondy carries the HLC
+the user had at issue time inside the token. A credential or membership
+change bumps the cell's HLC; once that bump has converged, a peer
+re-reads it and rejects the now-stale token. The fence guarantees the
+version it compares against is itself fresh, so the two mechanisms are a
+pair: bounded staleness plus a per-subject epoch.
+
+**React to the merge.** Some changes cannot wait for the next
+authentication — an active session must be acted on now. That is what the
+merge events from the `publish => true` security tables drive, through a
+single node-local reactor. The reaction splits on the authn-vs-authz
+distinction:
+
+| A peer… | Merge event on… | This node… |
+|---|---|---|
+| deletes a user | `security_users` (`clear`) | **closes** that user's local sessions |
+| deletes a realm | `bondy_realm` (`clear`) | **closes** every local session on that realm |
+| grants or revokes a permission | `security_*_grants` (`set`/`clear`) | **re-evaluates** the realm's cached authorization in place |
+
+The split is the load-bearing idea: an **authentication**-level change (a
+delete) tears the session down, whereas an **authorization** change (a
+grant edit) re-evaluates the session's cached RBAC context in place — the
+session survives, and its next authorize reads the new grants. A node's
+*own* writes already did this inline at the write site; the merge tag is
+strictly for reacting to what a peer did.
+
+## 6. Patterns you'll keep using
 
 - **New table when the CRDT differs.** Don't try to unify two
   tables that need different merge semantics. The cost of a table
@@ -549,7 +674,7 @@ winner.
   F", with skew detection. Use it when (e.g.) authorisation
   combines a user row and a grants row.
 
-## 6. Anti-patterns
+## 7. Anti-patterns
 
 - **`aw_map` for whole-record-update workloads.** Every write goes
   through one key at a time, and each cell pays for a tier_2 causal
@@ -608,9 +733,16 @@ winner.
   (`open/2`, `open_table/3`, `read/3`, `apply/4`,
   `counter_inc/4`).
 - `bondy_oplog_core.erl` — substrate primitives
-  (`read/3`, `read_batch/2`, `ensure_fresh/2`, `range/4`).
+  (`read/3`, `read_batch/2`, `ensure_fresh/2`, `range/4`,
+  `subscribe/2`).
+- `bondy_namespace_catalog.erl` (in `bondy_router`) — the catalogue
+  that declares the two DBs and every table above, with each table's
+  fold class, `shard_by`, indexes, and `publish` flag.
+- `bondy_aae_reactor.erl` (in `bondy_router`) — the node-local reactor
+  that turns the security tables' merge events into session closes and
+  RBAC re-evaluation (§5).
 - `bondy_db_topology_shared_shards.erl`,
   `bondy_db_topology_per_entity.erl`,
-  `bondy_db_topology_single_bookie.erl` — the three topologies; they
-  share their leveled/Bookie plumbing via
-  `bondy_db_topology_leveled_common.erl`.
+  `bondy_db_topology_single_bookie.erl` (durable, sharing
+  `bondy_db_topology_leveled_common.erl`) and
+  `bondy_db_topology_memory.erl` (ephemeral) — the topologies.

@@ -190,7 +190,47 @@ keeps reads parallel.
     %% to the MST walk. Appended last so existing `#entry`-index
     %% `ets:update_element` writes stay valid.
     primary_cell_scope = undefined ::
-        bondy_oplog_projection_adapter:cell_keys_scope() | undefined
+        bondy_oplog_projection_adapter:cell_keys_scope() | undefined,
+    %% Primary shards only. The per-table routing config the multiplexer needs to
+    %% (re)build a cell-apply ctx from the registry ALONE, so a `one_for_all`
+    %% instance-subtree restart can self-heal its `cell_apply_source` for every
+    %% table on the shard (the runtime `register_table/4` adds are otherwise lost
+    %% on restart). The registry entry survives the restart; the applier/fused
+    %% instance rebuilds its source from every primary entry whose `instance_id`
+    %% matches.
+    %%
+    %% `cell_apply_bucket`: the entity-type Bucket this table's events carry —
+    %% the multiplexer's directory key. Set only for a `per_shard` (collapsed)
+    %% instance, where it is realm-independent (`atom_to_binary(ET)`); `undefined`
+    %% for a `per_table_shard` (single-table) instance, whose source is keyless.
+    %% Appended last so existing `#entry`-index `ets:update_element` writes stay
+    %% valid.
+    cell_apply_bucket = undefined :: binary() | undefined,
+    %% `publish_ns`: the namespace remote-merge events publish under
+    %% (`publish => true` tables), or `undefined`. Authoritative here so a
+    %% restart-rebuilt ctx keeps emitting; `undefined` falls back to the opts.
+    %% Appended last.
+    publish_ns = undefined :: atom() | undefined,
+    %% `secondary_indexes`: the index descriptors the applier dispatches index
+    %% ops against. Authoritative here so a restart-rebuilt ctx keeps indexing;
+    %% `undefined` (NOT `[]`) means "unset — fall back to the opts" (a raw,
+    %% non-`bondy_db` registration), while `[]` means "no indexes". Appended last.
+    secondary_indexes = undefined :: [map()] | undefined,
+    %% Index shards only. The grouping key of the `bondy_oplog_secondary_writer`
+    %% that drives this index shard — the secondary-side twin of `instance_id`.
+    %% A single writer serves every index shard sharing a `writer_key`, demuxing
+    %% the dispatched ops back to each `(NS, IndexName, SecShard)` stream. The
+    %% owner (`bondy_db`) sets its granularity from the topology's instance
+    %% strategy: coarse (`DbName/idx/SecShard`, shared across every index of the
+    %% DB on that secondary shard) on a `per_shard` backend; fine
+    %% (`NS/IndexName/idx/SecShard`, one writer per index shard) on a
+    %% `per_table_shard` backend. `undefined` for primary shards and for a raw
+    %% registration. The durable basis for refcounted writer teardown
+    %% (`writer_key_in_use/1`) and crash/epoch self-healing
+    %% (`index_entries_for_writer/1`), exactly as `instance_id` is for primaries.
+    %% Appended last so existing `#entry`-index `ets:update_element` writes stay
+    %% valid.
+    writer_key = undefined :: binary() | undefined
 }).
 
 -record(state, {
@@ -284,6 +324,10 @@ keeps reads parallel.
 -export([ever_freshened/3]).
 -export([shards_for/1]).
 -export([primary_shards_for/1]).
+-export([instance_id_in_use/1]).
+-export([primary_entries_for_instance/1]).
+-export([writer_key_in_use/1]).
+-export([index_entries_for_writer/1]).
 -export([namespaces/0]).
 
 %% Field accessors (so callers do not need the header).
@@ -305,6 +349,10 @@ keeps reads parallel.
 -export([entry_causal_tier/1]).
 -export([entry_index_clear_scope/1]).
 -export([entry_primary_cell_scope/1]).
+-export([entry_cell_apply_bucket/1]).
+-export([entry_publish_ns/1]).
+-export([entry_secondary_indexes/1]).
+-export([entry_writer_key/1]).
 -export([entry_last_ae/1]).
 -export([entry_ever_freshened/1]).
 
@@ -665,6 +713,102 @@ primary_shards_for(NS) when is_atom(NS) ->
     ],
     ets:select(?TABLE, MS).
 
+-doc """
+True when any registered primary shard entry still names `InstanceId` as its
+oplog instance.
+
+Backs the facade's refcounted teardown of a shard instance shared by several
+tables (one-log-per-shard): the shared instance is stopped only once the last
+table's registry entry has been unregistered, exactly as a shared Bookie stays
+up until the DB shuts down. Secondary (index) shards carry no `instance_id`, so
+they never count.
+""".
+-spec instance_id_in_use(InstanceId :: binary()) -> boolean().
+
+instance_id_in_use(InstanceId) when is_binary(InstanceId) ->
+    MS = [
+        {
+            #entry{instance_id = InstanceId, _ = '_'},
+            [],
+            [true]
+        }
+    ],
+    case ets:select(?TABLE, MS, 1) of
+        '$end_of_table' -> false;
+        {[true], _Cont} -> true
+    end.
+
+-doc """
+Every primary shard entry whose oplog `instance_id` is `InstanceId`.
+
+The durable basis for self-healing the per-shard multiplexer: an instance shared
+by several tables rebuilds its `cell_apply_source` from these entries on
+applier/fused init, so a `one_for_all` subtree restart restores routing for
+every table on the shard (not just the founding one) without re-running
+provisioning. On a fresh start only the founding entry exists; on a restart all
+of the shard's tables' entries do.
+""".
+-spec primary_entries_for_instance(InstanceId :: binary()) ->
+    [shard_entry()].
+
+primary_entries_for_instance(InstanceId) when is_binary(InstanceId) ->
+    MS = [
+        {
+            #entry{instance_id = InstanceId, _ = '_'},
+            [],
+            ['$_']
+        }
+    ],
+    ets:select(?TABLE, MS).
+
+-doc """
+Whether any index shard entry still references the `bondy_oplog_secondary_writer`
+grouping key `WriterKey`.
+
+The secondary-side twin of `instance_id_in_use/1`: backs the facade's refcounted
+teardown of a writer shared by several index shards (one-writer-per-secondary-
+shard), so the shared writer is stopped only once the last index shard's registry
+entry has been unregistered. Primary shards carry no `writer_key`, so they never
+count.
+""".
+-spec writer_key_in_use(WriterKey :: binary()) -> boolean().
+
+writer_key_in_use(WriterKey) when is_binary(WriterKey) ->
+    MS = [
+        {
+            #entry{writer_key = WriterKey, _ = '_'},
+            [],
+            [true]
+        }
+    ],
+    case ets:select(?TABLE, MS, 1) of
+        '$end_of_table' -> false;
+        {[true], _Cont} -> true
+    end.
+
+-doc """
+Every index shard entry whose `bondy_oplog_secondary_writer` grouping key is
+`WriterKey`.
+
+The secondary-side twin of `primary_entries_for_instance/1`: the durable basis
+for a shared writer's crash/epoch self-healing. A writer that serves several
+index shards re-stamps its pid onto every one of these entries (and re-checks
+each for a pending rebuild) on init and on a registry-restart epoch event, so a
+writer crash or a registry flush restores dispatch for every stream on the shard
+— not just the founding one — without re-running provisioning.
+""".
+-spec index_entries_for_writer(WriterKey :: binary()) -> [shard_entry()].
+
+index_entries_for_writer(WriterKey) when is_binary(WriterKey) ->
+    MS = [
+        {
+            #entry{writer_key = WriterKey, _ = '_'},
+            [],
+            ['$_']
+        }
+    ],
+    ets:select(?TABLE, MS).
+
 %% =============================================================================
 %% Accessors
 %% =============================================================================
@@ -710,6 +854,22 @@ registration that predates the field (the rebuild then falls back to the MST).
     bondy_oplog_projection_adapter:cell_keys_scope() | undefined.
 
 entry_primary_cell_scope(#entry{primary_cell_scope = V}) -> V.
+
+%% The multiplexer routing bucket (entity-type tag) for a `per_shard` primary
+%% shard, or `undefined` for a `per_table_shard` shard / a registration that
+%% predates the field.
+entry_cell_apply_bucket(#entry{cell_apply_bucket = V}) -> V.
+
+%% The remote-merge publish namespace (`publish => true` tables), or `undefined`.
+entry_publish_ns(#entry{publish_ns = V}) -> V.
+
+%% The secondary-index descriptors, `undefined` when unset (fall back to opts),
+%% or `[]` for a table with no indexes.
+entry_secondary_indexes(#entry{secondary_indexes = V}) -> V.
+
+%% The index shard's `bondy_oplog_secondary_writer` grouping key (the
+%% secondary-side twin of `instance_id`), `undefined` for primary shards.
+entry_writer_key(#entry{writer_key = V}) -> V.
 
 %% Last AE-freshness timestamp (monotonic ms), read straight off the
 %% entry's atomics — the sentinel `?STALE_SENTINEL` for a never-freshened
@@ -1072,7 +1232,11 @@ handle_call({register, NS, Index, Shard, Owner, Config}, _From, State0) ->
         crdt_module = maps:get(crdt_module, Config, undefined),
         causal_tier = maps:get(causal_tier, Config, tier_0),
         index_clear_scope = maps:get(index_clear_scope, Config, undefined),
-        primary_cell_scope = maps:get(primary_cell_scope, Config, undefined)
+        primary_cell_scope = maps:get(primary_cell_scope, Config, undefined),
+        cell_apply_bucket = maps:get(cell_apply_bucket, Config, undefined),
+        publish_ns = maps:get(publish_ns, Config, undefined),
+        secondary_indexes = maps:get(secondary_indexes, Config, undefined),
+        writer_key = maps:get(writer_key, Config, undefined)
     },
     true = ets:insert(?TABLE, Entry),
     State2 = State1#state{
