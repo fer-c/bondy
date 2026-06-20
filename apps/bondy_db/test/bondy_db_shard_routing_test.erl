@@ -77,6 +77,28 @@ aggregate_root_leading_col_no_separator_test() ->
     NoSep = <<1, 2, 3, 4>>,
     ?assertEqual(NoSep, bondy_db:aggregate_root(leading_col, NoSep)).
 
+aggregate_root_second_col_forward_test() ->
+    %% A forward membership cell `[<<"f">>, User, Group]` routes by its SECOND
+    %% column (the user), skipping the band marker, so it co-locates with the
+    %% user record (keyed by the plain user term).
+    FwdKey = bondy_oplog_index_key:encode_tuple(
+        [<<"f">>, <<"alice">>, <<"admins">>]
+    ),
+    ?assertEqual(<<"alice">>, bondy_db:aggregate_root(second_col, FwdKey)).
+
+aggregate_root_second_col_reverse_test() ->
+    %% A reverse membership cell `[<<"r">>, Group, User]` routes by the group.
+    RevKey = bondy_oplog_index_key:encode_tuple(
+        [<<"r">>, <<"admins">>, <<"alice">>]
+    ),
+    ?assertEqual(<<"admins">>, bondy_db:aggregate_root(second_col, RevKey)).
+
+aggregate_root_second_col_band_prefix_test() ->
+    %% A two-column band prefix `[<<"f">>, User]` (no trailing column) still
+    %% yields the entity — the second column runs to the end of the key.
+    Prefix = bondy_oplog_index_key:encode_tuple([<<"f">>, <<"alice">>]),
+    ?assertEqual(<<"alice">>, bondy_db:aggregate_root(second_col, Prefix)).
+
 
 %% =============================================================================
 %% Co-location (aggregate strategy)
@@ -97,6 +119,25 @@ user_grant_source_colocate_test() ->
     UserShard = bondy_db:shard_for(UserT, ?REALM, UserKey),
     ?assertEqual(UserShard, bondy_db:shard_for(GrantT, ?REALM, GrantKey)),
     ?assertEqual(UserShard, bondy_db:shard_for(SourceT, ?REALM, SourceKey)).
+
+membership_colocates_with_entity_test() ->
+    %% Membership cells co-locate with their leading entity: a user's FORWARD
+    %% cells land on the user record's shard (so the hot auth-path group join
+    %% and a list page's group join are single-shard), a group's REVERSE cells
+    %% land on the group record's shard (so "members of a group" is single-shard).
+    UserT = agg_table(identity),
+    MemberT = agg_table(second_col),
+
+    UserShard = bondy_db:shard_for(UserT, ?REALM, <<"alice">>),
+    GroupShard = bondy_db:shard_for(UserT, ?REALM, <<"admins">>),
+    FwdKey = bondy_oplog_index_key:encode_tuple(
+        [<<"f">>, <<"alice">>, <<"admins">>]
+    ),
+    RevKey = bondy_oplog_index_key:encode_tuple(
+        [<<"r">>, <<"admins">>, <<"alice">>]
+    ),
+    ?assertEqual(UserShard, bondy_db:shard_for(MemberT, ?REALM, FwdKey)),
+    ?assertEqual(GroupShard, bondy_db:shard_for(MemberT, ?REALM, RevKey)).
 
 distinct_subjects_spread_test() ->
     %% Distinct subjects must spread across more than one shard (else a single

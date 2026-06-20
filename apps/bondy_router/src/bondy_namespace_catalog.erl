@@ -213,6 +213,15 @@ tables() ->
             db => core,
             durability => durable,
             shard_by => realm,
+            %% Co-locate each fact with its leading ENTITY (the 2nd column of the
+            %% band-tagged key): a forward `[?MEMBER_FWD, User, Group]` cell lands
+            %% on the user record's aggregate shard, a reverse
+            %% `[?MEMBER_REV, Group, User]` cell on the group record's. So a
+            %% user's groups (hot auth path + list-page join) and a group's
+            %% members are each a single-shard band scan, not a cross-shard
+            %% scatter. Without this the `identity` default routes every fact by
+            %% its whole key ⇒ scatter. (`bondy_db:aggregate_root/2`.)
+            aggregate_root => second_col,
             fold => ew,
             migrated => true,
             publish => true
@@ -863,7 +872,7 @@ stop_sup(Sup) when is_pid(Sup) ->
 %% Maps a table spec to its `bondy_db:open_table/3` opts: the fold→CRDT wiring
 %% (see `fold_opts/1`), `publish` for tables with a change reactor, any declared
 %% secondary `indexes`, and the routing keys `shard_by` (realm | key) +
-%% `aggregate_root` (identity | leading_col) consumed by strategy-aware shard
+%% `aggregate_root` (identity | leading_col | second_col) consumed by strategy-aware shard
 %% routing (AR-2 / AR-3). `shard_by` defaults to `key`, `aggregate_root` to
 %% `identity` — together reproducing the legacy `phash2({EntityType, Key})`
 %% placement for any table that declares neither.

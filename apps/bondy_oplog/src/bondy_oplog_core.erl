@@ -1022,22 +1022,60 @@ shards_in(NS, Index) ->
 
 scatter_range([], _NS, _Index, _Bucket, _Low, _High, _Opts) ->
     {ok, []};
-scatter_range(Shards, NS, Index, Bucket, Low, High, Opts) ->
-    scatter_range_loop(Shards, NS, Index, Bucket, Low, High, Opts, []).
-
-scatter_range_loop([], _NS, _Index, _Bucket, _Low, _High, _Opts, Acc) ->
-    {ok, Acc};
-scatter_range_loop([Entry | Rest], NS, Index, Bucket, Low, High, Opts, Acc) ->
+scatter_range([Entry], NS, Index, Bucket, Low, High, Opts) ->
+    %% Single shard — read inline, no spawn overhead.
     {_NS, _Idx, Shard} = bondy_oplog_core_registry:entry_key(Entry),
-    PerShardOpts = Opts#{shard => Shard},
-    case range(NS, Index, Bucket, {Low, High}, PerShardOpts) of
-        {ok, Rows} ->
-            scatter_range_loop(
-                Rest, NS, Index, Bucket, Low, High, Opts, [Rows | Acc]
-            );
-        {error, _} = Err ->
-            Err
+    case range(NS, Index, Bucket, {Low, High}, Opts#{shard => Shard}) of
+        {ok, Rows} -> {ok, [Rows]};
+        {error, _} = Err -> Err
+    end;
+scatter_range(Shards, NS, Index, Bucket, Low, High, Opts) ->
+    %% Read every shard CONCURRENTLY. Each shard is an independent per-shard
+    %% projection (its own leveled/ETS stack), so the reads do not contend with
+    %% one another; a serial scatter made a realm-scoped range (e.g. a user list
+    %% page) cost O(shards) sequential reads — the dominant latency once the
+    %% per-user fan-out was removed. Results are key-merged afterwards, so the
+    %% order in which shards complete is irrelevant.
+    Tasks = [
+        begin
+            {_NS, _Idx, Shard} = bondy_oplog_core_registry:entry_key(Entry),
+            spawn_monitor(fun() ->
+                exit({scatter_result,
+                    range(NS, Index, Bucket, {Low, High}, Opts#{shard => Shard})})
+            end)
+        end
+     || Entry <- Shards
+    ],
+    collect_scatter(Tasks, []).
+
+%% @private
+%% Gather one per-shard range result per spawned task. The task carries its
+%% result in its exit reason, so each `DOWN` both delivers a result and frees
+%% its monitor — no separate message or demonitor needed.
+collect_scatter([], Acc) ->
+    {ok, Acc};
+collect_scatter([{_Pid, MRef} | Rest], Acc) ->
+    receive
+        {'DOWN', MRef, process, _, {scatter_result, {ok, Rows}}} ->
+            collect_scatter(Rest, [Rows | Acc]);
+        {'DOWN', MRef, process, _, {scatter_result, {error, _} = Err}} ->
+            ok = drain_scatter(Rest),
+            Err;
+        {'DOWN', MRef, process, _, Reason} ->
+            ok = drain_scatter(Rest),
+            {error, {scatter_shard_crashed, Reason}}
     end.
+
+%% @private
+%% After an early error, wait out the remaining shard tasks so their `DOWN`
+%% messages do not leak into the caller's mailbox.
+drain_scatter([]) ->
+    ok;
+drain_scatter([{_Pid, MRef} | Rest]) ->
+    receive
+        {'DOWN', MRef, process, _, _} -> ok
+    end,
+    drain_scatter(Rest).
 
 %% Multi-way merge of per-shard range results into a single globally
 %% sorted list. Each input list is already sorted by Key for the

@@ -215,7 +215,8 @@ end#{
 }.
 -type list_opts() :: #{
     limit => pos_integer(),
-    cursor => bondy_relation:cursor()
+    cursor => bondy_relation:cursor(),
+    mode => bondy_relation:mode()
 }.
 -type add_error() ::
     {no_such_realm, uri()}
@@ -757,7 +758,11 @@ list(RealmUri) ->
     | {[t()], Continuation :: bondy_relation:cursor() | undefined}.
 
 list(RealmUri, Opts) ->
-    Relation = relation(),
+    %% `mode` (`partition` default | `global`) selects how a bounded page is
+    %% assembled — see `relation/0`. It only affects the keyset (limit) branch;
+    %% the whole-realm fold is order-agnostic.
+    Mode = maps_utils:get_any([mode, <<"mode">>], Opts, partition),
+    Relation = relation(Mode),
     case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
             %% Whole-realm listing — streamed through a bounded keyset fold so
@@ -784,9 +789,13 @@ list(RealmUri, Opts) ->
                 end,
             {ok, #{values := Users, next := Next}} =
                 bondy_relation:list(Relation, RealmUri, PageOpts),
-            %% A bounded page — populate each user's groups from the relation
-            %% (at most `Limit` per-user forward-band scans).
-            {[with_groups(RealmUri, U) || U <- Users], Next}
+            %% Join groups for the WHOLE page in ONE bounded forward-band scan.
+            %% The page's usernames are ascending, so their membership cells
+            %% occupy the contiguous band «FWD,first»..«FWD,last». The previous
+            %% `with_groups/2`-per-user form did a cross-shard scatter PER user,
+            %% so a 100-row page cost ~100 scatters (seconds).
+            GMap = page_member_groups(RealmUri, Users),
+            {[join_groups(GMap, U) || U <- Users], Next}
     end.
 
 -doc """
@@ -1096,10 +1105,23 @@ table() ->
 %% The `security_users` table as a paginatable relation of user records.
 %% Alias-pointer cells co-located in the same table are rejected, so they never
 %% surface in a user listing or `update_groups` fold.
+%%
+%% `partition` mode (the default): a page is served from ~1 user-table shard
+%% rather than scattering across all of them. The group join (`page_member_groups/2`)
+%% stays cheap because a user's forward membership cells co-locate on that same
+%% shard (catalogue `aggregate_root => second_col`), so a partition page's join
+%% is a single bounded shard scan — no need for the page to be globally ordered.
+%% `global` mode (opt-in via `list/2`'s `mode` option) scatters every page and
+%% returns it in global username order — slower, but alphabetical.
 relation() ->
+    relation(partition).
+
+%% @private
+relation(Mode) ->
     bondy_relation:new(?BONDY_DB_USER_TAB, #{
         table => table(),
-        decode => fun decode_user_row/1
+        decode => fun decode_user_row/1,
+        mode => Mode
     }).
 
 %% @private
@@ -1219,7 +1241,12 @@ clear_memberships(RealmUri, Username) ->
 %% few groups, so the band is small and read whole (no pagination).
 member_groups(RealmUri, Username) ->
     {Lo, Hi} = fwd_band(Username),
-    {ok, Rows} = bondy_db:range_all(member_table(), RealmUri, Lo, Hi, #{}),
+    %% Single-shard read: a user's forward cells co-locate on the user's shard
+    %% (catalogue `aggregate_root => second_col`), and `range/5` derives that
+    %% shard from the band's leading bytes (`second_col(Lo) = Username`) — so
+    %% this is one bounded shard scan, not the all-shard scatter `range_all`
+    %% would run. This is the hot auth path (`get_context` → `lookup`).
+    {ok, Rows} = bondy_db:range(member_table(), RealmUri, Lo, Hi, #{}),
     [fwd_group(Key) || {Key, true, _Hlc} <- Rows].
 
 %% @private
@@ -1241,6 +1268,77 @@ all_member_groups(RealmUri) ->
     Map.
 
 %% @private
+%% Groups for a PAGE of users as `#{Username => [Group]}`. A user's forward
+%% membership cells co-locate on the user's shard (catalogue
+%% `aggregate_root => second_col`), so the page's usernames are grouped by their
+%% shard and each shard contributes ONE bounded single-shard band scan. A
+%% partition-ordered page is one shard ⇒ one scan; a globally-ordered page spans
+%% shards ⇒ one tight scan each — either way no cross-shard scatter, and the
+%% page need not be globally ordered (min/max bound each shard's band).
+page_member_groups(_RealmUri, []) ->
+    #{};
+
+page_member_groups(RealmUri, Users) ->
+    Table = member_table(),
+    Names = [maps:get(username, U) || U <- Users],
+    ByShard = lists:foldl(
+        fun(Name, Acc) ->
+            {Lo, _} = fwd_band(Name),
+            Shard = bondy_db:shard_for(Table, RealmUri, Lo),
+            maps:update_with(Shard, fun(Ns) -> [Name | Ns] end, [Name], Acc)
+        end,
+        #{},
+        Names
+    ),
+    Map = maps:fold(
+        fun(Shard, ShardNames, Acc) ->
+            {Lo, _} = fwd_band(lists:min(ShardNames)),
+            {_, Hi} = fwd_band(lists:max(ShardNames)),
+            scan_member_band(RealmUri, Shard, Lo, Hi, Acc)
+        end,
+        #{},
+        ByShard
+    ),
+    %% Cells scan ascending by key (group); `update_with` prepends, so restore
+    %% ascending group order to match the per-user `member_groups/2` path.
+    maps:map(fun(_U, Gs) -> lists:reverse(Gs) end, Map).
+
+%% @private
+%% Chunked ascending scan of one shard's forward membership band, folding every
+%% LIVE cell into `#{Username => [Group]}` (descending group order — caller
+%% reverses). Forced onto `Shard` (the band's co-located shard); pages past the
+%% row cap so a wide band (many users / groups) is never silently truncated.
+scan_member_band(RealmUri, Shard, Lo, Hi, Acc) ->
+    RangeOpts = #{limit => 1000, direction => asc, shard => Shard},
+    case bondy_db:range(member_table(), RealmUri, Lo, Hi, RangeOpts) of
+        {ok, []} ->
+            Acc;
+        {ok, Rows} ->
+            {Acc1, LastKey} = lists:foldl(
+                fun({Key, _V, _Hlc} = Row, {A, _Last}) ->
+                    case decode_fwd_member(Row) of
+                        {ok, {U, G}} ->
+                            {maps:update_with(
+                                U, fun(Gs) -> [G | Gs] end, [G], A
+                            ), Key};
+                        skip ->
+                            {A, Key}
+                    end
+                end,
+                {Acc, undefined},
+                Rows
+            ),
+            case length(Rows) < 1000 of
+                true ->
+                    Acc1;
+                false ->
+                    scan_member_band(
+                        RealmUri, Shard, <<LastKey/binary, 0>>, Hi, Acc1
+                    )
+            end
+    end.
+
+%% @private
 %% Decode a live forward membership cell to `{User, Group}`; skip reverse cells
 %% and disabled (retracted) ones.
 decode_fwd_member({Key, true, _Hlc}) ->
@@ -1253,10 +1351,8 @@ decode_fwd_member(_) ->
 
 %% @private
 %% Add the user's derived `groups` (from the relation) to a user map read from
-%% the cell, which no longer carries them.
-with_groups(RealmUri, #{username := Username} = User) ->
-    with_groups(RealmUri, Username, User).
-
+%% the cell, which no longer carries them. The single-user get path uses this;
+%% the list page path joins groups in bulk via `page_member_groups/2`.
 with_groups(RealmUri, Username, User) ->
     User#{groups => member_groups(RealmUri, Username)}.
 
@@ -1291,7 +1387,10 @@ members_page(RealmUri, Group, After, Target) ->
 collect_members(RealmUri, Lo, Hi, Target, Acc) ->
     Chunk = erlang:max(Target, 64),
     RangeOpts = #{limit => Chunk, direction => asc},
-    case bondy_db:range_all(member_table(), RealmUri, Lo, Hi, RangeOpts) of
+    %% Single-shard read: a group's reverse cells co-locate on the group's shard
+    %% (`second_col(Lo) = Group`), so `range/5` resolves to that one shard rather
+    %% than scattering — "members of a group" is a bounded single-shard band scan.
+    case bondy_db:range(member_table(), RealmUri, Lo, Hi, RangeOpts) of
         {ok, []} ->
             lists:sublist(lists:reverse(Acc), Target);
         {ok, Rows} ->

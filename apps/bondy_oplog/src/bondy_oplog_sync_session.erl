@@ -582,12 +582,14 @@ bump_ae_on_sync(Instance, Peer) ->
     end.
 
 -doc """
-Freshen this instance's AE targets for a node that can reach NO peers
-(solo membership), per the `oplog.aae.fence.on_isolation` policy:
-`proceed` always bumps (treat isolation as vacuously fresh), `refuse`
-never bumps (fail closed — the fence will refuse), `quorum` bumps only
-while connected to a majority (true for genuinely-solo membership).
-Called by the sync scheduler when an instance's peer list is empty.
+Freshen this instance's AE targets for a node whose peer list is empty
+this round (no peer reachable). Certification follows
+`should_certify_freshness/1`: a genuine single-node deployment
+(`is_solo/0`) always certifies, since it has no peer to lag. Otherwise the
+`oplog.aae.fence.on_isolation` policy decides — `proceed` always bumps
+(treat isolation as vacuously fresh), `refuse` never bumps (fail closed —
+the fence will refuse), `quorum` bumps only while connected to a majority.
+Called by the sync scheduler at its no-peer seam.
 """.
 -spec maybe_bump_ae_isolated(instance_id()) -> ok.
 
@@ -625,11 +627,36 @@ isolation_policy() ->
 %% Whether a freshness certification is permitted now under the isolation
 %% policy, for a bump arising from `Site` (`synced` = a successful round
 %% that reached a peer; `isolated` = a tick with no peers in membership).
+%%
+%% A genuine single-node deployment (`is_solo/0`) certifies unconditionally: it
+%% IS the whole cluster, so its local view cannot lag a peer that does not
+%% exist. This is what lets a single-node deployment authenticate with the AAE
+%% fence on, and a cold-started node serve auth before its first peer round —
+%% without weakening `refuse` for a real isolated minority, whose membership
+%% still lists the unreachable peers (so `is_solo/0` is false).
 should_certify_freshness(Site) ->
-    case isolation_policy() of
-        proceed -> true;
-        refuse -> Site =:= synced;
-        quorum -> connected_majority()
+    case is_solo() of
+        true ->
+            true;
+        false ->
+            case isolation_policy() of
+                proceed -> true;
+                refuse -> Site =:= synced;
+                quorum -> connected_majority()
+            end
+    end.
+
+%% @private
+%% True iff this node is the sole member of its Partisan membership — a genuine
+%% single-node deployment. `partisan_peer_service:members/0` returns the full
+%% known membership (every peer ever joined, INCLUDING currently-unreachable
+%% ones — the same set `connected_majority/0` reads as `Expected`), so a node
+%% that was clustered and is now partitioned still lists its peers and is NOT
+%% solo. Only a deployment that never had a peer is.
+is_solo() ->
+    case partisan_peer_service:members() of
+        {ok, Members} when is_list(Members) -> length(Members) =< 1;
+        _ -> false
     end.
 
 %% @private

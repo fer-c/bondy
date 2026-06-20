@@ -658,7 +658,11 @@
     start_cluster/3,
     stop_cluster/1,
     stop_nodes/1,
-    peer_boot/1
+    peer_boot/1,
+    aae_reset_all_stale/0,
+    aae_bump_isolated_all/0,
+    aae_mock_nonsolo_membership/0,
+    aae_unmock_nonsolo_membership/0
 ]).
 
 %% =============================================================================
@@ -1049,3 +1053,71 @@ wait_for_members_loop(Nodes, Expected, Deadline) ->
                     wait_for_members_loop(Nodes, Expected, Deadline)
             end
     end.
+
+
+%% =============================================================================
+%% AAE FRESHNESS-FENCE TEST HELPERS
+%% =============================================================================
+%% Shared by the auth suites that exercise the `oplog.aae` freshness fence
+%% (`bondy_auth_oauth2_SUITE`, `bondy_auth_password_SUITE`). They drive the
+%% per-shard AE freshness atomics and the no-peer certification seam directly,
+%% so a single-node suite can assert fence behaviour without a real cluster and
+%% without tick-timing races.
+
+-doc """
+Reset every primary shard on this node to the "infinitely stale" sentinel, so
+a fence assertion starts from a known-stale baseline.
+""".
+-spec aae_reset_all_stale() -> ok.
+
+aae_reset_all_stale() ->
+    lists:foreach(
+        fun(NS) ->
+            lists:foreach(
+                fun(E) -> ok = bondy_oplog_core_registry:reset_stale_ae(E) end,
+                bondy_oplog_core_registry:primary_shards_for(NS)
+            )
+        end,
+        bondy_oplog_core_registry:namespaces()
+    ).
+
+-doc """
+Drive the scheduler's no-peer freshness path for every running instance — the
+exact function the sync scheduler invokes at its no-peer seam. Whether it
+certifies freshness depends on `oplog.aae.fence.on_isolation` and whether the
+node looks solo (see `aae_mock_nonsolo_membership/0`).
+""".
+-spec aae_bump_isolated_all() -> ok.
+
+aae_bump_isolated_all() ->
+    lists:foreach(
+        fun(I) -> ok = bondy_oplog_sync_session:maybe_bump_ae_isolated(I) end,
+        bondy_oplog:list_instances()
+    ).
+
+-doc """
+Mock the Partisan membership so this single test node looks like one member of a
+two-node cluster whose peer is unreachable: NOT solo (so the `on_isolation`
+policy actually applies), and — since `partisan:nodes/0` really returns [] here
+— not a connected majority either. The ghost peer is a node atom, so any sync
+the scheduler attempts against it over the in-VM transport is rejected outright
+(`{error, {invalid_peer_for_inline_transport, _}}`) and cannot falsely certify
+freshness. Pair with `aae_unmock_nonsolo_membership/0` in an `after` clause.
+""".
+-spec aae_mock_nonsolo_membership() -> ok.
+
+aae_mock_nonsolo_membership() ->
+    ok = meck:new(partisan_peer_service, [passthrough, no_link]),
+    ok = meck:expect(partisan_peer_service, members, fun() ->
+        {ok, [node(), 'ghost@127.0.0.1']}
+    end),
+    ok.
+
+-doc """
+Undo `aae_mock_nonsolo_membership/0`.
+""".
+-spec aae_unmock_nonsolo_membership() -> ok.
+
+aae_unmock_nonsolo_membership() ->
+    catch meck:unload(partisan_peer_service),
+    ok.

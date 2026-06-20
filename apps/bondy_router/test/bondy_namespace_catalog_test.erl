@@ -48,6 +48,10 @@ declarations_test_() ->
             ?assertEqual(durable, maps:get(durability, Spec)),
             ?assertEqual(realm, maps:get(shard_by, Spec)),
             ?assertEqual(ew, maps:get(fold, Spec)),
+            %% Facts co-locate with their leading entity (forward → user shard,
+            %% reverse → group shard) so a user's groups / a group's members are
+            %% single-shard band scans (`bondy_db:aggregate_root/2`).
+            ?assertEqual(second_col, maps:get(aggregate_root, Spec)),
             ?assertEqual(true, maps:get(migrated, Spec, false)),
             ?assertEqual(true, maps:get(publish, Spec, false))
         end},

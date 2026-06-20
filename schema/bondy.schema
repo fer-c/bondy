@@ -30,20 +30,22 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Enables active anti-entropy (AAE) replication for the bondy_db storage
-%% substrate. When enabled the sync scheduler discovers peers from the live
-%% Partisan cluster membership and runs sync sessions over the dedicated
-%% Partisan AAE channel. Off by default — a single-node or non-replicated
-%% deployment needs no replication, and the substrate is not yet on any
-%% read/write hot path (this governs the plum_db-migration substrate only).
-%% This is the single master switch: the sync scheduler process always runs, but
-%% with AAE off `bondy_app:maybe_setup_oplog_replication/0` wires no Partisan peer
-%% source, so the scheduler has no peers and stays inert (the inner
-%% `sync_scheduler` app-env defaults `true` but is harmless without a peer source).
+%% substrate — the live store for security (users / grants), realms, the API
+%% gateway, the registry and more. When enabled the sync scheduler discovers
+%% peers from the live Partisan cluster membership and runs sync sessions over
+%% the dedicated Partisan AAE channel, converging each node's view of the
+%% replicated tables. On by default. This is the single master switch: the sync
+%% scheduler process always runs, but with AAE off
+%% `bondy_app:maybe_setup_oplog_replication/0` wires no Partisan peer source, so
+%% the scheduler has no peers and stays inert. A single-node deployment is
+%% unaffected either way — it has no peer to sync with, and the authentication
+%% freshness fence treats a lone node as vacuously fresh (see
+%% `oplog.aae.fence.on_isolation`).
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "oplog.aae", "bondy_oplog.aae_enabled", [
   {datatype, {flag, on, off}},
-  {default, off}
+  {default, on}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -84,20 +86,23 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc What the authentication AE fence does on a node that can reach NO peers
-%% for the security tables. A node partitioned into a minority still has peers in
-%% its membership, so its sync rounds fail and its freshness decays naturally —
-%% this policy governs only the genuinely-isolated case (solo membership). Only
-%% relevant when `oplog.aae` is on.
-%%   refuse  - fail closed: refuse all new authentication while isolated. The
-%%             secure default — a node that cannot confirm freshness with any
-%%             peer must not authenticate against a possibly-stale security view.
-%%             (A single-node deployment runs with `oplog.aae` off, where the
-%%             fence is a no-op, so it is unaffected.)
-%%   proceed - treat isolation as vacuously fresh and keep authenticating. Most
-%%             available, but during a partition a stale isolated node would
-%%             accept a token revoked elsewhere until it heals. Not recommended
-%%             for a security fence.
+%% @doc What the authentication AE fence does on a node in a multi-node cluster
+%% that currently cannot confirm freshness with any peer — partitioned into a
+%% minority, or cold-started before its first AE round completes. Such a node
+%% still lists its peers in its Partisan membership, so it knows it may be lagging
+%% a security change made elsewhere. A genuine single-node deployment (membership
+%% is just this node) is NOT governed by this policy: with no peer to lag, its
+%% view is vacuously fresh and it always authenticates — so flipping `oplog.aae`
+%% on does not lock out a lone node. Only relevant when `oplog.aae` is on.
+%%   refuse  - fail closed: refuse all new authentication until a peer round
+%%             confirms freshness. The secure default — a node that cannot confirm
+%%             freshness with any peer must not authenticate against a possibly-
+%%             stale security view. A node restarting into an established cluster
+%%             refuses only until its first sync round (typically sub-second).
+%%   proceed - treat the unreachable peers as vacuously fresh and keep
+%%             authenticating. Most available, but during a partition a stale
+%%             minority node would accept a token revoked elsewhere until it
+%%             heals. Not recommended for a security fence.
 %%   quorum  - certify freshness (and so authenticate) only while connected to a
 %%             majority of the expected cluster membership; a minority partition
 %%             refuses even if it can still sync internally. Secure AND available

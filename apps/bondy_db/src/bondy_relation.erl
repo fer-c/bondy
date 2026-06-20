@@ -20,27 +20,43 @@ that every "list the things in a realm" call needs:
   operations (rename, bulk-delete) that must be complete but must not
   hold the whole table in memory.
 
-## Why `range_all/5` and not `range/5`
+## Pagination modes
 
 A relation's keys are spread across all of a table's shards
 (`phash2({Bucket, Key})`) until `shard_by => realm` is honoured, so a page
-must scatter its `[Low, High)` window across every shard and k-way merge
-the bounded per-shard results (`bondy_db:range_all/5`). A single-shard
-`range/5` would return only the fraction of the window that hashes to one
-shard. When realm-sharding lands the merge collapses to one non-empty
-shard for free — same call, optimal cost.
+cannot come from a single shard for free. There are two ways to assemble it,
+and they trade *ordering* against *cost*. `new/2` fixes the mode per
+relation (`mode => partition | global`, default `partition`).
+
+- **`partition` (default)** — walk the shards in index order, filling the
+  page from one shard before moving to the next, and stop as soon as `limit`
+  accepted rows are collected. A large realm's page is therefore served from
+  **one** shard (one bounded `bondy_db:range/5`), not a scatter across all of
+  them. The result is *stable, complete, duplicate-free* but **not globally
+  key-ordered**: rows are key-sorted *within* a shard and concatenated in
+  shard-index order. This is the right mode for "enumerate the things in a
+  realm" surfaces, where pages must page cleanly but need not be alphabetical.
+
+- **`global`** — scatter the `[Low, High)` window across **every** shard and
+  k-way merge the bounded per-shard results (`bondy_db:range_all/5`), so the
+  full result is globally key-ordered. Every page touches every shard. Use it
+  only when a caller genuinely needs sorted output. When `shard_by => realm`
+  lands, a realm's keys collapse onto one shard and the two modes converge.
 
 ## Cursor
 
-The cursor is the order-preserving storage key of the last row returned,
-plus a `schema_hash` identifying the `(tag, schema)` it was minted for.
-Resumption is a `range_all/5` whose open bound is moved just past that key
-(`<<Key, 0>>` ascending; the key itself as the exclusive upper bound
-descending), so pages never skip or duplicate a row even when rejected
-rows (see `t:decoder/0`) are interleaved between accepted ones.
-`encode_cursor/1` / `decode_cursor/2` ship the cursor over the wire
-(base64 of `term_to_binary/1`), rejecting a cursor minted for a different
-relation with `{error, stale}`.
+The cursor is the storage key of the last row returned, plus a `schema_hash`
+identifying the `(tag, mode, schema)` it was minted for. In `partition` mode
+it also carries the **shard index** that key came from, so resumption
+continues that shard just past the key before walking the remaining shards;
+in `global` mode the shard is `undefined` and resumption moves a
+`range_all/5` open bound past the key. Either way the bound moves to
+`<<Key, 0>>` ascending or the key itself as the exclusive upper bound
+descending, so pages never skip or duplicate a row even when rejected rows
+(see `t:decoder/0`) are interleaved between accepted ones. `encode_cursor/1`
+/ `decode_cursor/2` ship the cursor over the wire (base64 of
+`term_to_binary/1`), rejecting a cursor minted for a different relation —
+or a different mode — with `{error, stale}`.
 
 ## Forward-map
 
@@ -61,18 +77,27 @@ adapter's `paginated_select`.
     tag :: atom(),
     table :: bondy_db:table(),
     decode :: decoder(),
-    schema_hash :: binary()
+    schema_hash :: binary(),
+    mode = partition :: mode()
 }).
 
 %% An opaque resumption token: the storage key of the last emitted row,
-%% scoped to the relation/schema that minted it.
+%% scoped to the relation/schema/mode that minted it. `shard` is the shard
+%% the key came from in `partition` mode (so resumption continues that shard
+%% before walking the rest), and `undefined` in `global` mode.
 -record(cursor, {
     key :: binary(),
-    schema_hash :: binary()
+    schema_hash :: binary(),
+    shard = undefined :: non_neg_integer() | undefined
 }).
 
 -opaque relation() :: #relation{}.
 -opaque cursor() :: #cursor{}.
+
+%% How `list/3` assembles a page from a multi-shard relation. `partition`
+%% (default) walks shards and is partition-ordered; `global` scatter-merges
+%% and is globally key-ordered. See the moduledoc.
+-type mode() :: partition | global.
 
 %% Maps a raw `bondy_db` row to the caller's tuple, or rejects it. Rejection
 %% lets one physical table back more than one logical relation (e.g. the
@@ -95,6 +120,7 @@ adapter's `paginated_select`.
 
 -export_type([relation/0]).
 -export_type([cursor/0]).
+-export_type([mode/0]).
 -export_type([page_opts/0]).
 -export_type([result_set/0]).
 
@@ -127,9 +153,14 @@ Build a relation descriptor for `Tag`.
 - `decode` — a `t:decoder/0` mapping a raw row to the caller's tuple (or
   `skip` to reject it).
 
-`Opts` MAY carry `schema` (any term) which, with `Tag`, fixes the cursor
-`schema_hash`; it defaults to `Tag`. Change it whenever a relation's key
-encoding changes so old cursors are rejected as stale.
+`Opts` MAY carry:
+
+- `mode` — `partition` (default) or `global`, fixing how `list/3` assembles
+  a page (see the moduledoc). The mode is part of the cursor identity, so a
+  cursor minted under one mode is rejected by a relation built with the other.
+- `schema` (any term) which, with `Tag` and `mode`, fixes the cursor
+  `schema_hash`; it defaults to `Tag`. Change it whenever a relation's key
+  encoding changes so old cursors are rejected as stale.
 """.
 -spec new(Tag :: atom(), Opts :: map()) -> relation().
 
@@ -137,11 +168,15 @@ new(Tag, #{table := Table, decode := Decode} = Opts) when
     is_atom(Tag), is_function(Decode, 1)
 ->
     Schema = maps:get(schema, Opts, Tag),
+    Mode = maps:get(mode, Opts, partition),
+    (Mode =:= partition orelse Mode =:= global)
+        orelse error({badarg, {mode, Mode}}),
     #relation{
         tag = Tag,
         table = Table,
         decode = Decode,
-        schema_hash = schema_hash(Tag, Schema)
+        schema_hash = schema_hash(Tag, {Mode, Schema}),
+        mode = Mode
     }.
 
 -doc """
@@ -192,7 +227,7 @@ Returns `{ok, ResultSet}` where `ResultSet` is a `t:result_set/0`
 ) ->
     {ok, result_set()} | {error, term()}.
 
-list(#relation{} = Relation, Realm, #{limit := Limit} = Opts) when
+list(#relation{mode = global} = Relation, Realm, #{limit := Limit} = Opts) when
     is_binary(Realm), is_integer(Limit), Limit > 0
 ->
     Dir = maps:get(direction, Opts, asc),
@@ -202,6 +237,24 @@ list(#relation{} = Relation, Realm, #{limit := Limit} = Opts) when
     case collect(Relation, Realm, Lo, Hi, Dir, Limit + 1, []) of
         {ok, AccRev} ->
             {ok, finalize_page(Relation, lists:reverse(AccRev), Limit)};
+        {error, _} = Err ->
+            Err
+    end;
+
+list(#relation{mode = partition} = Relation, Realm, #{limit := Limit} = Opts) when
+    is_binary(Realm), is_integer(Limit), Limit > 0
+->
+    Dir = maps:get(direction, Opts, asc),
+    After = maps:get(cursor, Opts, undefined),
+    ok = assert_cursor(Relation, After),
+    NShards = bondy_db:shard_count(Relation#relation.table),
+    Walk = shard_walk(Dir, start_shard(Dir, After, NShards), NShards),
+    {Lo0, Hi0} = start_bounds(Dir, After),
+    case
+        collect_partition(Relation, Realm, Walk, Lo0, Hi0, Dir, Limit + 1, [])
+    of
+        {ok, AccRev} ->
+            {ok, finalize_page_p(Relation, lists:reverse(AccRev), Limit)};
         {error, _} = Err ->
             Err
     end.
@@ -353,6 +406,149 @@ finalize_page(Relation, Accepted, Limit) ->
                 has_more => false
             }
     end.
+
+%% =============================================================================
+%% PRIVATE: partition-mode pagination
+%% =============================================================================
+
+%% @private
+%% Walk `Shards` (already in scan order) filling the page one shard at a time,
+%% stopping as soon as `Target` accepted rows are gathered. The first shard
+%% resumes from `(Lo, Hi)` (the cursor's intra-shard window); every later shard
+%% starts from the full per-shard band. The accumulator is newest-first and
+%% each entry is tagged with the shard it came from (so the cursor can name it).
+collect_partition(_Relation, _Realm, [], _Lo, _Hi, _Dir, _Target, Acc) ->
+    {ok, Acc};
+
+collect_partition(Relation, Realm, [Shard | Rest], Lo, Hi, Dir, Target, Acc) ->
+    case collect_shard(Relation, Realm, Shard, Lo, Hi, Dir, Target, Acc) of
+        {filled, Acc1} ->
+            {ok, Acc1};
+        {exhausted, Acc1} ->
+            {Lo1, Hi1} = default_bounds(Dir),
+            collect_partition(
+                Relation, Realm, Rest, Lo1, Hi1, Dir, Target, Acc1
+            );
+        {error, _} = Err ->
+            Err
+    end.
+
+%% @private
+%% Page a single shard with a bounded `range/5` forced onto `Shard`, advancing
+%% the intra-shard window past each chunk's last raw key, until either the
+%% global `Target` is reached (`{filled, Acc}`) or the shard's band is
+%% exhausted (`{exhausted, Acc}`). Mirrors `collect/7` but single-shard and
+%% shard-tagging, so a chunk's over-fetch absorbs the decoder's rejected rows.
+collect_shard(
+    #relation{table = Table} = Relation, Realm, Shard, Lo, Hi, Dir, Target, Acc
+) ->
+    Remaining = Target - length(Acc),
+    Chunk = erlang:max(Remaining, ?CHUNK_MIN),
+    RangeOpts = #{limit => Chunk, direction => Dir, shard => Shard},
+    case bondy_db:range(Table, Realm, Lo, Hi, RangeOpts) of
+        {ok, Rows} ->
+            {Acc1, LastRawKey} = decode_rows_p(Relation, Shard, Rows, Acc),
+            case length(Acc1) >= Target of
+                true ->
+                    {filled, Acc1};
+                false ->
+                    case length(Rows) < Chunk of
+                        true ->
+                            {exhausted, Acc1};
+                        false ->
+                            {Lo1, Hi1} = advance(Dir, Lo, Hi, LastRawKey),
+                            collect_shard(
+                                Relation, Realm, Shard,
+                                Lo1, Hi1, Dir, Target, Acc1
+                            )
+                    end
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+%% @private
+%% Decode a single shard's chunk, dropping rejected rows. Returns the
+%% accumulator extended (newest first) with accepted `{Shard, Key, Tuple}`
+%% triples, and the raw key of the last row (for intra-shard advancement).
+decode_rows_p(#relation{decode = Decode}, Shard, Rows, Acc0) ->
+    lists:foldl(
+        fun({Key, _Value, _Hlc} = Row, {Acc, _Last}) ->
+            case Decode(Row) of
+                {ok, Tuple} -> {[{Shard, Key, Tuple} | Acc], Key};
+                skip -> {Acc, Key}
+            end
+        end,
+        {Acc0, undefined},
+        Rows
+    ).
+
+%% @private
+%% As `finalize_page/3` but for shard-tagged accepted rows: the cursor records
+%% the shard of the last in-page row so resumption continues there before
+%% walking the remaining shards.
+finalize_page_p(Relation, Accepted, Limit) ->
+    case length(Accepted) > Limit of
+        true ->
+            Page = lists:sublist(Accepted, Limit),
+            {Shard, LastKey, _} = lists:last(Page),
+            #{
+                values => values_p(Page),
+                next => mk_cursor_p(Relation, Shard, LastKey),
+                has_more => true
+            };
+        false ->
+            #{
+                values => values_p(Accepted),
+                next => undefined,
+                has_more => false
+            }
+    end.
+
+%% @private
+values_p(Triples) ->
+    [Tuple || {_Shard, _Key, Tuple} <- Triples].
+
+%% @private
+mk_cursor_p(#relation{schema_hash = Hash}, Shard, Key) ->
+    #cursor{key = Key, shard = Shard, schema_hash = Hash}.
+
+%% @private
+%% The shard the page starts at: a cursor pins its shard; a fresh ascending
+%% page starts at shard 0, a fresh descending page at the last shard.
+start_shard(_Dir, #cursor{shard = Shard}, _N) when is_integer(Shard) ->
+    Shard;
+start_shard(asc, undefined, _N) ->
+    0;
+start_shard(desc, undefined, N) ->
+    N - 1.
+
+%% @private
+%% Shards to visit, in scan order: ascending climbs to the last shard,
+%% descending descends to shard 0.
+shard_walk(asc, Start, N) ->
+    lists:seq(Start, N - 1);
+shard_walk(desc, Start, _N) ->
+    lists:seq(Start, 0, -1).
+
+%% @private
+%% The start shard's intra-shard window. A cursor resumes just past its key
+%% (`advance/4`-consistent: successor lower bound ascending, key as exclusive
+%% upper bound descending); a fresh page spans the whole per-shard band.
+start_bounds(Dir, undefined) ->
+    default_bounds(Dir);
+start_bounds(asc, #cursor{key = Key}) ->
+    {<<Key/binary, 0>>, infinity};
+start_bounds(desc, #cursor{key = Key}) ->
+    {<<>>, Key}.
+
+%% @private
+%% A fresh shard's full intra-shard band — the whole realm band, restricted to
+%% that one shard by the `shard` range option (the facade folds the realm in).
+default_bounds(asc) ->
+    {<<>>, infinity};
+default_bounds(desc) ->
+    {<<>>, infinity}.
 
 %% @private
 do_fold(

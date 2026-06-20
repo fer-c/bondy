@@ -69,6 +69,11 @@ procedures are kept as deprecated aliases.
 -define(EXPORT_VSN, <<"2.0.0">>).
 %% The legacy plum_db backup format written by the former bondy_backup module.
 -define(LEGACY_FORMAT, dvvset_log).
+%% Import write-batch size: tier_0 (lww) entries are buffered and flushed via
+%% `bondy_db:apply_many/1` (one atomic WAL frame — one fsync — per shard per
+%% flush) instead of one fsync'd `apply/4` per entry. Tier_2 (ew/mv/aw) entries
+%% can't ride a shared frame and are applied individually.
+-define(IMPORT_BATCH, 500).
 
 -define(EXPORT_SPEC, #{
     <<"path">> => #{
@@ -491,7 +496,9 @@ do_import(Filename) ->
 %% @private
 do_import_aux(Log) ->
     try
-        Counters0 = #{read_count => 0, written_count => 0},
+        Counters0 = #{
+            read_count => 0, written_count => 0, writes => [], writes_n => 0
+        },
         import_chunk(
             {head, disk_log:chunk(Log, start)}, undefined, Log, Counters0
         )
@@ -504,7 +511,8 @@ do_import_aux(Log) ->
 
 %% @private
 import_chunk(eof, Mode, Log, Counters0) ->
-    Counters = maybe_flush_tokens(Mode, Counters0),
+    Counters1 = flush_writes(Counters0),
+    Counters = maybe_flush_tokens(Mode, Counters1),
     ok = disk_log:close(Log),
     {ok, Counters};
 import_chunk({error, _} = Error, _, Log, _) ->
@@ -551,13 +559,13 @@ import_terms([_Other | T], new, #{read_count := N} = Counters) ->
 %% @private
 %% Applies one logical entry to bondy_db. Tables declared but not provisioned on
 %% this node are skipped (counted as read only).
-apply_entry(Name, Band, Key, Value, #{read_count := N, written_count := M} = C) ->
+apply_entry(Name, Band, Key, Value, #{read_count := N} = C) ->
+    C1 = C#{read_count => N + 1},
     case bondy_namespace_catalog:table(Name) of
         undefined ->
-            C#{read_count => N + 1};
+            C1;
         Table ->
-            ok = bondy_db:apply(Table, Band, Key, {set, Value}),
-            C#{read_count => N + 1, written_count => M + 1}
+            buffer_write(Table, Band, Key, {set, Value}, C1)
     end.
 
 %% =============================================================================
@@ -656,9 +664,43 @@ apply_legacy(Table, Band, Key, Value, C) ->
         undefined ->
             skip({table_not_provisioned, Table}, C);
         Handle ->
-            ok = bondy_db:apply(Handle, Band, Key, {set, Value}),
-            bump(written_count, C)
+            buffer_write(Handle, Band, Key, {set, Value}, C)
     end.
+
+%% @private
+%% Buffer one write for batched application, or apply it inline when the table
+%% can't ride a shared WAL frame. tier_0 (lww) entries accumulate and flush via
+%% `bondy_db:apply_many/1` — one fsync per shard per `?IMPORT_BATCH`-sized flush
+%% rather than one fsync per entry, which is the difference between an import
+%% taking minutes and seconds. tier_2 (ew/mv/aw) cells stamp a per-cell causal
+%% context that `apply_many/1` refuses, so they are applied individually.
+buffer_write(Handle, Band, Key, Event, C) ->
+    case maps:get(causal_tier, Handle, tier_0) of
+        tier_2 ->
+            ok = bondy_db:apply(Handle, Band, Key, Event),
+            bump(written_count, C);
+        _ ->
+            Buf = [{Handle, Band, Key, Event} | maps:get(writes, C, [])],
+            N = maps:get(writes_n, C, 0) + 1,
+            C1 = C#{writes => Buf, writes_n => N},
+            case N >= ?IMPORT_BATCH of
+                true -> flush_writes(C1);
+                false -> C1
+            end
+    end.
+
+%% @private
+%% Apply the buffered tier_0 writes as one `apply_many/1` (grouped into one
+%% atomic WAL frame per shard) and credit them to `written_count`.
+flush_writes(#{writes := Buf, writes_n := N} = C) when Buf =/= [] ->
+    ok = bondy_db:apply_many(lists:reverse(Buf)),
+    C#{
+        writes => [],
+        writes_n => 0,
+        written_count => maps:get(written_count, C, 0) + N
+    };
+flush_writes(C) ->
+    C.
 
 -doc """
 Resolves a legacy plum_db object (a `dvvset`) to its live payload, unwrapping the

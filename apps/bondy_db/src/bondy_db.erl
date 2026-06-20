@@ -150,6 +150,8 @@ it).
 -export([ensure_fresh/2]).
 -export([info/1]).
 -export([namespace/1]).
+-export([shard_count/1]).
+-export([shard_for/3]).
 -export([publish_event/1]).
 
 -export_type([db/0, table/0, realm/0, entry/0, row/0]).
@@ -159,10 +161,8 @@ it).
 %% guard directly, without spinning a durable (leveled) Bookie just to
 %% reach its rejection branch.
 -export([assert_fused_requires_ephemeral/2]).
-%% Exposed so the strategy-aware routing (AR-2) can be pinned directly: the
-%% co-location invariant (a subject's record + grants share a shard) and the
-%% legacy `entity` equivalence, without standing up real shards.
--export([shard_for/3]).
+%% Exposed so the strategy-aware routing (AR-2) can be pinned directly without
+%% standing up real shards. (`shard_for/3` is now a public API — see above.)
 -export([aggregate_root/2]).
 -endif.
 
@@ -1812,6 +1812,18 @@ table was opened with `publish => true`).
 namespace(#{namespace := NS}) ->
     NS.
 
+-doc """
+The number of primary shards `Table` is partitioned into.
+
+A cell's shard is `shard_for/3`; a cross-shard read must visit `0..N-1`.
+Used by the relation layer to walk shards for partition-ordered pagination
+(`bondy_relation:list/3` in `partition` mode).
+""".
+-spec shard_count(Table :: table()) -> pos_integer().
+
+shard_count(#{shard_count := SC}) ->
+    SC.
+
 
 -doc """
 The application-facing AE freshness fence (`STORAGE_ARCHITECTURE` §9.1/§10.5).
@@ -3314,24 +3326,28 @@ index_rows(Topology, Realm, Rows) ->
 instance_for_shard(#{instance_ids := Ids}, Shard) ->
     maps:get(Shard, Ids).
 
-%% @private
-%% Strategy-aware shard selection (AR-2 / AR-3): the shard a `(Realm, Key)` cell
-%% routes to under the table's `partition_strategy`. Write (`apply/4`) and point
-%% read (`read/3`) BOTH call this so they always address the same shard.
-%%
-%%   entity    — legacy `phash2({Bucket, FoldedKey}, N)`, where FoldedKey is the
-%%               realm-folded cell key (G-1). Byte-identical to pre-AR-2 routing,
-%%               so a table that declares no strategy routes exactly as before.
-%%   aggregate — `phash2({Realm, AggregateRoot}, N)`: a subject's record + its
-%%               grants + sources co-locate on one shard (atomic batch, AR-4),
-%%               while subjects spread across shards so a single realm still
-%%               fills every core. The shard is independent of the Bucket, which
-%%               is precisely what co-locates different entity types of one
-%%               subject.
-%%   realm     — `phash2(realm_prefix(Realm, Depth), N)`: a whole realm (or a
-%%               shared dotted-prefix group of realms) on one shard. Single realm
-%%               ⇒ one shard (use only when per-realm atomicity outweighs the
-%%               lost write parallelism).
+-doc """
+The shard index a `(Realm, Key)` cell routes to under `Table`'s
+`partition_strategy`. Write (`apply/4`) and point read (`read/3`) both call this
+so they always address the same shard; a caller that wants to read a band on its
+co-located shard (e.g. the membership group join) passes the band's lower bound
+as `Key`.
+
+- `entity` — legacy `phash2({Bucket, FoldedKey}, N)`, where `FoldedKey` is the
+  realm-folded cell key (G-1). Byte-identical to pre-AR-2 routing, so a table
+  that declares no strategy routes exactly as before.
+- `aggregate` — `phash2({Realm, AggregateRoot}, N)`: a subject's record + its
+  grants + sources co-locate on one shard (atomic batch, AR-4), while subjects
+  spread across shards so a single realm still fills every core. The shard is
+  independent of the Bucket, which is precisely what co-locates different entity
+  types of one subject (`aggregate_root/2` picks the root from the key).
+- `realm` — `phash2(realm_prefix(Realm, Depth), N)`: a whole realm (or a shared
+  dotted-prefix group of realms) on one shard. Single realm ⇒ one shard (use
+  only when per-realm atomicity outweighs the lost write parallelism).
+""".
+-spec shard_for(Table :: table(), Realm :: realm(), Key :: binary()) ->
+    non_neg_integer().
+
 shard_for(#{shard_count := SC} = Table, Realm, Key) ->
     case maps:get(partition_strategy, Table, entity) of
         entity ->
@@ -3360,6 +3376,19 @@ shard_for(#{shard_count := SC} = Table, Realm, Key) ->
 %%                 SAME `{Realm, Subject}` shard as the subject's own record —
 %%                 the record keys by the plain (un-encoded) subject, so the
 %%                 column MUST be decoded back to that term to match.
+%%   second_col — the subject is the SECOND column of a band-tagged composite
+%%                 key `encode_col(Tag), 0, encode_col(Subject), 0, ...` (the
+%%                 permutation-index pattern, as in the `security_group_members`
+%%                 forward `[?MEMBER_FWD, User, Group]` / reverse
+%%                 `[?MEMBER_REV, Group, User]` bands). The leading column is a
+%%                 band marker shared by every cell, so routing on it would
+%%                 collapse a band onto one shard; routing on the second column
+%%                 instead co-locates each fact with its leading ENTITY — a
+%%                 forward cell with its user (the user record's shard), a
+%%                 reverse cell with its group (the group record's shard). The
+%%                 codec leaves exactly one `0x00` per column boundary (columns
+%%                 are escaped `0x00`-free), so the second column is the bytes
+%%                 between the 1st and 2nd separator, decoded back to its term.
 aggregate_root(identity, Key) ->
     Key;
 aggregate_root(leading_col, Key) when is_binary(Key) ->
@@ -3370,6 +3399,20 @@ aggregate_root(leading_col, Key) when is_binary(Key) ->
         nomatch ->
             %% No separator (a non-composite key under a leading_col table):
             %% defensively treat the whole key as the root.
+            Key
+    end;
+aggregate_root(second_col, Key) when is_binary(Key) ->
+    case binary:match(Key, <<0>>) of
+        {Pos1, 1} ->
+            Rest = binary:part(Key, Pos1 + 1, byte_size(Key) - Pos1 - 1),
+            ColBin =
+                case binary:match(Rest, <<0>>) of
+                    {Pos2, 1} -> binary:part(Rest, 0, Pos2);
+                    nomatch -> Rest
+                end,
+            bondy_oplog_index_key:decode_col(ColBin);
+        nomatch ->
+            %% No separator (a non-composite key): nothing to co-locate on.
             Key
     end.
 

@@ -276,46 +276,49 @@ range(#{bookie := Pid}, Bucket, Low, High, Opts) when
 ->
     Limit = maps:get(limit, Opts, 1000),
     Direction = maps:get(direction, Opts, asc),
-    {async, Folder} =
+    %% ONE streaming head-fold over BOTH subkeys reconstructs every frame in a
+    %% single ledger pass. The value lives in the head (no journal hop), so
+    %% there is no need for the old keylist + per-key `get/3` — that was an N+1
+    %% (one keylist fold, then two `book_headonly` reads per result row), which
+    %% turned a page into hundreds of random ledger reads per shard.
+    %%
+    %% Each Key stores its subkeys consecutively — `?SK_STATE` ("s") then, when
+    %% present, `?SK_VALUE` ("v") (omitted for `value_equals_state` cells). The
+    %% fold groups a Key's consecutive subkeys and reconstructs the V2 frame
+    %% exactly as `get/3` (value-absent ⇒ re-encode with `HasValueColumn=true`).
+    {Limiter, FoldFun} =
         case High of
             infinity ->
-                %% Whole-bucket fold from Low with no upper bound.
-                FoldFun0 = make_state_keylist_fold_open(Limit, Low),
-                leveled_bookie:book_keylist(
-                    Pid, ?HEAD_TAG, Bucket, {FoldFun0, {0, []}}
-                );
+                %% Whole-bucket fold, accepting state subkeys with Key >= Low.
+                {{range, Bucket, all}, make_frame_fold_open(Limit, Low)};
             _ ->
-                %% Range over the {Key, SubKey} composite that brackets
-                %% every **state** subkey between Low and High. We key off
-                %% `?SK_STATE` (not `?SK_VALUE`) because the state subkey is
-                %% the only one guaranteed present: a `value_equals_state`
-                %% cell (e.g. a secondary index entry or a G-Set) omits the
-                %% value subkey entirely (see `build_object_specs/2`), so a
-                %% fold over `?SK_VALUE` would skip those cells. `get/3`
-                %% reconstructs the full frame from whichever subkeys exist.
+                %% Leveled's KeyRange end is inclusive, so the fold drops a
+                %% state subkey whose Key equals `High` (half-open contract).
+                %% Both subkeys of every Key in `[Low, High)` fall in the
+                %% `{Key, SubKey}` band below `{High, ?SK_STATE}`.
                 KeyRange = {{Low, ?SK_STATE}, {High, ?SK_STATE}},
-                FoldFun1 = make_state_keylist_fold(Limit, High),
-                leveled_bookie:book_keylist(
-                    Pid, ?HEAD_TAG, Bucket, KeyRange, {FoldFun1, {0, []}}
-                )
+                {{range, Bucket, KeyRange}, make_frame_fold(Limit, High)}
         end,
-    {_N, KeysRev} =
+    {async, Folder} = leveled_bookie:book_headfold(
+        Pid,
+        ?HEAD_TAG,
+        Limiter,
+        {FoldFun, {0, [], none}},
+        false,
+        true,
+        false
+    ),
+    {_Count, PairsRev, Pending} =
         try
             Folder()
         catch
             throw:{limit_reached, S} -> S
         end,
-    KeysAsc = lists:reverse(KeysRev),
-    %% Fetch the state subkey for each key found, reconstruct the V2
-    %% frame. Returns [] if Reader fails on any key (treats as not_found).
-    Pairs = [
-        {K, F}
-     || K <- KeysAsc,
-        {ok, F} <- [get(#{bookie => Pid}, Bucket, K)]
-    ],
+    {_, FinalRev} = finalize_frame(Pending, 0, PairsRev),
+    PairsAsc = lists:reverse(FinalRev),
     case Direction of
-        asc -> {ok, Pairs};
-        desc -> {ok, lists:reverse(Pairs)}
+        asc -> {ok, PairsAsc};
+        desc -> {ok, lists:reverse(PairsAsc)}
     end.
 
 -doc """
@@ -623,39 +626,70 @@ build_object_specs([{Bucket, Key, Frame} | Rest], Acc) ->
         end,
     build_object_specs(Rest, Acc2).
 
-%% Fold fun for keylist over `{Key, ?SK_STATE}` composite keys.
-%% Accumulates Keys (deduped by the SubKey == ?SK_STATE filter) up to
-%% Limit; excludes any Key matching the High sentinel (half-open range).
-%% Keys off the state subkey because it is the only one every cell is
-%% guaranteed to have (`value_equals_state` cells omit `?SK_VALUE`).
-make_state_keylist_fold(Limit, High) ->
-    fun(_B, {K, SubKey}, {N, Items}) ->
-        case SubKey of
-            ?SK_STATE when K =/= High ->
-                N1 = N + 1,
-                State = {N1, [K | Items]},
-                case N1 >= Limit of
-                    true -> throw({limit_reached, State});
-                    false -> State
-                end;
-            _ ->
-                {N, Items}
-        end
+%% Head-fold builder for a bounded `[Low, High)` range. The fold visits each
+%% Key's subkeys consecutively (state then optional value); it finalizes the
+%% previous Key when the next Key's state subkey arrives, capping at `Limit`
+%% distinct keys. `High` is dropped (leveled's range end is inclusive). The
+%% accumulator is `{Count, ResultsRev, Pending}` where `Pending` is the Key
+%% currently being assembled.
+make_frame_fold(Limit, High) ->
+    fun
+        (_B, {K, ?SK_STATE}, _Value, Acc) when K =:= High ->
+            Acc;
+        (_B, {K, ?SK_STATE}, Value, {Count, Results, Pending}) ->
+            {Count1, Results1} = finalize_frame(Pending, Count, Results),
+            case Count1 >= Limit of
+                true ->
+                    throw({limit_reached, {Count1, Results1, none}});
+                false ->
+                    {Hlc, StateBytes} = decode_head(Value),
+                    {Count1, Results1, {K, Hlc, StateBytes, undefined}}
+            end;
+        (_B, {K, ?SK_VALUE}, Value, {Count, Results, {K, Hlc, StateBytes, _}}) ->
+            {Count, Results, {K, Hlc, StateBytes, head_payload(Value)}};
+        (_B, {_K, _SubKey}, _Value, Acc) ->
+            Acc
     end.
 
-%% Open-ended (`High =:= infinity`) variant: a whole-bucket fold keeps
-%% only state subkeys whose key is `>= Low`, capped at `Limit`.
-make_state_keylist_fold_open(Limit, Low) ->
-    fun(_B, {K, SubKey}, {N, Items}) ->
-        case SubKey of
-            ?SK_STATE when K >= Low ->
-                N1 = N + 1,
-                State = {N1, [K | Items]},
-                case N1 >= Limit of
-                    true -> throw({limit_reached, State});
-                    false -> State
-                end;
-            _ ->
-                {N, Items}
-        end
+%% Open-ended (`High =:= infinity`) variant: whole-bucket fold accepting state
+%% subkeys whose Key is `>= Low`, capped at `Limit`.
+make_frame_fold_open(Limit, Low) ->
+    fun
+        (_B, {K, ?SK_STATE}, _Value, Acc) when K < Low ->
+            Acc;
+        (_B, {K, ?SK_STATE}, Value, {Count, Results, Pending}) ->
+            {Count1, Results1} = finalize_frame(Pending, Count, Results),
+            case Count1 >= Limit of
+                true ->
+                    throw({limit_reached, {Count1, Results1, none}});
+                false ->
+                    {Hlc, StateBytes} = decode_head(Value),
+                    {Count1, Results1, {K, Hlc, StateBytes, undefined}}
+            end;
+        (_B, {K, ?SK_VALUE}, Value, {Count, Results, {K, Hlc, StateBytes, _}}) ->
+            {Count, Results, {K, Hlc, StateBytes, head_payload(Value)}};
+        (_B, {_K, _SubKey}, _Value, Acc) ->
+            Acc
     end.
+
+%% Finalize the pending Key into a `{Key, Frame}` result (newest-first),
+%% reconstructing the V2 frame exactly as `get/3`: a value-absent cell
+%% (`value_equals_state`) re-encodes with `HasValueColumn=true`; otherwise the
+%% state HLC plus both byte payloads.
+finalize_frame(none, Count, Results) ->
+    {Count, Results};
+finalize_frame({K, Hlc, StateBytes, undefined}, Count, Results) ->
+    Frame = bondy_oplog_cell_frame:encode(Hlc, StateBytes, undefined, true),
+    {Count + 1, [{K, Frame} | Results]};
+finalize_frame({K, Hlc, StateBytes, ValueBytes}, Count, Results) ->
+    Frame = bondy_oplog_cell_frame:encode(Hlc, StateBytes, ValueBytes, false),
+    {Count + 1, [{K, Frame} | Results]}.
+
+%% Parse a head subkey payload `<<HlcLen:16, Hlc, Bytes>>` to `{HlcInt, Bytes}`.
+decode_head(<<HlcLen:16/big-unsigned, Hlc:HlcLen/binary, Bytes/binary>>) ->
+    {binary:decode_unsigned(Hlc, big), Bytes}.
+
+%% The payload bytes of a head subkey (the state subkey's HLC is authoritative
+%% for the reconstructed frame, matching `get/3`).
+head_payload(<<HlcLen:16/big-unsigned, _Hlc:HlcLen/binary, Bytes/binary>>) ->
+    Bytes.

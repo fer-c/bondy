@@ -130,7 +130,7 @@ all() ->
         context_method_set_after_auth,
 
         %% CP-for-security (§9.2) — AAE-phase fence gating
-        aae_fence_refuses_stale_node,
+        aae_fence_single_node_available,
         aae_fence_isolation_policy
     ].
 
@@ -314,27 +314,29 @@ password_grant_jwt_has_required_claims(Config) ->
     ?assert(maps:is_key(<<"client_id">>, Scope)),
     ?assert(maps:is_key(<<"device_id">>, Scope)).
 
-aae_fence_refuses_stale_node(Config) ->
+aae_fence_single_node_available(Config) ->
+    %% A genuine single-node deployment (Partisan membership is just this node)
+    %% is vacuously fresh: there is no peer it could lag. Flipping the AAE phase
+    %% on must therefore NOT lock it out — `is_solo/0` certifies a solo node
+    %% under any `on_isolation` policy, including the fail-closed `refuse`
+    %% default, so authentication keeps working.
     RealmUri = ?config(realm_uri, Config),
     JWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
 
-    %% With AAE off (the default) the §9.2 CP-security gate is a no-op, so a
-    %% valid token authenticates exactly as before.
+    %% AAE off (the default): the fence is a no-op, a valid token authenticates.
     ?assertMatch({ok, _, _}, do_authenticate(RealmUri, JWT)),
 
-    %% Turn the AAE phase on: the freshness fence now runs. Single-node, no AE
-    %% loop advances the per-shard freshness atomics, so the security tables
-    %% read as maximally stale and the node must refuse new auth — the §9.8
-    %% "a partitioned/lagging node cannot authenticate new sessions" property.
     ok = application:set_env(bondy_oplog, aae_enabled, true),
+    ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
     try
-        %% bondy_auth:authenticate/4 strips the method state on error, so the
-        %% caller sees the 2-tuple {error, Reason}.
-        ?assertEqual(
-            {error, temporarily_unavailable},
-            do_authenticate(RealmUri, JWT)
-        )
+        %% Start from maximally-stale shards; the scheduler's no-peer seam
+        %% (driven directly here) certifies a solo node even under `refuse`, so
+        %% the fence passes.
+        ok = bondy_ct:aae_reset_all_stale(),
+        ok = bondy_ct:aae_bump_isolated_all(),
+        ?assertMatch({ok, _, _}, do_authenticate(RealmUri, JWT))
     after
+        ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
         ok = application:set_env(bondy_oplog, aae_enabled, false)
     end,
 
@@ -342,65 +344,48 @@ aae_fence_refuses_stale_node(Config) ->
     ?assertMatch({ok, _, _}, do_authenticate(RealmUri, JWT)).
 
 aae_fence_isolation_policy(Config) ->
-    %% On a node with no AE peers (single-node here), the
-    %% `oplog.aae.fence.on_isolation` policy decides whether the freshness fence
-    %% certifies. `maybe_bump_ae_isolated/1` is the exact function the sync
-    %% scheduler invokes at its no-peer seam, driven here directly so the
-    %% assertion is deterministic (no tick-timing race).
+    %% The `oplog.aae.fence.on_isolation` policy governs a node that is part of a
+    %% multi-node cluster but cannot reach a peer this round (so it is NOT solo).
+    %% We simulate that on a single test node by mocking the Partisan membership
+    %% to include an unreachable peer; `maybe_bump_ae_isolated/1` (the exact
+    %% function the scheduler invokes at its no-peer seam) is then driven directly
+    %% so the assertion is deterministic.
     RealmUri = ?config(realm_uri, Config),
     JWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
     ok = application:set_env(bondy_oplog, aae_enabled, true),
+    ok = bondy_ct:aae_mock_nonsolo_membership(),
     try
-        %% refuse (the secure default): the isolated bump is a strict no-op, the
-        %% security shards stay stale, and the fence refuses.
-        ok = reset_all_ae_stale(),
+        %% refuse (the secure default): an isolated bump on a non-solo node is a
+        %% strict no-op, the security shards stay stale, and the fence refuses.
+        ok = bondy_ct:aae_reset_all_stale(),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
-        ok = bump_isolated_all(),
+        ok = bondy_ct:aae_bump_isolated_all(),
         ?assertEqual(
             {error, temporarily_unavailable},
             do_authenticate(RealmUri, JWT)
         ),
 
-        %% proceed: a solo node treats isolation as vacuously fresh, so the
+        %% proceed: the unreachable peer is treated as vacuously fresh, so the
         %% isolated bump certifies freshness and the fence passes.
-        ok = reset_all_ae_stale(),
+        ok = bondy_ct:aae_reset_all_stale(),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, proceed),
-        ok = bump_isolated_all(),
+        ok = bondy_ct:aae_bump_isolated_all(),
         ?assertMatch({ok, _, _}, do_authenticate(RealmUri, JWT)),
 
-        %% quorum: solo membership is trivially a connected majority, so the
-        %% isolated bump certifies (a minority partition, untestable single-node,
-        %% would not).
-        ok = reset_all_ae_stale(),
+        %% quorum: connected to 1 of 2 expected members is a minority, so the
+        %% isolated bump does NOT certify and the fence refuses.
+        ok = bondy_ct:aae_reset_all_stale(),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, quorum),
-        ok = bump_isolated_all(),
-        ?assertMatch({ok, _, _}, do_authenticate(RealmUri, JWT))
+        ok = bondy_ct:aae_bump_isolated_all(),
+        ?assertEqual(
+            {error, temporarily_unavailable},
+            do_authenticate(RealmUri, JWT)
+        )
     after
+        ok = bondy_ct:aae_unmock_nonsolo_membership(),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
         ok = application:set_env(bondy_oplog, aae_enabled, false)
     end.
-
-%% @private
-%% Reset every primary shard on this node to the "infinitely stale" sentinel,
-%% so each policy assertion starts from a known-stale baseline.
-reset_all_ae_stale() ->
-    lists:foreach(
-        fun(NS) ->
-            lists:foreach(
-                fun(E) -> ok = bondy_oplog_core_registry:reset_stale_ae(E) end,
-                bondy_oplog_core_registry:primary_shards_for(NS)
-            )
-        end,
-        bondy_oplog_core_registry:namespaces()
-    ).
-
-%% @private
-%% Drive the scheduler's no-peer freshness path for every running instance.
-bump_isolated_all() ->
-    lists:foreach(
-        fun(I) -> ok = bondy_oplog_sync_session:maybe_bump_ae_isolated(I) end,
-        bondy_oplog:list_instances()
-    ).
 
 client_credentials_grant_issues_token(Config) ->
     RealmUri = ?config(realm_uri, Config),
