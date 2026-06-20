@@ -122,6 +122,8 @@ hash.
 -export_type([hash/0]).
 
 -export([capabilities/1]).
+-export([close/1]).
+-export([flush/1]).
 -export([destroy/1]).
 -export([delete/2]).
 -export([diff_to_list/2]).
@@ -309,8 +311,42 @@ capabilities(#?MODULE{store = Store}) ->
     bondy_mst_store:capabilities(Store).
 
 ?DOC("""
-Destroys the tree by destroying its backend store. Irreversible.
-Distinct from `delete/2`, which removes a single key from the tree.
+Gracefully closes the tree's backend store, preserving any persisted state so a
+later `new/1` against the same store options restores it. For a durable backend
+this flushes the current root and pending buffers and releases file descriptors;
+for an in-memory backend (`ets`/`map`) it is a no-op (the data is freed when the
+owning process exits). Use this — NOT `destroy/1` — when stopping a tree whose
+data must survive a restart.
+""").
+-spec close(t()) -> ok.
+
+close(#?MODULE{store = Val}) ->
+    bondy_mst_store:close(Val).
+
+?DOC("""
+Forces the tree's staged state (the current root and any buffered pages)
+durable WITHOUT closing the backend. For a durable backend this is the
+per-commit durability barrier: the on-disk root advances so a later `new/1`
+resumes from the latest committed root rather than replaying from the
+beginning. For an in-memory backend (`ets`/`map`) it is a no-op. Returns
+`{ok, Tree}` with the staged-state bookkeeping cleared, or `{error, Reason}`
+if the durable write failed (the in-memory root is unchanged and the next
+`flush/1`/`close/1` retries).
+""").
+-spec flush(t()) -> {ok, t()} | {error, term()}.
+
+flush(#?MODULE{store = Store0} = T) ->
+    case bondy_mst_store:flush(Store0) of
+        {ok, Store1} ->
+            {ok, T#?MODULE{store = Store1}};
+        {error, _} = Error ->
+            Error
+    end.
+
+?DOC("""
+Destroys the tree by destroying its backend store. Irreversible: a durable
+backend's on-disk data is DELETED. Distinct from `close/1`, which preserves
+persisted state, and from `delete/2`, which removes a single key from the tree.
 """).
 -spec destroy(t()) -> ok.
 

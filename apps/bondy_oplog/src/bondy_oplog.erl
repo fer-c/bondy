@@ -83,6 +83,7 @@ Per-instance event operations pass through to
 -export([await_apply/1]).
 -export([await_apply/2]).
 -export([await_drain/1]).
+-export([open_drain_gate/1]).
 -export([get/2]).
 -export([root_hash/1]).
 -export([fold_range/5]).
@@ -301,6 +302,20 @@ await_drain(InstanceId) ->
         _ ->
             {error, no_applier}
     end.
+
+-spec open_drain_gate(instance_id()) -> ok | {error, term()}.
+
+-doc """
+Release an instance founded with the WAL drain GATED (`drain_gated => true`),
+kicking its deferred replay. The provisioning orchestrator calls this once per
+collapsed per-shard instance after every table sharing the shard has registered
+its cell-apply bucket, so the shared WAL is replayed with a complete routing
+directory and no cell is skipped. Idempotent; a no-op on an ungated or fused
+instance. See `bondy_oplog_instance:open_drain_gate/1`.
+""".
+
+open_drain_gate(InstanceId) when is_binary(InstanceId) ->
+    bondy_oplog_instance:open_drain_gate(InstanceId).
 
 -spec get(instance_id(), bondy_oplog_event:event_key()) ->
     {ok, bondy_oplog_event:t()} | not_found.

@@ -25,6 +25,7 @@ multiplex_test_() ->
         fun two_tables_one_instance_project_independently/0,
         fun unregister_table_stops_routing/0,
         fun siblings_self_heal_from_registry/0,
+        fun gated_drain_defers_until_siblings_register/0,
         fun install_catalogue_batch_routes_by_bucket/0
     ]}.
 
@@ -150,6 +151,78 @@ siblings_self_heal_from_registry() ->
     ?assertEqual(
         {<<"vb">>, 1}, bondy_oplog_core:read(NsB, primary, ?BUCKET_B, <<"k">>)
     ),
+    ok = bondy_oplog:stop_instance(Id),
+    ok = bondy_oplog_core_registry:unregister(NsA, primary, 0),
+    ok = bondy_oplog_core_registry:unregister(NsB, primary, 0),
+    teardown_handles(HA),
+    teardown_handles(HB).
+
+%% Reproduces the cold-boot ordering bug (#104). A collapsed per-shard instance
+%% is founded by the FIRST table opened on the shard, but its single WAL holds
+%% cells for EVERY table sharing the shard. If the founding applier replayed the
+%% WAL at init — before the sibling tables registered their cell-apply buckets —
+%% the siblings' cells would resolve to no ctx and be SKIPPED, and (because the
+%% MST install is unconditional) the resume frontier would advance past them:
+%% permanent loss of every non-founding table's WAL-tail on the durable backend.
+%%
+%% Here only table A is registered when the instance starts (so even the init
+%% self-heal rebuild cannot recover B's ctx), and the instance is founded with
+%% the drain GATED. A table B cell is written to the shared WAL; while gated it
+%% is HELD, not skipped. After B registers and the gate is released, the deferred
+%% drain replays the whole WAL with a complete routing directory and B's cell
+%% projects. Without the gate this would assert `undefined` for table B.
+gated_drain_defers_until_siblings_register() ->
+    Id = mk_id(),
+    NsA = binary_to_atom(<<"gate_a_", Id/binary>>, utf8),
+    NsB = binary_to_atom(<<"gate_b_", Id/binary>>, utf8),
+    %% Only table A is registered at founding time — exactly the cold-boot
+    %% window where the sibling has not provisioned yet.
+    HA = register_shard(NsA, Id, ?BUCKET_A),
+    {ok, _} = bondy_oplog:start_instance(Id, #{
+        fold_module => lww_register,
+        applier => #{
+            cell_apply_target => {NsA, primary, 0},
+            cell_apply_bucket => ?BUCKET_A,
+            drain_gated => true
+        }
+    }),
+
+    %% Write cells for BOTH the founding table and the not-yet-registered
+    %% sibling B into the shared WAL.
+    _ = bondy_oplog:append(
+        Id, {cell_apply, ?BUCKET_A, <<"k">>, {set, 1, <<"va">>}}
+    ),
+    _ = bondy_oplog:append(
+        Id, {cell_apply, ?BUCKET_B, <<"k">>, {set, 1, <<"vb">>}}
+    ),
+
+    %% Gate holds: nothing has been replayed into the projection yet. A direct
+    %% projection read does NOT await the drain, so this observes the gate.
+    ?assertEqual(
+        undefined, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"k">>)
+    ),
+
+    %% Sibling B provisions: durable registry entry + runtime bucket
+    %% registration — the state the orchestrator reaches before releasing.
+    HB = register_shard(NsB, Id, ?BUCKET_B),
+    ApplierPid = bondy_oplog_registry:applier_pid(Id),
+    ok = bondy_oplog_applier:register_table(
+        ApplierPid, ?BUCKET_B, {NsB, primary, 0}, #{}
+    ),
+
+    %% Release the gate; the deferred drain replays the whole WAL now that the
+    %% routing directory is complete.
+    ok = bondy_oplog:open_drain_gate(Id),
+    _ = bondy_oplog:projection(Id),
+
+    %% Both cells projected — B's cell was held across the gate, not skipped.
+    ?assertEqual(
+        {<<"va">>, 1}, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"k">>)
+    ),
+    ?assertEqual(
+        {<<"vb">>, 1}, bondy_oplog_core:read(NsB, primary, ?BUCKET_B, <<"k">>)
+    ),
+
     ok = bondy_oplog:stop_instance(Id),
     ok = bondy_oplog_core_registry:unregister(NsA, primary, 0),
     ok = bondy_oplog_core_registry:unregister(NsB, primary, 0),

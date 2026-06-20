@@ -48,6 +48,7 @@ and implement different synchronization or caching mechanisms.
 
 %% API
 -export([close/1]).
+-export([flush/1]).
 -export([capabilities/1]).
 -export([copy/3]).
 -export([destroy/1]).
@@ -74,6 +75,15 @@ and implement different synchronization or caching mechanisms.
 -callback open(HashAlgorithm :: atom(), Opts :: opts()) -> backend().
 
 -callback close(backend()) -> ok.
+
+%% Forces any state staged in memory (the current root, buffered pages) durable
+%% WITHOUT releasing the backend. Optional: backends that hold no deferred
+%% durable state (`ets`, `map`) need not implement it — the facade treats an
+%% absent callback as a no-op. Durable backends return the updated backend so
+%% the caller can thread the cleared dirty state forward.
+-callback flush(backend()) -> {ok, backend()} | {error, term()}.
+
+-optional_callbacks([flush/1]).
 
 -callback get_root(backend()) -> hash() | undefined.
 
@@ -133,6 +143,25 @@ open(Mod, HashAlgo, Opts) when
 
 close(#?MODULE{mod = Mod, state = State}) ->
     Mod:close(State).
+
+?DOC("""
+Forces any in-memory durable state (the current root, buffered pages) to disk
+without releasing the backend. For a durable backend this is the per-commit
+durability barrier — it advances the on-disk root in lockstep with the WAL
+consumer offset so crash replay is bounded to one commit window. For an
+in-memory backend (`ets`/`map`) it is a no-op. Returns the updated store so the
+caller threads the cleared dirty state forward.
+""").
+-spec flush(Store :: t()) -> {ok, t()} | {error, term()}.
+
+flush(#?MODULE{mod = Mod, state = State0} = T) ->
+    Default = fun() -> {ok, State0} end,
+    case bondy_mst_utils:apply_lazy(Mod, flush, 1, [State0], Default) of
+        {ok, State1} ->
+            {ok, T#?MODULE{state = State1}};
+        {error, _} = Error ->
+            Error
+    end.
 
 -spec is_type(any()) -> boolean().
 

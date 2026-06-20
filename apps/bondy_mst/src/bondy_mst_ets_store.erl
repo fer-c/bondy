@@ -62,6 +62,7 @@ Read-concurrent, MST backend using `ets`.
 %% API
 -export([capabilities/1]).
 -export([close/1]).
+-export([flush/1]).
 -export([copy/3]).
 -export([destroy/1]).
 -export([delete/2]).
@@ -135,6 +136,12 @@ capabilities(#?MODULE{} = T) ->
 
 close(#?MODULE{}) ->
     ok.
+
+-spec flush(t()) -> {ok, t()}.
+
+flush(#?MODULE{} = T) ->
+    %% In-memory backend: nothing is staged for durability.
+    {ok, T}.
 
 -spec get_root(T :: t()) -> Root :: hash() | undefined.
 

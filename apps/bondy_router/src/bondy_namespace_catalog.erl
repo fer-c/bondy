@@ -610,6 +610,20 @@ open_core_into(State) ->
         Specs ->
             case do_open_core(Specs) of
                 {ok, Db, Sup, Dir} ->
+                    %% Every core table is now open, so every shared per-shard
+                    %% instance has its full set of cell-apply buckets
+                    %% registered. Release the founding instances' WAL-drain
+                    %% gates (set via `drain_gated => true` in
+                    %% `maybe_ephemeral_opts/2`) so each shared WAL replays with
+                    %% a complete routing directory — no non-founding table's
+                    %% cells are skipped. A no-op unless the core topology is
+                    %% `per_shard`. See `bondy_db:start_draining/1`.
+                    ok = bondy_db:start_draining(Db),
+                    %% Now that the gates are open, run the secondary-index
+                    %% cold-start that `open_table/3` deferred for the gated
+                    %% tables: each barriers its (now ungated) primary drain and
+                    %% trust-or-rebuilds from a fully-replayed primary.
+                    ok = cold_start_core_indexes(Specs),
                     State#state{db = Db, leveled_sup = Sup, dir = Dir};
                 {error, Reason} ->
                     %% Don't brick the node over a migration feature — log
@@ -623,6 +637,25 @@ open_core_into(State) ->
                     State
             end
     end.
+
+%% @private
+%% Run the deferred secondary-index cold-start for every opened core table. Called
+%% AFTER `bondy_db:start_draining/1` has released the founding instances' WAL-drain
+%% gates, so each table's `bondy_db:cold_start_table_indexes/1` barriers a now-
+%% ungated, fully-replayed primary. A no-op for index-less tables and for tables
+%% whose handle is absent (a partial provisioning failure already logged).
+cold_start_core_indexes(Specs) ->
+    lists:foreach(
+        fun(#{name := Name}) ->
+            case table(Name) of
+                undefined ->
+                    ok;
+                Table ->
+                    ok = bondy_db:cold_start_table_indexes(Table)
+            end
+        end,
+        Specs
+    ).
 
 %% @private
 open_registry_into(State) ->
@@ -936,12 +969,25 @@ maybe_ephemeral_opts(#{db := core, durability := durable}, Opts) ->
     %% `pre_bootstrap` waiting for a live peer to bootstrap from — which a single
     %% node never has. Under multi-node AAE every node genesis-seeds and the lww
     %% merge reconciles their cells (proven by `bondy_aae_cluster_SUITE`).
+    %% `drain_gated => true` founds each shared per-shard instance with its WAL
+    %% drain deferred. The `core` DB collapses every table onto N shard
+    %% instances (one WAL each); the first table opened on a shard founds the
+    %% instance and the rest register their cell-apply buckets as they open. A
+    %% founding instance that drained at init — before its siblings registered —
+    %% would skip (and, since the MST install is unconditional, LOSE) every
+    %% not-yet-registered table's WAL-tail cells on restart. `provision/1`
+    %% releases the gate via `bondy_db:start_draining/1` AFTER all core tables
+    %% are open. See `bondy_db:start_draining/1` and the applier `drain_gate`.
     Opts#{
         oplog_instance_opts => #{
             backend => bondy_mst_pack_store,
             storage_path => core_mst_dir(),
             wal_dir => core_wal_dir(),
-            seed => true
+            seed => true,
+            %% `log_boot_replay` emits one NOTICE when each durable core shard
+            %% begins reading its WAL at boot and one when that replay reaches
+            %% end-of-log — so a node's boot shows it reading each WAL.
+            applier => #{drain_gated => true, log_boot_replay => true}
         }
     };
 maybe_ephemeral_opts(_Spec, Opts) ->

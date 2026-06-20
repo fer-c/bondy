@@ -284,7 +284,34 @@ instances are unaffected.
     %% Callers parked on `await_drain/1` (the cold-start rebuild barrier),
     %% replied `ok` the next time the WAL drain reaches end-of-log. Empty in
     %% steady state.
-    drain_waiters = [] :: [gen_server:from()]
+    drain_waiters = [] :: [gen_server:from()],
+    %% Per-boot WAL-drain gate, distinct from the durable bootstrap
+    %% `lifecycle`. A collapsed per-shard instance (`shared_shards`) is founded
+    %% by the FIRST table opened on its shard, but its single WAL holds cells
+    %% for EVERY table sharing the shard. If the applier drained at init —
+    %% before the sibling tables register their cell-apply buckets — those
+    %% siblings' cells would resolve to no ctx and be skipped (lost: the MST
+    %% install is unconditional, so resume advances past them). `gated` defers
+    %% the drain until the provisioning orchestrator (the catalogue) has
+    %% registered every table on the shard and releases it via
+    %% `open_drain_gate/1`. Unlike `lifecycle`, this gate is NOT durable: it
+    %% re-engages on every boot, because the registration race recurs on every
+    %% boot. Defaults to `open` so single-table (`per_table_shard`) instances
+    %% and tests are byte-identical to the pre-gate path.
+    drain_gate = open :: open | gated,
+    %% Boot WAL-replay logging state machine (opt-in via `log_boot_replay`).
+    %% Emits exactly ONE log when this instance's WAL replay begins and ONE
+    %% when the first drain reaches end-of-log (boot catch-up complete) — a
+    %% per-WAL boot progress marker, not a per-batch trace. `disabled` (the
+    %% default) is a no-op; only the durable `core` shards opt in (set by the
+    %% catalogue), so tests and ephemeral instances stay quiet.
+    %%   disabled            — logging off.
+    %%   armed               — opted in, replay not started.
+    %%   {running, T0, N}    — replay started at `T0` (monotonic µs), `N`
+    %%                         events applied so far.
+    %%   done                — end-of-log logged; steady-state drains are silent.
+    boot_replay = disabled ::
+        disabled | armed | {running, integer(), non_neg_integer()} | done
 }).
 
 -type shard_key() :: {atom(), atom(), non_neg_integer()}.
@@ -331,7 +358,18 @@ instances are unaffected.
     %% Secondary-index descriptors for this primary table. Passed
     %% through into the `cell_apply_ctx`; only meaningful alongside
     %% `cell_apply_target`.
-    secondary_indexes => [index_descriptor()]
+    secondary_indexes => [index_descriptor()],
+    %% Found this instance with the WAL drain GATED: the applier does not
+    %% drain (nor cold-replay) at init; it waits for `open_drain_gate/1`.
+    %% Set by the provisioning orchestrator for a collapsed per-shard
+    %% (`shared_shards`) instance so its shared WAL is not replayed until
+    %% every sibling table on the shard has registered its cell-apply bucket.
+    %% Default `false`. See the `drain_gate` state field.
+    drain_gated => boolean(),
+    %% Emit a single boot log when this instance's WAL replay starts and a
+    %% single log when the first drain reaches end-of-log. Default `false`.
+    %% Set by the catalogue for the durable `core` shards. See `boot_replay`.
+    log_boot_replay => boolean()
 }.
 
 -export_type([opts/0]).
@@ -381,6 +419,7 @@ instances are unaffected.
 -export([build_cell_apply_source/3]).
 -export([register_table/4]).
 -export([unregister_table/2]).
+-export([open_drain_gate/1]).
 -export([resume_position/2]).
 -export([collect_frames/2]).
 -export([diff_pairs/3]).
@@ -784,6 +823,19 @@ unregister_table(ApplierPid, Bucket) when
 ->
     gen_server:call(ApplierPid, {unregister_table, Bucket}, infinity).
 
+-doc """
+Releases an applier founded with `drain_gated => true`: flips its per-boot drain
+gate `open` and kicks the deferred WAL drain (and the cold-replay catch-up). The
+provisioning orchestrator calls this — exactly once per per-shard instance —
+after every table sharing the shard has registered its cell-apply bucket, so the
+shared WAL is replayed with a complete `cell_apply_source` and no cell is
+skipped. Idempotent and asynchronous; a no-op on an ungated applier.
+""".
+-spec open_drain_gate(ApplierPid :: pid()) -> ok.
+
+open_drain_gate(ApplierPid) when is_pid(ApplierPid) ->
+    gen_server:cast(ApplierPid, open_drain_gate).
+
 -spec cell_context(pid(), term(), term()) ->
     {ok, term()} | {error, term()}.
 
@@ -907,10 +959,25 @@ do_init_2(
     ApplyBatchMax = maps:get(
         apply_batch_max_events, Opts, ?DEFAULT_APPLY_BATCH_MAX_EVENTS
     ),
+    DrainGate =
+        case maps:get(drain_gated, Opts, false) of
+            true -> gated;
+            false -> open
+        end,
+    BootReplay =
+        case maps:get(log_boot_replay, Opts, false) of
+            true -> armed;
+            false -> disabled
+        end,
     case resolve_siblings(InstanceId) of
         {ok, InstP, WalP, MST, Watermark} ->
             CO = read_consumer_offset(WalDir),
-            StartPos = resume_position(MST, Watermark),
+            %% Read the MST's last key in the INSTANCE process — it owns the
+            %% pack store's raw (process-bound) fds. Reading it here on the
+            %% shared `MST` handle would `pread` a sealed pack off the
+            %% instance's fd and crash with `not_on_controlling_process`.
+            MstLast = bondy_oplog_instance:mst_last(InstP),
+            StartPos = resume_position(MstLast, Watermark),
             case
                 bondy_oplog_wal_reader:open(
                     WalP, StartPos, [{follow, false}]
@@ -967,22 +1034,36 @@ do_init_2(
                         ),
                         install_in_flight = InFlightRef,
                         max_install_in_flight = InFlightCap,
-                        lifecycle = Lifecycle
+                        lifecycle = Lifecycle,
+                        drain_gate = DrainGate,
+                        boot_replay = BootReplay
                     },
                     ok = bondy_oplog_registry:set_applier_pid(
                         InstanceId, self()
                     ),
-                    self() ! drain,
-                    %% Cold-replay catch-up: a durable MST can hold
-                    %% peer-authored events from a previous run whose
-                    %% `replay_cell_events` never ran (process died
-                    %% between `integrate_peer_root/2` and the cast).
-                    %% The WAL drain only handles events past
-                    %% `resume_position/2`, so without this the
-                    %% projection stays stale until the next sync tick.
-                    case CellCtx of
-                        undefined -> ok;
-                        _ -> gen_server:cast(self(), replay_cell_events)
+                    %% When the drain is gated (a collapsed per-shard instance
+                    %% whose sibling tables have not all registered yet), defer
+                    %% BOTH the WAL drain and the cold-replay catch-up until the
+                    %% orchestrator calls `open_drain_gate/1`. The applier_pid is
+                    %% published above regardless, so the release — and any
+                    %% sibling `register_table/4` — can reach this process while
+                    %% it waits.
+                    case DrainGate of
+                        open ->
+                            self() ! drain,
+                            %% Cold-replay catch-up: a durable MST can hold
+                            %% peer-authored events from a previous run whose
+                            %% `replay_cell_events` never ran (process died
+                            %% between `integrate_peer_root/2` and the cast).
+                            %% The WAL drain only handles events past
+                            %% `resume_position/2`, so without this the
+                            %% projection stays stale until the next sync tick.
+                            case CellCtx of
+                                undefined -> ok;
+                                _ -> gen_server:cast(self(), replay_cell_events)
+                            end;
+                        gated ->
+                            ok
                     end,
                     {ok, State};
                 {error, Reason} ->
@@ -1424,15 +1505,42 @@ handle_cast(drain_resume, #state{drain_deferred = true} = State) ->
     %% Capacity has freed up; resume the drain loop immediately.
     self() ! drain,
     {noreply, State#state{drain_deferred = false}};
+handle_cast(open_drain_gate, #state{drain_gate = open} = State) ->
+    %% Already released (or never gated). Idempotent — releasing twice, or a
+    %% release racing an instance restart, is a no-op.
+    {noreply, State};
+handle_cast(
+    open_drain_gate,
+    #state{drain_gate = gated, cell_apply_ctx = CellCtx} = State
+) ->
+    %% Provisioning is complete: every table sharing this per-shard instance
+    %% has registered its cell-apply bucket, so the WAL can be replayed with a
+    %% whole `cell_apply_source` and no cell is skipped. Kick the drain (and the
+    %% cold-replay catch-up that init deferred — see `do_init_2/9`).
+    self() ! drain,
+    case CellCtx of
+        undefined -> ok;
+        _ -> gen_server:cast(self(), replay_cell_events)
+    end,
+    {noreply, State#state{drain_gate = open}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info(drain, #state{drain_gate = gated} = State) ->
+    %% Boot drain gate engaged: the orchestrator has not yet released this
+    %% per-shard instance's drain (sibling tables may still be registering
+    %% their cell-apply buckets). Swallow drain ticks — including any stray
+    %% `drain_resume`/`drain_backstop` re-sends — without draining or arming a
+    %% backstop. `open_drain_gate/1` re-sends `drain` when it flips the gate.
+    {noreply, State};
 handle_info(drain, State0) ->
     %% A fresh drain supersedes any parked idle waiter — cancel it so
     %% waiter helpers don't accumulate across drains.
-    State1 = cancel_idle_waiter(State0),
+    State1 = boot_replay_start(cancel_idle_waiter(State0)),
     case drain_loop(State1) of
         {ok, State2} ->
+            %% Reaching end-of-log is the boot WAL-replay completion signal.
+            State2b = boot_replay_end(State2),
             %% Caught up. Park an async waiter on the WAL's durable
             %% position instead of re-sending `drain` immediately (a
             %% busy spin: the next-to-read byte is already durable in
@@ -1446,7 +1554,7 @@ handle_info(drain, State0) ->
             %% Reaching end-of-log is also the signal any `await_drain/1`
             %% callers (the cold-start rebuild barrier) wait on, so reply to
             %% them here before parking.
-            {noreply, arm_idle_waiter(reply_drain_waiters(State2))};
+            {noreply, arm_idle_waiter(reply_drain_waiters(State2b))};
         {paused, State2} ->
             %% Hit the demand cap. Stay parked — the instance will
             %% send `drain_resume` once it processes a batch. The
@@ -1561,15 +1669,20 @@ init_fold(InstanceId) ->
 %% Falls back to `beginning` when both inputs are absent (fresh
 %% instance with empty MST and no compaction history) or when the
 %% MST handle is missing.
-resume_position(MST, Watermark) ->
-    case resume_hlc(MST, Watermark) of
+resume_position(MstLast, Watermark) ->
+    case resume_hlc(MstLast, Watermark) of
         undefined -> beginning;
         HLC -> {hlc, HLC}
     end.
 
 %% @private
-resume_hlc(MST, Watermark) ->
-    MstHlc = mst_last_hlc(MST),
+%% `MstLast` is the MST's last `{Key, Value}` (or `undefined`) ALREADY READ in
+%% the process that owns the store. The durable pack store's sealed-pack file
+%% descriptors are raw and hence process-bound, so `bondy_mst:last/1` must run in
+%% the INSTANCE process (`bondy_oplog_instance:mst_last/1`) — calling it on the
+%% shared handle from the applier process crashes with `not_on_controlling_process`.
+resume_hlc(MstLast, Watermark) ->
+    MstHlc = mst_last_hlc(MstLast),
     WmHlc = watermark_hlc(Watermark),
     case {MstHlc, WmHlc} of
         {undefined, undefined} -> undefined;
@@ -1582,11 +1695,8 @@ resume_hlc(MST, Watermark) ->
 %% @private
 mst_last_hlc(undefined) ->
     undefined;
-mst_last_hlc(MST) ->
-    case bondy_mst:last(MST) of
-        undefined -> undefined;
-        {Key, _Value} -> bondy_oplog_event:key_hlc(Key)
-    end.
+mst_last_hlc({Key, _Value}) ->
+    bondy_oplog_event:key_hlc(Key).
 
 %% @private
 watermark_hlc(undefined) ->
@@ -1685,11 +1795,14 @@ drain_loop_step(
         {frames, Batch, {NextSeg, NextOff}, NewIter, More} ->
             StateA = apply_batch(State0, Batch),
             {LastHlc, Count} = batch_summary(Batch),
-            State1 = bump_offset(
-                StateA#state{iter = NewIter},
-                NextSeg,
-                NextOff,
-                LastHlc,
+            State1 = boot_replay_accrue(
+                bump_offset(
+                    StateA#state{iter = NewIter},
+                    NextSeg,
+                    NextOff,
+                    LastHlc,
+                    Count
+                ),
                 Count
             ),
             case More of
@@ -3120,6 +3233,43 @@ batch_summary(Batch) ->
         bondy_oplog_event:key(LastEvent)
     ),
     {LastHlc, length(Batch)}.
+
+%% @private
+%% Boot WAL-replay logging (opt-in via `log_boot_replay`; see the `boot_replay`
+%% state field). `boot_replay_start/1` logs once on the first drain after init
+%% (ungated) or gate release (gated); `boot_replay_end/1` logs once the first
+%% drain reaches end-of-log; `boot_replay_accrue/2` tallies the events replayed
+%% in between. All three are no-ops once `done` (steady-state drains are silent)
+%% and when logging was never armed.
+boot_replay_start(#state{boot_replay = armed, instance_id = Id} = State) ->
+    ?LOG_NOTICE(#{
+        description => "bondy_db boot: replaying WAL",
+        instance_id => Id
+    }),
+    State#state{boot_replay = {running, erlang:monotonic_time(microsecond), 0}};
+boot_replay_start(State) ->
+    State.
+
+%% @private
+boot_replay_accrue(#state{boot_replay = {running, T0, N}} = State, Count) ->
+    State#state{boot_replay = {running, T0, N + Count}};
+boot_replay_accrue(State, _Count) ->
+    State.
+
+%% @private
+boot_replay_end(
+    #state{boot_replay = {running, T0, N}, instance_id = Id} = State
+) ->
+    DurationMs = (erlang:monotonic_time(microsecond) - T0) div 1000,
+    ?LOG_NOTICE(#{
+        description => "bondy_db boot: WAL replay complete",
+        instance_id => Id,
+        events => N,
+        duration_ms => DurationMs
+    }),
+    State#state{boot_replay = done};
+boot_replay_end(State) ->
+    State.
 
 %% @private
 bump_offset(

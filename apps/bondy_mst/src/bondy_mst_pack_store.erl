@@ -172,6 +172,7 @@ volume.
 %% bondy_mst_store callbacks
 -export([open/2]).
 -export([close/1]).
+-export([flush/1]).
 -export([capabilities/1]).
 -export([copy/3]).
 -export([destroy/1]).
@@ -308,6 +309,22 @@ close(#?MODULE{} = T) ->
     ),
     bondy_mst_pack_writer:close(T#?MODULE.writer),
     ok.
+
+-spec flush(t()) -> {ok, t()} | {error, term()}.
+
+flush(#?MODULE{writer = W} = T) ->
+    %% Durability barrier: datasync the incoming pack (pages durable) then
+    %% rewrite the manifest with the staged root (pages-before-root, so the
+    %% persisted root never references a non-durable page). Idempotent — a
+    %% no-op when nothing is staged. The writer's own buffers (tombstones,
+    %% free_set) are rebuilt on reopen and are not part of resume, so they
+    %% are intentionally left to their own debounce.
+    case bondy_mst_pack_writer:flush(W) of
+        {ok, W1} ->
+            {ok, T#?MODULE{writer = W1}};
+        {error, _} = Error ->
+            Error
+    end.
 
 -spec capabilities(t()) -> map().
 

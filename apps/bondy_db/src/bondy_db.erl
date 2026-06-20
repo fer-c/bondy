@@ -126,6 +126,8 @@ it).
 
 -export([open/2]).
 -export([close/1]).
+-export([start_draining/1]).
+-export([cold_start_table_indexes/1]).
 -export([open_table/3]).
 -export([close_table/1]).
 -export([tick/1]).
@@ -536,7 +538,27 @@ open_table_provision(
                             ok = assert_durable_rebuild_invariant(
                                 Backend, IndexMap
                             ),
-                            ok = cold_start_indexes(NS, InstanceIds, IndexMap),
+                            %% Defer the index cold-start barrier when the
+                            %% founding instance's WAL drain is GATED. The
+                            %% barrier `await_drain`s the primary, but a gated
+                            %% drain never reaches end-of-log, so running it here
+                            %% would DEADLOCK; and the founding instance is
+                            %% shared across tables, so draining before the
+                            %% siblings register would replay the shared WAL with
+                            %% an incomplete routing directory (skipping — and on
+                            %% the durable backend LOSING — the not-yet-registered
+                            %% tables' cells). The orchestrator runs the deferred
+                            %% cold-start via `cold_start_table_indexes/1` once it
+                            %% has released every shard's gate (`start_draining/1`).
+                            ok =
+                                case is_drain_gated(OplogOpts) of
+                                    true ->
+                                        ok;
+                                    false ->
+                                        cold_start_indexes(
+                                            NS, InstanceIds, IndexMap
+                                        )
+                                end,
                             {ok, #{
                                 db_name => DbName,
                                 db_topology => Topology,
@@ -705,6 +727,81 @@ close(#{topology := Topology, topology_state := State} = Db) ->
             EtsState -> bondy_db_topology_memory:shutdown(EtsState)
         end,
     Topology:shutdown(State).
+
+-doc """
+Release the WAL drain on every collapsed per-shard instance of `Db`.
+
+A `shared_shards` (`per_shard` strategy) DB founds one oplog instance per shard,
+each shared by every table and backed by a single WAL. The first table opened on
+a shard founds the instance; sibling tables register their cell-apply buckets as
+they open. If the founding instance drained its WAL at `init/1` — before the
+siblings registered — cells for the not-yet-registered tables would resolve to no
+context and be dropped (and lost: the MST install is unconditional, so resume
+advances past them). To prevent that, founding instances are started with the
+drain GATED (the catalogue passes `drain_gated => true` in
+`oplog_instance_opts.applier`). The orchestrator MUST call `start_draining/1`
+once, AFTER all of `Db`'s tables are open, to release every shard's drain so the
+shared WAL is replayed with a complete routing directory.
+
+A no-op for topologies whose instance-mapping strategy is not `per_shard`
+(`per_table_shard` / memory) — nothing is gated there, so callers that never set
+`drain_gated` need not call this. Idempotent.
+""".
+-spec start_draining(Db :: db()) -> ok.
+
+start_draining(#{name := DbName, topology := Topology, opts := Opts}) ->
+    case instances_strategy(Topology) of
+        per_shard ->
+            ShardCount = maps:get(shard_count, Opts, ?DEFAULT_SHARD_COUNT),
+            lists:foreach(
+                fun(Shard) ->
+                    InstanceId = encode_instance_id(DbName, Shard),
+                    case bondy_oplog:open_drain_gate(InstanceId) of
+                        ok ->
+                            ok;
+                        {error, Reason} ->
+                            ?LOG_WARNING(#{
+                                description =>
+                                    "bondy_db could not release the per-shard "
+                                    "WAL drain gate; the instance may not be "
+                                    "running. Its shared WAL will not replay "
+                                    "until the gate is released.",
+                                db => DbName,
+                                instance_id => InstanceId,
+                                shard => Shard,
+                                reason => Reason
+                            })
+                    end
+                end,
+                lists:seq(0, ShardCount - 1)
+            );
+        _ ->
+            ok
+    end.
+
+-doc """
+Run the deferred secondary-index cold-start for `Table`.
+
+`open_table/3` skips the inline index cold-start barrier (`await_drain` on the
+primary, then trust-or-rebuild) when the table's founding instance is provisioned
+with the WAL drain GATED (`drain_gated`) — running it before the gate is released
+would deadlock and would replay the shared WAL with an incomplete routing
+directory. The provisioning orchestrator calls this once per table AFTER
+`start_draining/1` has released every shard's drain gate, so the barrier observes
+a fully-replayed primary built from the complete routing directory.
+
+A no-op for a table with no secondary indexes (`open_table/3` already keeps that
+drain async) and for a table whose instance was never gated (its cold-start ran
+inline at open). Idempotent — the trust markers make a re-run cheap.
+""".
+-spec cold_start_table_indexes(Table :: table()) -> ok.
+
+cold_start_table_indexes(#{
+    namespace := NS,
+    instance_ids := InstanceIds,
+    indexes := IndexMap
+}) ->
+    cold_start_indexes(NS, InstanceIds, IndexMap).
 
 -doc """
 Generate a fresh HLC from the DB's clock. Callers inject this HLC into
@@ -2950,6 +3047,14 @@ assert_durable_rebuild_invariant(_Backend, _IndexMap) ->
 %% the trusted shards so a finite `max_lag` read passes. Best-effort — a failure
 %% leaves the index marked for rebuild (reads refuse), recoverable by a later
 %% trigger — so it never fails `open_table`.
+%% @private
+%% `true` when this table's founding instance is provisioned with the WAL drain
+%% gated (`oplog_instance_opts.applier.drain_gated`). The inline index cold-start
+%% barrier is deferred for such tables — see the call site and
+%% `cold_start_table_indexes/1`.
+is_drain_gated(OplogOpts) ->
+    maps:get(drain_gated, maps:get(applier, OplogOpts, #{}), false) =:= true.
+
 cold_start_indexes(_NS, _InstanceIds, IndexMap) when map_size(IndexMap) =:= 0 ->
     %% No secondary indexes ⇒ no trust/rebuild decision and no barrier. Skipping
     %% keeps the WAL drain ASYNC for index-less tables (forcing it here would

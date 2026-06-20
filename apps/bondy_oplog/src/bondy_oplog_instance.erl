@@ -424,6 +424,7 @@ without protocol changes.
 -export([size/1]).
 -export([first_key/1]).
 -export([latest_key/1]).
+-export([mst_last/1]).
 -export([origin/1]).
 -export([info/1]).
 
@@ -459,6 +460,7 @@ without protocol changes.
 -export([finalize_catalogue_bootstrap/3]).
 -export([register_table/4]).
 -export([unregister_table/2]).
+-export([open_drain_gate/1]).
 
 %% Registry helpers
 -export([whereis/1]).
@@ -1134,6 +1136,19 @@ latest_key(Target) ->
     %% Same atomicity story as `first_key/1`.
     gen_server:call(target(Target), latest_key).
 
+-doc """
+The MST's last `{Key, Value}` (durable replay frontier), or `undefined` for an
+empty MST. Read inside the instance process because the durable pack store's
+sealed-pack file descriptors are raw and process-bound — the applier calls this
+at init to compute its `resume_position/2` instead of folding the shared MST
+handle in its own process (which raises `not_on_controlling_process`).
+""".
+-spec mst_last(instance_id() | pid()) ->
+    undefined | {bondy_oplog_event:event_key(), term()}.
+
+mst_last(Target) ->
+    gen_server:call(target(Target), mst_last).
+
 ?DOC("""
 Returns the configured Origin for `Target`.
 
@@ -1287,26 +1302,12 @@ set of pages, this instance returns whichever it has.
 -spec get_pages(instance_id() | pid(), [bondy_mst:hash()]) ->
     #{bondy_mst:hash() => bondy_mst_page:t()}.
 
-get_pages(Target, Hashes) when is_binary(Target), is_list(Hashes) ->
-    %% Lock-free: pages live in the underlying store, addressable by
-    %% hash. Read directly via the registry-published MST handle.
-    case bondy_oplog_registry:mst(Target) of
-        undefined ->
-            error({noproc, {?MODULE, Target}});
-        MST ->
-            Store = bondy_mst:store(MST),
-            lists:foldl(
-                fun(Hash, Acc) ->
-                    case bondy_mst_store:get(Store, Hash) of
-                        undefined -> Acc;
-                        Page -> Acc#{Hash => Page}
-                    end
-                end,
-                #{},
-                Hashes
-            )
-    end;
 get_pages(Target, Hashes) when is_list(Hashes) ->
+    %% Always route through the instance gen_server. Page reads hit the
+    %% durable pack store's raw (process-bound) file descriptors, which only
+    %% the instance process may use — a direct read from the AAE responder
+    %% process raises `not_on_controlling_process`. The handler folds in the
+    %% instance process (see `do_handle_call({get_pages, _}, ...)`).
     gen_server:call(target(Target), {get_pages, Hashes}).
 
 ?DOC("""
@@ -1335,20 +1336,12 @@ to compute what to request from the peer.
 -spec missing_set(instance_id() | pid(), bondy_mst:hash()) ->
     [bondy_mst:hash()].
 
-missing_set(Target, Root) when is_binary(Target), is_binary(Root) ->
-    %% Lock-free: missing_set walks the store from Root computing what
-    %% pages we lack. Pure read; safe off the gen_server.
-    case bondy_oplog_registry:mst(Target) of
-        undefined ->
-            error({noproc, {?MODULE, Target}});
-        MST ->
-            Set = bondy_mst:missing_set(MST, Root),
-            case is_list(Set) of
-                true -> Set;
-                false -> sets:to_list(Set)
-            end
-    end;
 missing_set(Target, Root) when is_binary(Root) ->
+    %% Always route through the instance gen_server. Walking the store from
+    %% Root to compute missing pages reads the durable pack store's raw
+    %% (process-bound) fds — a direct read from the sync-session (initiator)
+    %% process raises `not_on_controlling_process`. The handler walks in the
+    %% instance process (see `do_handle_call({missing_set, _}, ...)`).
     gen_server:call(target(Target), {missing_set, Root}).
 
 ?DOC("""
@@ -1679,6 +1672,34 @@ unregister_table(InstanceId, Bucket) when
                     {error, instance_not_running};
                 ApplierPid ->
                     bondy_oplog_applier:unregister_table(ApplierPid, Bucket)
+            end
+    end.
+
+?DOC("""
+Releases an instance founded with the WAL drain GATED (`drain_gated => true`):
+flips its per-boot drain gate `open` and kicks the deferred replay. The
+provisioning orchestrator calls this once per collapsed per-shard instance,
+after every table sharing the shard has registered its cell-apply bucket, so the
+shared WAL is replayed with a complete routing directory and no cell is skipped.
+Idempotent; a no-op on an ungated or fused (ephemeral) instance. Returns
+`{error, instance_not_running}` if the applier has not published its pid yet.
+""").
+-spec open_drain_gate(InstanceId :: instance_id()) ->
+    ok | {error, term()}.
+
+open_drain_gate(InstanceId) when is_binary(InstanceId) ->
+    case bondy_oplog_registry:fused(InstanceId) of
+        true ->
+            %% Fused (ephemeral, memory-topology) instances are never gated —
+            %% their WAL is in-memory and empty on boot, so there is no replay
+            %% race to gate.
+            ok;
+        _ ->
+            case bondy_oplog_registry:applier_pid(InstanceId) of
+                undefined ->
+                    {error, instance_not_running};
+                ApplierPid ->
+                    bondy_oplog_applier:open_drain_gate(ApplierPid)
             end
     end.
 
@@ -2242,11 +2263,22 @@ do_handle_call(
                 {ok, {CurrentRoot, Pairs}}
         end,
     {reply, Reply, State};
-do_handle_call(drain_install_queue, _From, State) ->
+do_handle_call(drain_install_queue, _From, State0) ->
     %% Synchronisation barrier for the applier's commit boundary.
     %% Calls jump past casts in the mailbox order, so by the time
     %% this call is processed, every prior `install_local_batch`
     %% cast has been handled. The reply itself carries no payload.
+    %%
+    %% This is also the MST root durability barrier. Every install_local_batch
+    %% merged its events into the MST and staged the new root in memory
+    %% (`bondy_mst_pack_writer:set_root/2` only rewrites the manifest lazily);
+    %% by flushing here we advance the on-disk root in lockstep with the WAL
+    %% `consumer.offset` commit_now/1 is about to write. That bounds crash
+    %% replay to one commit window — without it the on-disk root lags the
+    %% debounce, `resume_position/2` reads a stale root and replays the whole
+    %% WAL, and the compaction watermark never advances so the WAL never
+    %% truncates. No-op for ephemeral (ets/map) backends.
+    State = flush_mst_root(State0),
     {reply, ok, State};
 do_handle_call(await_overlay_drained, From, State) ->
     %% Event-driven `await_apply/1,2`. Reply inline when the overlay
@@ -2421,6 +2453,13 @@ do_handle_call(origin, _From, State) ->
 do_handle_call(first_key, _From, #state{mst = MST, overlay = Overlay} = State) ->
     Reply = merge_first_key_tab(Overlay, MST),
     {reply, Reply, State};
+do_handle_call(mst_last, _From, #state{mst = undefined} = State) ->
+    {reply, undefined, State};
+do_handle_call(mst_last, _From, #state{mst = MST} = State) ->
+    %% Runs in the instance process, which owns the pack store's raw fds, so the
+    %% sealed-pack `pread` behind `bondy_mst:last/1` is on its controlling
+    %% process. The applier consumes this for `resume_position/2`.
+    {reply, bondy_mst:last(MST), State};
 do_handle_call(latest_key, _From, #state{mst = MST, overlay = Overlay} = State) ->
     Reply = merge_latest_key_tab(Overlay, MST),
     {reply, Reply, State};
@@ -2758,8 +2797,16 @@ fused_open_reader(#state{fused_drain = undefined} = State) ->
 fused_open_reader(#state{fused_drain = FD} = State0) ->
     case ensure_wal_pid(State0) of
         {ok, WalPid, State1} ->
+            %% In the instance process (owns the store's fds), so reading the
+            %% MST's last key here is safe; `resume_position/2` now takes the
+            %% already-read last `{Key, Value}` rather than the MST handle.
+            MstLast =
+                case State1#state.mst of
+                    undefined -> undefined;
+                    MST -> bondy_mst:last(MST)
+                end,
             StartPos = bondy_oplog_applier:resume_position(
-                State1#state.mst, State1#state.watermark
+                MstLast, State1#state.watermark
             ),
             ReaderMod = fused_reader_mod(FD#fused_drain.wal_backend),
             %% `chunk` caps the mem reader's per-`next` events at the apply
@@ -3204,6 +3251,7 @@ fused_bump_ae_targets(Targets) ->
 
 terminate(_Reason, #state{
     mst = MST,
+    backend = Backend,
     compaction_checkpoint = CkptMod,
     compaction_checkpoint_state = CkptState,
     overlay = Overlay
@@ -3214,7 +3262,23 @@ terminate(_Reason, #state{
     %% gen_server's init runs and republishes; lock-free read paths
     %% use `is_process_alive/1` to detect that case.
     _ = catch CkptMod:close(CkptState),
-    _ = catch bondy_mst:destroy(MST),
+    %% CLOSE (not destroy) a durable MST: `terminate` runs on EVERY stop —
+    %% node shutdown, supervisor `one_for_all` subtree restart — none of which
+    %% mean "delete this data". For a pack-store backend `destroy/1` does
+    %% `file:del_dir_r/1`, which would wipe the durable tree on every restart
+    %% and force a full WAL replay (resume falls back to `beginning` because
+    %% `bondy_mst:last/1` returns `undefined`), and the WAL would never
+    %% truncate. `close/1` flushes the root + fds and PRESERVES the tree so the
+    %% next `init/1` restores it. Ephemeral backends (`ets`/`map`) keep
+    %% `destroy/1`: it frees the table explicitly and there is no on-disk state
+    %% to lose. Deleting a durable table's data belongs on an explicit drop
+    %% path, not here. Unknown backends fail safe to `close` (never delete).
+    _ =
+        case Backend of
+            ets -> catch bondy_mst:destroy(MST);
+            map -> catch bondy_mst:destroy(MST);
+            _ -> catch bondy_mst:close(MST)
+        end,
     %% Drop the overlay — it dies with the instance, no heir, no
     %% survival across subtree restart. The applier reads the tid
     %% from the registry, and the registry row's `overlay_tab`
@@ -3415,6 +3479,31 @@ is_fast_install(Event, Origin, MaxSeq) ->
     Key = bondy_oplog_event:key(Event),
     bondy_oplog_event:key_origin(Key) =:= Origin andalso
         bondy_oplog_event:key_seq(Key) > MaxSeq.
+
+%% @private
+%% MST root durability barrier, invoked at the applier's commit boundary
+%% (`drain_install_queue`). Each install_local_batch merged its events into the
+%% MST and staged the new root in RAM via `bondy_mst:put_batch/2`'s single
+%% `set_root`; this forces that staged root durable so `resume_position/2`
+%% bounds crash replay to one commit window. It rides the existing per-commit
+%% barrier — it does NOT touch the per-batch merge fast path and never enters
+%% the per-put path. No-op for ephemeral (ets/map) backends.
+flush_mst_root(#state{mst = undefined} = State) ->
+    State;
+flush_mst_root(#state{mst = MST0, instance_id = Id} = State) ->
+    case bondy_mst:flush(MST0) of
+        {ok, MST1} ->
+            State#state{mst = MST1};
+        {error, Reason} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Failed to flush durable MST root at commit barrier",
+                instance_id => Id,
+                reason => Reason
+            }),
+            %% Leave the staged root in place; the next commit barrier retries.
+            State
+    end.
 
 %% @private
 install_slow_events(State, []) ->

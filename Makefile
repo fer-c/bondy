@@ -176,6 +176,9 @@ node1-clean:
 node2:
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as node2 release
+	@set -a && \
+    [ -f .env ] && . .env && \
+    set +a && \
 	ERL_DIST_PORT=27782 _build/node2/rel/bondy/bin/bondy console
 
 node2-clean:

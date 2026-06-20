@@ -39,6 +39,7 @@ from the map.
 -export_type([page/0]).
 
 -export([close/1]).
+-export([flush/1]).
 -export([capabilities/1]).
 -export([copy/3]).
 -export([destroy/1]).
@@ -87,6 +88,12 @@ capabilities(#?MODULE{}) ->
 
 close(#?MODULE{}) ->
     ok.
+
+-spec flush(t()) -> {ok, t()}.
+
+flush(#?MODULE{} = T) ->
+    %% In-memory backend: nothing is staged for durability.
+    {ok, T}.
 
 -spec get_root(T :: t()) -> Root :: hash() | undefined.
 
