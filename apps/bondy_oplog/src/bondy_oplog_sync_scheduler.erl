@@ -37,6 +37,9 @@ Read from app env at boot:
 | `bootstrap_retry_base_ms` | `500`   | Initial backoff after a failed bootstrap session. Doubles per consecutive failure up to `bootstrap_retry_max_ms`. |
 | `bootstrap_retry_max_ms`  | `30000` | Upper bound on the exponential backoff window. |
 | `bootstrap_retry_jitter`  | `true`  | Multiplies the computed wait by `uniform(0.5, 1.5)` to spread retries across instances. |
+| `live_sync_adaptive`  | `true`  | Throttle live (post-bootstrap) syncs adaptively. `false` ⇒ every live instance syncs every peer every tick (historical). |
+| `live_sync_base_ms`   | `sync_interval_ms` | Poll cadence for a live shard whose local root is actively moving. |
+| `live_sync_max_ms`    | `5000` | Upper bound on the live-sync poll window once a shard goes quiescent. Instances that back the auth fence are exempt — they are never throttled. |
 
 ## Default dispatch — lifecycle-aware
 
@@ -54,7 +57,8 @@ accordingly:
   expensive (full projection ship) and multi-peer would not improve
   correctness.
 - **`live`** — fan out one async pull-direction sync session per peer
-  via `bondy_oplog_sync_session:start/3` (the historical behaviour).
+  via `bondy_oplog_sync_session:start/3`, gated by the adaptive
+  live-sync throttle (see below).
 
 ## Bootstrap peer strategy
 
@@ -112,6 +116,54 @@ and the backoff; consumers wanting either with a custom strategy
 should call back into
 `bondy_oplog_sync_scheduler:default_dispatch/2` after their
 selection.
+
+## Live-sync throttle
+
+A `live` instance only re-syncs to discover divergence; once its data
+has converged it has nothing to pull, yet the historical dispatch still
+spawned a session against every peer on every tick. Across many shards
+this is a constant, pointless load — the dominant steady-state cost of
+running AAE.
+
+The throttle (default on; disable with `live_sync_adaptive = false`)
+makes the live-sync cadence adaptive per instance, using the instance's
+in-memory MST root as a free change detector:
+
+- While the local root is moving — a local write, data arriving via
+  normal replication, or a prior sync catching up — the instance
+  dispatches every tick (cadence `live_sync_base_ms`, default the tick
+  interval). This is exactly the historical behaviour during activity.
+- Once the root goes quiescent, the poll window doubles each round up to
+  `live_sync_max_ms` (default `5s`). The instance still polls at the
+  capped cadence so divergence is discovered within at most one window.
+- The first such poll that pulls anything moves the local root, which
+  resets the window to the base interval, so recovery is fast once it
+  starts.
+
+`bondy_db` apply is pull-only (no eager push), so the capped cadence is
+also the steady-state cross-node convergence latency for a quiescent
+shard — keep `live_sync_max_ms` below the convergence SLA you need. The
+default `5s` trades a 10× churn cut for at most `5s` of convergence lag
+on idle shards.
+
+**Fence exemption.** An instance that carries AE freshness targets backs
+the read-side authentication fence: its successful sync round re-bumps
+those targets (`bondy_oplog_sync_session:maybe_record/4`), even when the
+shard is converged, and the fence refuses authentication once a target
+goes unconfirmed past `auth_max_lag`. Such an instance is **never**
+throttled — backing it off would starve the bump and trip the fence on
+inactivity. Only instances with no AE targets (for which the bump is a
+no-op) are throttled. This keeps the throttle a pure performance change
+with no effect on auth availability.
+
+The throttle keys solely on the local root, so it never trades away
+freshness for data this node already has; it only stretches the
+*detection* latency for data it is missing, bounded by the cap. The
+`pre_bootstrap` path is untouched — it has its own peer strategy and
+failure backoff. Telemetry: `[bondy_oplog, sync_scheduler,
+live_sync_poll]` on each backed-off poll (with `window_ms`) and
+`[bondy_oplog, sync_scheduler, live_sync_skipped]` on each tick a
+converged instance is skipped.
 """).
 
 -record(state, {
@@ -138,12 +190,16 @@ selection.
 -export([set_bootstrap_retry_base_ms/1]).
 -export([set_bootstrap_retry_max_ms/1]).
 -export([set_bootstrap_retry_jitter/1]).
+-export([set_live_sync_adaptive/1]).
+-export([set_live_sync_base_ms/1]).
+-export([set_live_sync_max_ms/1]).
 -export([info/0]).
 -export([default_dispatch/2]).
 
 -define(RR_TAB, bondy_oplog_sync_scheduler_rr).
 -define(INFLIGHT_TAB, bondy_oplog_sync_scheduler_inflight).
 -define(BACKOFF_TAB, bondy_oplog_sync_scheduler_backoff).
+-define(LIVE_BACKOFF_TAB, bondy_oplog_sync_scheduler_live_backoff).
 
 %% gen_server callbacks
 -export([init/1]).
@@ -151,6 +207,12 @@ selection.
 -export([handle_cast/2]).
 -export([handle_info/2]).
 -export([terminate/2]).
+
+-ifdef(TEST).
+%% Exposed for deterministic unit testing of the live-sync backoff
+%% state machine, decoupled from the clock and instance root reads.
+-export([live_decide/5]).
+-endif.
 
 %% =============================================================================
 %% LIFECYCLE
@@ -282,6 +344,45 @@ set_bootstrap_retry_jitter(B) when is_boolean(B) ->
     ok.
 
 ?DOC("""
+Enables or disables the adaptive live-sync throttle. When `false`,
+every live instance dispatches a sync against every peer on every tick
+(the historical behaviour). When `true` (default), a converged shard
+backs off (see `set_live_sync_max_ms/1`) until its local root moves.
+""").
+-spec set_live_sync_adaptive(boolean()) -> ok.
+
+set_live_sync_adaptive(B) when is_boolean(B) ->
+    application:set_env(bondy_oplog, live_sync_adaptive, B),
+    ok.
+
+?DOC("""
+Sets the base live-sync poll interval in milliseconds — the cadence at
+which a live shard re-syncs while its local root is actively moving.
+Defaults to `sync_interval_ms` (the tick interval). The effective
+cadence is rounded up to a whole number of ticks.
+""").
+-spec set_live_sync_base_ms(non_neg_integer()) -> ok.
+
+set_live_sync_base_ms(Ms) when is_integer(Ms), Ms >= 0 ->
+    application:set_env(bondy_oplog, live_sync_base_ms, Ms),
+    ok.
+
+?DOC("""
+Sets the upper bound on the adaptive live-sync poll interval. Once a
+shard's local root goes quiescent the poll window doubles each round up
+to this cap; bounding how long a divergence can go undetected — and,
+since `bondy_db` apply propagates pull-only, the steady-state cross-node
+convergence latency for a quiescent shard. Defaults to `5000`.
+Instances that back the auth freshness fence are never throttled
+regardless of this value.
+""").
+-spec set_live_sync_max_ms(non_neg_integer()) -> ok.
+
+set_live_sync_max_ms(Ms) when is_integer(Ms), Ms >= 0 ->
+    application:set_env(bondy_oplog, live_sync_max_ms, Ms),
+    ok.
+
+?DOC("""
 Returns the scheduler's current configuration. Cheap.
 """).
 -spec info() -> map().
@@ -298,6 +399,7 @@ init(Opts) ->
     _ = ensure_rr_table(),
     _ = ensure_inflight_table(),
     _ = ensure_backoff_table(),
+    _ = ensure_live_backoff_table(),
     Dispatch =
         case maps:find(dispatch, Opts) of
             {ok, V} ->
@@ -364,7 +466,10 @@ handle_call(info, _From, State) ->
         bootstrap_retry_max_ms =>
             application:get_env(bondy_oplog, bootstrap_retry_max_ms, 30000),
         bootstrap_retry_jitter =>
-            application:get_env(bondy_oplog, bootstrap_retry_jitter, true)
+            application:get_env(bondy_oplog, bootstrap_retry_jitter, true),
+        live_sync_adaptive => live_adaptive_enabled(),
+        live_sync_base_ms => live_sync_base_ms(),
+        live_sync_max_ms => live_sync_max_ms()
     },
     {reply, Reply, State};
 handle_call({set_dispatch, Fun}, _From, State) ->
@@ -508,7 +613,7 @@ default_dispatch(InstanceId, Peers) ->
         pre_bootstrap ->
             maybe_dispatch_bootstrap(InstanceId, Peers);
         live ->
-            dispatch_live_sync(InstanceId, Peers);
+            maybe_dispatch_live(InstanceId, Peers);
         undefined ->
             %% Instance is starting up or unknown — no-op for this
             %% tick; the next tick will see the lifecycle once
@@ -753,6 +858,160 @@ backoff_remaining(InstanceId) ->
                 true -> {Remaining, Count};
                 false -> {0, Count}
             end
+    end.
+
+%% @private
+%% Adaptive live-sync throttle. A converged shard re-syncs only to
+%% discover peer-side divergence; once its local root stops moving,
+%% polling every peer every tick is pure churn. We dispatch on every
+%% tick while the local root is changing (active local write, normal
+%% replication, or catch-up pulling data in), and otherwise back the
+%% poll cadence off geometrically up to `live_sync_max_ms`. Any local
+%% root change — including data pulled in by a prior sync — resets the
+%% window to the base interval, so missed replication heals within at
+%% most one cap-length window and active divergence stays tick-fast.
+%% Bootstrap is unaffected (different lifecycle, its own backoff).
+maybe_dispatch_live(InstanceId, Peers) ->
+    case live_adaptive_enabled() andalso not backs_fence(InstanceId) of
+        false ->
+            %% Either throttling is off, or this instance backs the auth
+            %% freshness fence — its successful sync round re-bumps the
+            %% fence's AE targets (`bondy_oplog_sync_session:maybe_record/4`),
+            %% including for a converged shard, and the fence refuses
+            %% authentication once a target goes unconfirmed past
+            %% `auth_max_lag`. Such an instance MUST sync every tick;
+            %% backing it off would trip the fence on inactivity. Dispatch
+            %% unconditionally.
+            dispatch_live_sync(InstanceId, Peers);
+        true ->
+            case live_should_dispatch(InstanceId) of
+                true -> dispatch_live_sync(InstanceId, Peers);
+                false -> ok
+            end
+    end.
+
+%% @private
+%% An instance "backs the fence" when it carries AE freshness targets
+%% (set once at init via `bondy_oplog_registry:set_ae_targets/2`): a
+%% successful AE round freshens those targets, and the read-side auth
+%% fence depends on that bump landing within `auth_max_lag`. Throttling
+%% such an instance would starve the bump and trip the fence, so it is
+%% never throttled. An instance with no targets cannot affect the fence
+%% (the bump is a strict no-op there), so throttling it is safe. On any
+%% lookup error we fail safe — treat it as fence-backing (do not
+%% throttle).
+backs_fence(InstanceId) ->
+    case catch bondy_oplog_registry:ae_targets(InstanceId) of
+        L when is_list(L) -> L =/= [];
+        _ -> true
+    end.
+
+%% @private
+%% Decides whether this tick dispatches a live sync for the instance and
+%% records the decision in `?LIVE_BACKOFF_TAB`:
+%%     {InstanceId, LastRoot, NextDueMs, WindowMs}
+%%   - First sight, or the local root changed since last sight → dispatch
+%%     now and reset the window to the base interval (activity).
+%%   - Root unchanged and the window has not elapsed → skip.
+%%   - Root unchanged and the window has elapsed → dispatch a poll (to
+%%     detect peer-side divergence) and grow the window (×2, capped).
+live_should_dispatch(InstanceId) ->
+    _ = ensure_live_backoff_table(),
+    live_decide(
+        InstanceId,
+        current_root(InstanceId),
+        now_ms(),
+        live_sync_base_ms(),
+        live_sync_max_ms()
+    ).
+
+%% @private
+%% The live-sync backoff state machine, factored out of clock and
+%% root-reading so it is deterministically unit-testable. Reads/writes
+%% `?LIVE_BACKOFF_TAB` keyed by instance:
+%%     {InstanceId, LastRoot, NextDueMs, WindowMs}
+live_decide(InstanceId, Root, Now, Base, Max) ->
+    case ets:lookup(?LIVE_BACKOFF_TAB, InstanceId) of
+        [] ->
+            ets:insert(
+                ?LIVE_BACKOFF_TAB, {InstanceId, Root, Now + Base, Base}
+            ),
+            true;
+        [{InstanceId, LastRoot, _Due, _Window}] when Root =/= LastRoot ->
+            %% Activity → reset to the fast cadence.
+            ets:insert(
+                ?LIVE_BACKOFF_TAB, {InstanceId, Root, Now + Base, Base}
+            ),
+            true;
+        [{InstanceId, _Root, Due, Window}] when Now >= Due ->
+            %% Quiescent, poll window elapsed → poll + grow the window.
+            NextWindow = min(Window * 2, max(Base, Max)),
+            ets:insert(
+                ?LIVE_BACKOFF_TAB,
+                {InstanceId, Root, Now + NextWindow, NextWindow}
+            ),
+            telemetry:execute(
+                [bondy_oplog, sync_scheduler, live_sync_poll],
+                #{window_ms => NextWindow},
+                #{instance_id => InstanceId}
+            ),
+            true;
+        [{InstanceId, _Root, _Due, _Window}] ->
+            %% Quiescent, within window → skip (the churn we are cutting).
+            telemetry:execute(
+                [bondy_oplog, sync_scheduler, live_sync_skipped],
+                #{count => 1},
+                #{instance_id => InstanceId}
+            ),
+            false
+    end.
+
+%% @private
+%% The instance's in-memory MST root, used purely as a change detector
+%% for the throttle. Soft-fails to `undefined` (treated as "no change"
+%% against a prior `undefined`) if the instance is mid-restart.
+current_root(InstanceId) ->
+    try
+        bondy_oplog_instance:root_hash(InstanceId)
+    catch
+        _:_ -> undefined
+    end.
+
+%% @private
+live_adaptive_enabled() ->
+    application:get_env(bondy_oplog, live_sync_adaptive, true).
+
+%% @private
+%% Base poll interval; defaults to the tick interval so an active shard
+%% syncs every tick exactly as before.
+live_sync_base_ms() ->
+    application:get_env(
+        bondy_oplog,
+        live_sync_base_ms,
+        application:get_env(bondy_oplog, sync_interval_ms, 500)
+    ).
+
+%% @private
+live_sync_max_ms() ->
+    application:get_env(bondy_oplog, live_sync_max_ms, 5000).
+
+%% @private
+ensure_live_backoff_table() ->
+    case ets:info(?LIVE_BACKOFF_TAB) of
+        undefined ->
+            try
+                ets:new(?LIVE_BACKOFF_TAB, [
+                    named_table,
+                    set,
+                    public,
+                    {read_concurrency, true},
+                    {write_concurrency, true}
+                ])
+            catch
+                error:badarg -> ?LIVE_BACKOFF_TAB
+            end;
+        _ ->
+            ?LIVE_BACKOFF_TAB
     end.
 
 %% @private

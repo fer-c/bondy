@@ -98,6 +98,7 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 ]).
 
 -export([cell_keys_exported/1]).
+-export([content_digest_fold_exported/1]).
 
 -type handle() :: any().
 -type bucket() :: term().
@@ -213,7 +214,20 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -callback cell_keys(handle(), Scope :: cell_keys_scope()) ->
     [{bucket(), Key :: term()}].
 
--optional_callbacks([head/3, clear/2, cell_keys/2]).
+%% Capture a snapshot-isolated fold over every primary cell in `Scope` and
+%% return a 0-arity runnable that computes the projection CONTENT DIGEST
+%% (`bondy_oplog_content_digest`, the AR-17 convergence oracle) over that
+%% snapshot. The snapshot is taken eagerly at the call, so an instance can
+%% capture its boot state during the quiescent init window and run the
+%% `O(cells)` fold asynchronously off the boot path to recover the digest after
+%% a crash restart. A DURABLE adapter (leveled) exports it; an EPHEMERAL one
+%% (ETS) omits it — its projection is volatile, so its digest is `empty/0` at
+%% boot and reconverges from peer anti-entropy, never recomputed. Probe with
+%% `content_digest_fold_exported/1`.
+-callback content_digest_fold(handle(), Scope :: cell_keys_scope()) ->
+    fun(() -> bondy_oplog_content_digest:t()).
+
+-optional_callbacks([head/3, clear/2, cell_keys/2, content_digest_fold/2]).
 
 %% =============================================================================
 %% API
@@ -235,3 +249,18 @@ instead of silently building empty indexes on the next rebuild.
 cell_keys_exported(Adapter) when is_atom(Adapter) ->
     _ = code:ensure_loaded(Adapter),
     erlang:function_exported(Adapter, cell_keys, 2).
+
+-doc """
+Whether `Adapter` implements the optional `content_digest_fold/2` callback.
+
+The single decision point for the instance's crash-restart digest recovery: an
+adapter that exports it is durable (its projection survives restart and the
+digest must be recomputed from it); one that does not is ephemeral (its
+projection is volatile, so the digest is `bondy_oplog_content_digest:empty/0` at
+boot and reconverges from anti-entropy). Mirrors `cell_keys_exported/1`.
+""".
+-spec content_digest_fold_exported(Adapter :: module()) -> boolean().
+
+content_digest_fold_exported(Adapter) when is_atom(Adapter) ->
+    _ = code:ensure_loaded(Adapter),
+    erlang:function_exported(Adapter, content_digest_fold, 2).

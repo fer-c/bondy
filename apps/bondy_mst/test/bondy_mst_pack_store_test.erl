@@ -9,8 +9,11 @@
 %% 4. has / list / missing_set.
 %% 5. seal extension: hash visibility before vs after sealing; pack
 %%    fds rotate as expected.
-%% 6. delete (tombstone): hashes hidden from get/has/list after a
-%%    delete; re-put resurrects them.
+%% 6. delete (tombstone): the `free_set` excludes a hash from `list/1`
+%%    enumeration (and marks it for physical GC), but `get/2`/`has/2` still
+%%    serve a physically-present page — the tombstone is a GC/enumeration
+%%    hint, NOT a read mask (reachability from the root is the single source
+%%    of truth for liveness). A page that was never written reads as absent.
 %% 7. End-to-end MST workload: insert N pairs through the high-level
 %%    `bondy_mst` interface using `bondy_mst_pack_store` as the
 %%    backend; verify `to_list` matches.
@@ -539,31 +542,37 @@ auto_seal_survives_close_reopen_with_same_opts_test() ->
 %% delete / free tombstones
 %% =============================================================================
 
-delete_hides_hash_from_subsequent_reads_test() ->
+delete_excludes_hash_from_list_but_content_addressable_test() ->
     with_tmp_dir(fun(Dir) ->
         S0 = open_store(Dir),
         try
             P = mk_page(0, undefined, [{k, v, undefined}]),
             {Hash, S1} = bondy_mst_store:put(S0, P),
             S2 = bondy_mst_store:delete(S1, Hash),
-            ?assertEqual(undefined, bondy_mst_store:get(S2, Hash)),
-            ?assertNot(bondy_mst_store:has(S2, Hash)),
-            ?assertEqual([], bondy_mst_store:list(S2))
+            %% Excluded from enumeration (and marked for GC)...
+            ?assertEqual([], bondy_mst_store:list(S2)),
+            %% ...but the page is physically present, so it is still served:
+            %% the `free_set` is a GC/enumeration hint, not a read mask.
+            ?assertEqual(P, bondy_mst_store:get(S2, Hash)),
+            ?assert(bondy_mst_store:has(S2, Hash))
         after
             _ = bondy_mst_store:close(S0)
         end
     end).
 
-re_put_after_delete_resurrects_test() ->
+re_put_after_delete_relists_test() ->
     with_tmp_dir(fun(Dir) ->
         S0 = open_store(Dir),
         try
             P = mk_page(0, undefined, [{k, v, undefined}]),
             {Hash, S1} = bondy_mst_store:put(S0, P),
             S2 = bondy_mst_store:delete(S1, Hash),
+            ?assertEqual([], bondy_mst_store:list(S2)),
+            %% Re-put clears the tombstone, so it re-appears in enumeration.
             {Hash, S3} = bondy_mst_store:put(S2, P),
             ?assertEqual(P, bondy_mst_store:get(S3, Hash)),
-            ?assert(bondy_mst_store:has(S3, Hash))
+            ?assert(bondy_mst_store:has(S3, Hash)),
+            ?assertEqual([P], bondy_mst_store:list(S3))
         after
             _ = bondy_mst_store:close(S0)
         end
@@ -574,15 +583,18 @@ re_put_after_delete_resurrects_test() ->
 %% =============================================================================
 
 tombstone_persists_across_reopen_test() ->
-    %% After delete + close, the tombstone file must keep the hash
-    %% hidden on the next open.
+    %% After delete + close, the tombstone file must keep the hash EXCLUDED
+    %% FROM list/1 on the next open. The page content stays addressable — it
+    %% is physically present in the sealed pack (the tombstone is a GC /
+    %% enumeration hint, not a read mask).
     with_tmp_dir(fun(Dir) ->
         S0 = open_store(Dir),
         P = mk_page(0, undefined, [{persist, me, undefined}]),
         {Hash, S1} = bondy_mst_store:put(S0, P),
         {ok, S2} = bondy_mst_pack_store_seal(S1),
         S3 = bondy_mst_store:delete(S2, Hash),
-        ?assertEqual(undefined, bondy_mst_store:get(S3, Hash)),
+        ?assertEqual([], bondy_mst_store:list(S3)),
+        ?assertEqual(P, bondy_mst_store:get(S3, Hash)),
         ?assertEqual(ok, bondy_mst_store:close(S3)),
         %% The file is there.
         ?assert(
@@ -592,8 +604,9 @@ tombstone_persists_across_reopen_test() ->
         ),
         S4 = open_store(Dir),
         try
-            ?assertEqual(undefined, bondy_mst_store:get(S4, Hash)),
-            ?assertNot(bondy_mst_store:has(S4, Hash))
+            ?assertEqual([], bondy_mst_store:list(S4)),
+            ?assertEqual(P, bondy_mst_store:get(S4, Hash)),
+            ?assert(bondy_mst_store:has(S4, Hash))
         after
             _ = bondy_mst_store:close(S4)
         end
@@ -912,9 +925,13 @@ gc_drops_tombstoned_pages_test() ->
         {H1, S1} = bondy_mst_store:put(S0, P1),
         {H2, S2} = bondy_mst_store:put(S1, P2),
         {ok, S3} = bondy_mst_pack_store_seal(S2),
-        %% Tombstone H2 while it lives in the sealed pack.
+        %% Tombstone H2 while it lives in the sealed pack. KeepRoots is [H1]
+        %% only: H2 is tombstoned AND unreachable, so GC physically drops it.
+        %% (Listing H2 in KeepRoots would make it reachable — GC correctly
+        %% keeps reachable pages, and a reachable page must NOT be hidden by
+        %% the tombstone: a present page is served. See get/2.)
         S4 = bondy_mst_store:delete(S3, H2),
-        {S5, Meta} = bondy_mst_store:gc(S4, [H1, H2]),
+        {S5, Meta} = bondy_mst_store:gc(S4, [H1]),
         try
             ?assertMatch(
                 #{
@@ -924,7 +941,7 @@ gc_drops_tombstoned_pages_test() ->
                 },
                 Meta
             ),
-            %% H1 retained, H2 dropped.
+            %% H1 retained, H2 physically dropped (genuinely absent now).
             ?assertEqual(P1, bondy_mst_store:get(S5, H1)),
             ?assertEqual(undefined, bondy_mst_store:get(S5, H2))
         after
@@ -1080,9 +1097,13 @@ gc_tombstones_for_pending_preserved_test() ->
         {S5, _} = bondy_mst_store:gc(S4, [H1]),
         try
             %% Pending tombstone survives gc — the entry is still in
-            %% incoming.pack, but get/has return undefined/false.
-            ?assertEqual(undefined, bondy_mst_store:get(S5, H2)),
-            ?assertNot(bondy_mst_store:has(S5, H2)),
+            %% incoming.pack and remains physically addressable (the
+            %% tombstone is a GC/enumeration hint, not a read mask), but it
+            %% is excluded from list/1, which proves the tombstone was
+            %% preserved (not pruned) for the still-pending page.
+            ?assertEqual(P2, bondy_mst_store:get(S5, H2)),
+            ?assert(bondy_mst_store:has(S5, H2)),
+            ?assertEqual([P1], bondy_mst_store:list(S5)),
             %% Sealed page still resolvable.
             ?assertEqual(P1, bondy_mst_store:get(S5, H1))
         after

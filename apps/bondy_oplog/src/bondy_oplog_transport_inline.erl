@@ -58,6 +58,12 @@ do_request(PeerInstance, get_root) ->
     %% prematurely-equal or miss pages.
     _ = bondy_oplog_instance:await_apply(PeerInstance),
     {ok, bondy_oplog_instance:root_hash(PeerInstance)};
+do_request(PeerInstance, get_content_digest) ->
+    %% Drain the peer's applier so the returned digest reflects every
+    %% WAL-fsynced event (mirrors `get_root` above). In-VM transport ⇒ no
+    %% fingerprint leg (the responder's Partisan path carries it).
+    _ = bondy_oplog_instance:await_apply(PeerInstance),
+    {ok, bondy_oplog_instance:content_digest(PeerInstance)};
 do_request(PeerInstance, {get_pages, Hashes}) ->
     HashList =
         case is_list(Hashes) of

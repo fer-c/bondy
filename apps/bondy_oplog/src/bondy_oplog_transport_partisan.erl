@@ -60,6 +60,7 @@ request(Peer, InstanceId, Request, Opts) when
     CallOpts = call_opts(Timeout, Opts),
     try partisan_gen_server:call(Target, Msg, CallOpts) of
         {ok, _} = OK -> OK;
+        {ok, _, _} = OK -> OK;
         {error, _} = E -> E;
         Other -> {error, {unexpected_response, Other}}
     catch

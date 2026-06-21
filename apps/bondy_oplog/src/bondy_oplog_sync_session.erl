@@ -461,27 +461,85 @@ is_live(Instance) ->
 %% @private
 do_run(Instance, Peer, Transport, TransportOpts, MaxIterations) ->
     case Transport:request(Peer, Instance, get_root, TransportOpts) of
-        {ok, undefined} ->
-            %% Peer has nothing; nothing to pull.
-            {ok, bondy_oplog_instance:root_hash(Instance)};
+        {ok, PeerRoot, PeerFp} ->
+            pull_if_compatible(
+                Instance, Peer, Transport, TransportOpts, MaxIterations,
+                PeerRoot, PeerFp
+            );
         {ok, PeerRoot} ->
-            LocalRoot = bondy_oplog_instance:root_hash(Instance),
-            case PeerRoot =:= LocalRoot of
-                true ->
-                    {ok, LocalRoot};
-                false ->
-                    pull_until_complete(
-                        Instance,
-                        Peer,
-                        Transport,
-                        TransportOpts,
-                        PeerRoot,
-                        MaxIterations
-                    )
-            end;
+            %% Legacy peer (pre-fingerprint reply): no topology check.
+            pull_if_compatible(
+                Instance, Peer, Transport, TransportOpts, MaxIterations,
+                PeerRoot, undefined
+            );
         {error, _} = E ->
             E
     end.
+
+%% @private
+%% Per-shard MST roots are only comparable when both nodes key data the same
+%% way, so we verify the peer's keying-topology fingerprint matches ours before
+%% pulling. A mismatch is refused loudly rather than diverging silently;
+%% `undefined` on either side (an ephemeral DB, or a peer that predates the
+%% fingerprint) skips the check.
+pull_if_compatible(
+    Instance, Peer, Transport, TransportOpts, MaxIterations, PeerRoot, PeerFp
+) ->
+    LocalFp = bondy_oplog:topology_fingerprint(bondy_oplog:db_of(Instance)),
+    case topology_compatible(LocalFp, PeerFp) of
+        true ->
+            pull_from_root(
+                Instance, Peer, Transport, TransportOpts, MaxIterations, PeerRoot
+            );
+        false ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Refusing AAE sync: the peer's bondy_db keying topology "
+                    "differs from ours, so per-shard MST roots are not "
+                    "comparable. The nodes must agree on partition_strategy, "
+                    "shard_count and per-table routing (compare the topology "
+                    "MANIFEST on each node).",
+                instance => Instance,
+                peer => Peer,
+                local_fingerprint => hexfp(LocalFp),
+                peer_fingerprint => hexfp(PeerFp)
+            }),
+            {error, {topology_mismatch, LocalFp, PeerFp}}
+    end.
+
+%% @private
+pull_from_root(
+    Instance, _Peer, _Transport, _TransportOpts, _MaxIterations, undefined
+) ->
+    %% Peer has nothing; nothing to pull.
+    {ok, bondy_oplog_instance:root_hash(Instance)};
+pull_from_root(
+    Instance, Peer, Transport, TransportOpts, MaxIterations, PeerRoot
+) ->
+    LocalRoot = bondy_oplog_instance:root_hash(Instance),
+    case PeerRoot =:= LocalRoot of
+        true ->
+            {ok, LocalRoot};
+        false ->
+            pull_until_complete(
+                Instance,
+                Peer,
+                Transport,
+                TransportOpts,
+                PeerRoot,
+                MaxIterations
+            )
+    end.
+
+%% @private
+topology_compatible(undefined, _) -> true;
+topology_compatible(_, undefined) -> true;
+topology_compatible(Fp, Fp) -> true;
+topology_compatible(_, _) -> false.
+
+%% @private
+hexfp(undefined) -> undefined;
+hexfp(Fp) when is_binary(Fp) -> binary:encode_hex(Fp).
 
 %% @private
 pull_until_complete(

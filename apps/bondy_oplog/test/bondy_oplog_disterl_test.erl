@@ -22,7 +22,9 @@ setup() ->
                 "bondymsttest_" ++
                     integer_to_list(os:system_time(microsecond))
             ),
-            {ok, _} = net_kernel:start([Name, shortnames]),
+            %% OTP-28: the legacy list form `net_kernel:start([Name, shortnames])`
+            %% is gone; use start/2 with the options map.
+            {ok, _} = net_kernel:start(Name, #{name_domain => shortnames}),
             true = erlang:set_cookie(node(), bondymsttestcookie),
             ok;
         _ ->
@@ -115,13 +117,15 @@ disterl_request_routes_through_responder() ->
         %% root and our local Inst2 root. Different instances, same
         %% wire shape; the responder must demux.
         Self = node(),
-        {ok, R1} = remote_call(
+        %% `get_root` replies `{ok, Root, Fingerprint}`; Fingerprint is
+        %% `undefined` for these bare oplog instances (no bondy_db manifest).
+        {ok, R1, _Fp1} = remote_call(
             NodeB,
             ?MODULE,
             do_responder_call,
             [Self, Inst1, get_root]
         ),
-        {ok, R2} = remote_call(
+        {ok, R2, _Fp2} = remote_call(
             NodeB,
             ?MODULE,
             do_responder_call,
@@ -160,12 +164,21 @@ start_peer_node(NameSuffix) ->
     %% on the very first connection.
     PeerOpts = #{
         name => Name,
-        host => "127.0.0.1",
+        %% Match the controller's short hostname (from `node()`); a literal
+        %% "127.0.0.1" forces a longname under our shortnames controller and the
+        %% peer would exit with `nodistribution` (OTP-28).
+        host => controller_host(),
         connection => standard_io,
         args => ["-setcookie", Cookie, "-pa" | code:get_path()]
     },
     {ok, Peer, Node} = peer:start_link(PeerOpts),
     {ok, Peer, Node}.
+
+controller_host() ->
+    case string:split(atom_to_list(node()), "@") of
+        [_, Host] -> Host;
+        _ -> "localhost"
+    end.
 
 setup_peer(Node) ->
     %% Bring the storage substrate up on the peer (its code path was

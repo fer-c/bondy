@@ -113,6 +113,11 @@ Per-instance event operations pass through to
 -export([retention_advice/1, retention_advice/2]).
 -export([retention_decision/1]).
 
+%% Topology fingerprint (AAE compatibility handshake)
+-export([db_of/1]).
+-export([set_topology_fingerprint/2]).
+-export([topology_fingerprint/1]).
+
 %% =============================================================================
 %% TYPES
 %% =============================================================================
@@ -452,6 +457,38 @@ projection(InstanceId) when is_binary(InstanceId) ->
         {error, _} ->
             {error, instance_unavailable}
     end.
+
+%% @doc The `bondy_db` DB name an oplog instance belongs to, derived from its id
+%% (`<<"core/6">>` -> `core`). Returns `undefined` when the DB segment is not a
+%% known atom.
+-spec db_of(instance_id()) -> atom() | undefined.
+
+db_of(InstanceId) when is_binary(InstanceId) ->
+    [Db | _] = binary:split(InstanceId, <<"/">>),
+    try
+        binary_to_existing_atom(Db, utf8)
+    catch
+        error:badarg -> undefined
+    end.
+
+%% @doc Record this node's frozen keying-topology fingerprint for `Db` (computed
+%% by `bondy_db_manifest:fingerprint/1`). Exchanged during anti-entropy so two
+%% nodes refuse to sync when they key data differently. Stored in
+%% `persistent_term` (written once at provision, read on the sync path).
+-spec set_topology_fingerprint(Db :: atom(), Fingerprint :: binary()) -> ok.
+
+set_topology_fingerprint(Db, Fingerprint)
+when is_atom(Db) andalso is_binary(Fingerprint) ->
+    persistent_term:put({?MODULE, topology_fingerprint, Db}, Fingerprint).
+
+%% @doc This node's keying-topology fingerprint for `Db`, or `undefined` if none
+%% was recorded (e.g. an ephemeral in-memory DB with no manifest).
+-spec topology_fingerprint(Db :: atom() | undefined) -> binary() | undefined.
+
+topology_fingerprint(undefined) ->
+    undefined;
+topology_fingerprint(Db) when is_atom(Db) ->
+    persistent_term:get({?MODULE, topology_fingerprint, Db}, undefined).
 
 %% =============================================================================
 %% SYNC

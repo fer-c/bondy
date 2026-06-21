@@ -182,6 +182,8 @@ volume.
 -export([get/2]).
 -export([get_root/1]).
 -export([has/2]).
+-export([is_present/2]).
+-export([is_tombstoned/2]).
 -export([list/1]).
 -export([missing_set/2]).
 -export([page_refs/1]).
@@ -354,11 +356,18 @@ set_root(#?MODULE{writer = W} = T, Root) ->
 
 get(#?MODULE{} = T, Hash) when is_binary(Hash) ->
     StartTs = erlang:monotonic_time(microsecond),
-    {Page, Source, ByteSize} =
-        case sets:is_element(Hash, T#?MODULE.free_set) of
-            true -> {undefined, cold_miss, 0};
-            false -> do_get(T, Hash)
-        end,
+    %% Serve any physically-present page. The `free_set` is a GC / enumeration
+    %% hint (see `list/1` and `gc/2`), NOT a read mask. Masking reads here was
+    %% a second, conflicting source of truth about whether a page is live:
+    %% `truncate`/`merge` churn can leave a page tombstoned while it is still
+    %% reachable from a live (or a peer's) root, and since physical GC never
+    %% runs in this deployment the bytes are still on disk — masking them made
+    %% `get`/`missing_set`/`do_diff` report a dangling root for a page that is
+    %% actually present (`peer_returned_empty_pages`, replay `function_clause`,
+    %% and an endless re-pull). Reachability from the root is the single source
+    %% of truth for liveness; the tombstone only gates physical reclamation and
+    %% `list/1` enumeration.
+    {Page, Source, ByteSize} = do_get(T, Hash),
     emit_get(
         T,
         ByteSize,
@@ -370,10 +379,24 @@ get(#?MODULE{} = T, Hash) when is_binary(Hash) ->
 -spec has(t(), binary()) -> boolean().
 
 has(#?MODULE{} = T, Hash) when is_binary(Hash) ->
-    case sets:is_element(Hash, T#?MODULE.free_set) of
-        true -> false;
-        false -> do_has(T, Hash)
-    end.
+    %% Physical presence, not the `free_set` mask — see `get/2`.
+    do_has(T, Hash).
+
+-spec is_present(t(), binary()) -> boolean().
+
+%% @doc Diagnostic: is the page's content PHYSICALLY present (in pending or a
+%% sealed pack), ignoring the `free_set` tombstone that `has/2` honours? Used
+%% to classify a "missing" page (per `missing_set/2`) as either
+%% tombstone-masked-but-present (data on disk) or genuinely absent (never
+%% written) when diagnosing a dangling root.
+is_present(#?MODULE{} = T, Hash) when is_binary(Hash) ->
+    do_has(T, Hash).
+
+-spec is_tombstoned(t(), binary()) -> boolean().
+
+%% @doc Diagnostic: is the hash currently tombstoned in the `free_set`?
+is_tombstoned(#?MODULE{free_set = FreeSet}, Hash) when is_binary(Hash) ->
+    sets:is_element(Hash, FreeSet).
 
 -spec put(t(), page()) -> {binary(), t()}.
 

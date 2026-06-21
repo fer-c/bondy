@@ -117,6 +117,7 @@ every cell is guaranteed to have — `value_equals_state` cells omit
     delete/3,
     clear/2,
     cell_keys/2,
+    content_digest_fold/2,
     info/1
 ]).
 
@@ -423,6 +424,41 @@ cell_keys(#{bookie := Pid}, all_primary) ->
         all_primary_buckets(Pid)
     ).
 
+-doc """
+Capture a snapshot-isolated fold over every PRIMARY cell in `Scope` and return a
+0-arity runnable that, when invoked, computes the projection **content digest**
+(`bondy_oplog_content_digest`, the ISSUES.md AR-17 convergence oracle) over that
+snapshot.
+
+The leveled snapshot is taken **eagerly, at this call** (`SnapPreFold = true`),
+so a caller invoking `content_digest_fold/2` during the quiescent instance-init
+window freezes the projection's boot state; the returned runnable can then run
+the `O(cells)` fold asynchronously, off the boot path, against that frozen
+snapshot — concurrent live writes do not perturb it. This is what lets the
+instance recompute the per-instance digest after a crash restart without
+blocking boot or racing the applier (the clean-shutdown path restores the digest
+from the checkpoint instead and never calls this).
+
+The runnable XOR-folds each cell's `(Bucket, Key, StateBytes)` via
+`bondy_oplog_content_digest:add/4`, reading `StateBytes` from the always-present
+`?SK_STATE` subkey (so `value_equals_state` cells are included exactly once) —
+the same bytes the apply-path digest hook uses, so a recomputed digest is
+byte-identical to one maintained incrementally. Each primary bucket is captured
+as its own eager snapshot and the per-bucket partials are XOR-combined
+(`combine/2`), which is order-independent.
+
+The returned runnable is **single-use**: running it consumes and closes the
+leveled snapshots, so it must be invoked exactly once (the recompute worker does).
+""".
+-spec content_digest_fold(
+    handle(), bondy_oplog_projection_adapter:cell_keys_scope()
+) -> fun(() -> bondy_oplog_content_digest:t()).
+
+content_digest_fold(#{bookie := Pid}, {entity, ET}) when is_binary(ET) ->
+    digest_runner(Pid, primary_buckets(Pid, ET));
+content_digest_fold(#{bookie := Pid}, all_primary) ->
+    digest_runner(Pid, all_primary_buckets(Pid)).
+
 -spec info(handle()) -> #{atom() => term()}.
 
 info(#{bookie := Pid}) ->
@@ -527,6 +563,49 @@ is_non_index_bucket(_Bucket) ->
 %% `all_primary` correct on any co-located handle.)
 is_reserved_idx_bucket(<<"$idx", _/binary>>) -> true;
 is_reserved_idx_bucket(_) -> false.
+
+%% Build the 0-arity content-digest runner over `Buckets`. The per-bucket
+%% head-fold snapshots are captured NOW (eagerly, `SnapPreFold = true`) so the
+%% returned runnable folds the boot-state projection even when invoked later off
+%% a live store; the partials are XOR-combined (order-independent).
+digest_runner(Pid, Buckets) ->
+    Folders = [bucket_state_digest_folder(Pid, B) || B <- Buckets],
+    fun() ->
+        lists:foldl(
+            fun(Folder, Acc) ->
+                bondy_oplog_content_digest:combine(Acc, Folder())
+            end,
+            bondy_oplog_content_digest:empty(),
+            Folders
+        )
+    end.
+
+%% One bucket's eager-snapshot head-fold, XOR-accumulating the content digest
+%% from the always-present `?SK_STATE` subkey (its payload is
+%% `<<HlcLen:16, Hlc, StateBytes>>`; `decode_head/1` strips the HLC). The 6th arg
+%% (`SnapPreFold`) is `true`: the snapshot is taken at this call, the returned
+%% `Folder/0` runs the fold against it later. A non-binary key (never produced by
+%% this layer) would crash `cell_hash/3` in the runner — surfaced loudly as a
+%% failed recompute rather than a silently-dropped cell.
+bucket_state_digest_folder(Pid, Bucket) ->
+    FoldFun =
+        fun
+            (B, {Key, ?SK_STATE}, Value, Acc) ->
+                {_Hlc, StateBytes} = decode_head(Value),
+                bondy_oplog_content_digest:add(Acc, B, Key, StateBytes);
+            (_B, {_Key, _SubKey}, _Value, Acc) ->
+                Acc
+        end,
+    {async, Folder} = leveled_bookie:book_headfold(
+        Pid,
+        ?HEAD_TAG,
+        {range, Bucket, all},
+        {FoldFun, bondy_oplog_content_digest:empty()},
+        false,
+        true,
+        false
+    ),
+    Folder.
 
 %% Every `{Bucket, Key}` of one bucket, keyed off the always-present
 %% `?SK_STATE` subkey so each cell is counted once.

@@ -114,6 +114,7 @@ Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
 %% API
 -export([build/1]).
 -export([diff/2]).
+-export([fingerprint/1]).
 -export([path/1]).
 -export([read/1]).
 -export([reconcile/3]).
@@ -215,6 +216,27 @@ build(Frozen0) when is_map(Frozen0) ->
         checksum => checksum(Frozen),
         frozen => Frozen
     }.
+
+
+-doc """
+A cross-node–portable digest of the frozen keying topology: a SHA-256 over a
+canonical (deterministically encoded) form of the `finalize/1`'d `frozen()` map.
+
+Unlike `checksum/1` (a local `phash2` integrity check), this is stable across
+nodes regardless of map iteration order, so two nodes can exchange it during
+anti-entropy to decide whether they key data the same way and may therefore
+sync at all. Only placement-determining fields contribute — `finalize/1` folds
+in the substrate invariants (hash function, key-encoding version, instances
+strategy) and the manifest envelope (`version`, `created_at`, `checksum`) is
+excluded.
+
+Two manifests with the same `checksum` will produce the same fingerprint; the
+SHA-256 simply widens the digest for the cross-node comparison.
+""".
+-spec fingerprint(frozen()) -> binary().
+
+fingerprint(Frozen0) when is_map(Frozen0) ->
+    crypto:hash(sha256, term_to_binary(finalize(Frozen0), [deterministic])).
 
 
 -doc """

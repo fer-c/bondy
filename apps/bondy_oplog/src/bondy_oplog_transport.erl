@@ -33,7 +33,8 @@ transport delivers them to the peer's responder which calls back into
 
 | Request                                | Reply                                                                  |
 |---|---|
-| `get_root`                             | `{ok, hash() \| undefined}`                                            |
+| `get_root`                             | `{ok, hash() \| undefined}` \| `{ok, hash() \| undefined, fingerprint()}` |
+| `get_content_digest`                   | `{ok, {ready \| warming, digest()}}` \| `{ok, {ready \| warming, digest()}, fingerprint()}` |
 | `{get_pages, Set}`                     | `{ok, #{hash() => page()}}`                                            |
 | `get_snapshot`                         | `{ok, event_key(), term()}` \| `{ok, no_snapshot}`                     |
 | `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}`         |
@@ -63,6 +64,7 @@ the `Opts` argument.
 
 -type request() ::
     get_root
+    | get_content_digest
     | {get_pages, [bondy_mst:hash()] | sets:set(bondy_mst:hash())}
     | get_snapshot
     | get_catalogue_snapshot_init
@@ -70,6 +72,7 @@ the `Opts` argument.
 
 -type response() ::
     {ok, bondy_mst:hash() | undefined}
+    | {ok, {ready | warming, bondy_oplog_content_digest:t()}}
     | {ok, #{bondy_mst:hash() => bondy_mst_page:t()}}
     | {ok, no_snapshot}
     | {ok, bondy_oplog_event:event_key(), term()}

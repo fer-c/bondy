@@ -1124,10 +1124,26 @@ root_flush_due(#?MODULE{
 %% @private
 %% Atomic manifest rewrite + counter reset. The writer's `manifest`
 %% field already holds the staged root, so we just persist it.
-do_flush_root(#?MODULE{dir = Dir, manifest = M} = W) ->
-    case bondy_mst_pack_manifest:write(Dir, M) of
-        ok ->
-            {ok, reset_root_flush_counters(W)};
+%%
+%% Pages-before-root: a content-addressed root is only crash-safe if every
+%% page it references is already durable. `incoming.pack` is datasync'd on
+%% the append path's own batching schedule (`sync_every_records` /
+%% `sync_every_ms`), so a staged root reached via the `set_root/2` debounce
+%% could otherwise be persisted AHEAD of the pages it points at. A crash in
+%% that window loses the unsynced tail of `incoming.pack` (recovery
+%% truncates the trailing records) while the manifest root survives,
+%% leaving a root that references pages present on no replica — the AAE
+%% `peer_returned_empty_pages` / dangling-page data-loss signature. So sync
+%% incoming first, matching the ordering `flush/1` already enforces.
+do_flush_root(#?MODULE{} = W0) ->
+    case flush_incoming(W0) of
+        {ok, #?MODULE{dir = Dir, manifest = M} = W} ->
+            case bondy_mst_pack_manifest:write(Dir, M) of
+                ok ->
+                    {ok, reset_root_flush_counters(W)};
+                {error, _} = E ->
+                    E
+            end;
         {error, _} = E ->
             E
     end.

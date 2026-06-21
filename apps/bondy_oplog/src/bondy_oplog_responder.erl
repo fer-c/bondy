@@ -66,7 +66,8 @@ partisan_gen_server:call(
 
 | Request                                  | Reply                                                                  |
 |---|---|
-| `get_root`                               | `{ok, hash() \| undefined}`                                            |
+| `get_root`                               | `{ok, hash() \| undefined, fingerprint()}`                             |
+| `get_content_digest`                     | `{ok, {ready \| warming, digest()}, fingerprint()}`                    |
 | `{get_pages, Set}`                       | `{ok, #{hash() => page()}}`                                            |
 | `get_snapshot`                           | `{ok, no_snapshot}` \| `{ok, event_key(), term()}`                     |
 | `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor()}}}`         |
@@ -124,22 +125,56 @@ dispatch(InstanceId, get_root) when is_binary(InstanceId) ->
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            %% Await the local applier's drain before reading the
-            %% root. A peer that just appended events and then asked
-            %% us to sync against our root expects the root to reflect
-            %% the events durably visible on this side; without the
-            %% await, the applier's `install_local_batch` cast may
-            %% still be in the instance mailbox and the root would
-            %% lag behind the WAL.
-            _ = bondy_oplog_instance:await_apply(InstanceId),
-            {ok, bondy_oplog_instance:root_hash(InstanceId)}
+            %% We do NOT await the local applier's drain before reading the
+            %% root. AAE is eventually consistent, and `root_hash/1` and
+            %% `get_pages/2` both read the same in-memory MST, so the root we
+            %% advertise and the pages we serve are mutually consistent even if
+            %% a just-appended local event is still draining — the next sync
+            %% round picks it up. Blocking on `await_apply/1` here is what made
+            %% `get_root` (and `get_pages`) exceed the 5s sync timeout whenever
+            %% the applier was busy under AAE load, so a peer that had lost a
+            %% shard could never heal from us. Reply with the current root,
+            %% plus this node's keying-topology fingerprint so the initiator can
+            %% verify both nodes key data the same way before pulling pages.
+            %%
+            %% `aae_root/1` (not `root_hash/1`) applies the integrity guard:
+            %% if our root is dangling (a page it references is missing) it
+            %% advertises `undefined` instead, so the peer pulls nothing
+            %% unservable from us (avoiding `peer_returned_empty_pages`) and we
+            %% heal our own root via our pull / replay rather than poisoning a
+            %% healthy peer. Local logic keeps using the real `root_hash/1`.
+            {ok, bondy_oplog_instance:aae_root(InstanceId),
+                bondy_oplog:topology_fingerprint(
+                    bondy_oplog:db_of(InstanceId)
+                )}
+    end;
+dispatch(InstanceId, get_content_digest) when is_binary(InstanceId) ->
+    case bondy_oplog_instance:whereis(InstanceId) of
+        undefined ->
+            {error, {instance_not_running, InstanceId}};
+        _Pid ->
+            %% The MST-root-independent convergence oracle (AR-17). Like
+            %% `get_root` we do NOT await the applier drain — the digest is
+            %% eventually consistent and the next round picks up any in-flight
+            %% delta. `content_digest/1` is a lock-free read of the per-instance
+            %% atomics + readiness flag, so it never round-trips the instance
+            %% gen_server. The `warming` status is propagated verbatim so the
+            %% initiator refuses a verdict until our crash-restart recompute has
+            %% landed (it MUST NOT read a partial digest as DIVERGED). The
+            %% topology fingerprint lets the initiator compare digests only when
+            %% both nodes key data the same way.
+            {ok, bondy_oplog_instance:content_digest(InstanceId),
+                bondy_oplog:topology_fingerprint(
+                    bondy_oplog:db_of(InstanceId)
+                )}
     end;
 dispatch(InstanceId, {get_pages, Hashes}) when is_binary(InstanceId) ->
     case bondy_oplog_instance:whereis(InstanceId) of
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            _ = bondy_oplog_instance:await_apply(InstanceId),
+            %% No await_apply: serve the current MST snapshot (AAE eventual);
+            %% blocking here caused the 5s sync timeouts — see `get_root`.
             HashList =
                 case is_list(Hashes) of
                     true -> Hashes;
@@ -152,7 +187,8 @@ dispatch(InstanceId, get_snapshot) when is_binary(InstanceId) ->
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            _ = bondy_oplog_instance:await_apply(InstanceId),
+            %% No await_apply: serve the current MST snapshot (AAE eventual);
+            %% blocking here caused the 5s sync timeouts — see `get_root`.
             %% Wire-protocol message `get_snapshot` is preserved
             %% (transport ABI). Internally it routes to the renamed
             %% compaction_checkpoint API.
@@ -168,7 +204,8 @@ dispatch(InstanceId, get_catalogue_snapshot_init) when
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            _ = bondy_oplog_instance:await_apply(InstanceId),
+            %% No await_apply: serve the current MST snapshot (AAE eventual);
+            %% blocking here caused the 5s sync timeouts — see `get_root`.
             case bondy_oplog_catalogue_snapshot:init(InstanceId) of
                 {ok, no_snapshot} ->
                     {ok, no_snapshot};

@@ -759,6 +759,14 @@ do_open_core(Specs, Dir, Effective) ->
             case bondy_db:open(core, DbOpts) of
                 {ok, Db} ->
                     ok = put_db(core, Db),
+                    %% Publish this node's keying-topology fingerprint (over the
+                    %% EFFECTIVE on-disk topology) so anti-entropy peers can
+                    %% verify they key data the same way before syncing per-shard
+                    %% MST roots — mismatched topologies are refused, not
+                    %% silently diverged.
+                    ok = bondy_oplog:set_topology_fingerprint(
+                        core, bondy_db_manifest:fingerprint(Effective)
+                    ),
                     case open_tables(Db, Specs, EffTables) of
                         ok ->
                             ?LOG_NOTICE(#{

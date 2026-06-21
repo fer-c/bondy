@@ -1170,9 +1170,11 @@ Equivalent to `dispatch_table(Specs, [])` (no additional base routes).
     [{Scheme :: binary(), [route_rule()]}] | no_return().
 
 dispatch_table(API) when is_map(API) ->
-    dispatch_table([API], []);
+    dispatch_table([API]);
 dispatch_table(Specs) when is_list(Specs) ->
-    dispatch_table(Specs, []).
+    %% Validation path (user-initiated create): STRICT — a route targeting a
+    %% realm that does not exist is an error the caller must see.
+    build_dispatch_table(Specs, [], error).
 
 -doc """
 Generates a Cowboy dispatch table, merging in additional base routes.
@@ -1192,12 +1194,24 @@ listener environment.
 dispatch_table(API, RulesToAdd) when is_map(API) ->
     dispatch_table([API], RulesToAdd);
 dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
-    SchemeRules = lists:flatten([do_dispatch_table(X) || X <- L]),
-    R0 = leap_relation:relation(?SCHEME_HEAD, SchemeRules),
+    %% Rebuild path (`bondy_http_gateway:load_dispatch_tables/0` / `parse_specs/2`),
+    %% which runs on every anti-entropy change: LENIENT — a spec can be replicated
+    %% via AAE before the realm it targets, so skip routes whose realm does not
+    %% exist and rebuild later (the api_gateway reactor / realm lifecycle
+    %% re-trigger `rebuild_dispatch_tables/0`) rather than crash the gateway under
+    %% `bondy_sup`.
+    build_dispatch_table(L, RulesToAdd, skip).
 
-    %% We make sure all realms exists
-    Realms = leap_relation:project(R0, [{var, realm}]),
-    _ = [check_realm_exists(Realm) || {Realm} <- leap_relation:tuples(Realms)],
+%% @private
+%% Builds the scheme/route dispatch table. `OnMissingRealm` selects what happens
+%% to a route whose realm is absent: `error` (strict — user-initiated create)
+%% raises so the caller sees it; `skip` (lenient — AAE-driven rebuild) drops the
+%% route and logs, so a spec that arrived before its realm cannot crash-loop the
+%% gateway.
+build_dispatch_table(L, RulesToAdd, OnMissingRealm) ->
+    SchemeRules0 = lists:flatten([do_dispatch_table(X) || X <- L]),
+    SchemeRules = handle_missing_realms(SchemeRules0, OnMissingRealm),
+    R0 = leap_relation:relation(?SCHEME_HEAD, SchemeRules),
 
     %% We add the additional rules
     Schemes = leap_relation:tuples(leap_relation:project(R0, [{var, scheme}])),
@@ -1219,6 +1233,39 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
     Proj2 = {?VAR(scheme), {as, HPMS, ?VAR(hpms)}},
     SHP = leap_relation:summarize(R2, Proj2, #{}),
     leap_relation:tuples(SHP).
+
+%% @private
+%% `error`: assert every targeted realm exists (strict; user create).
+%% `skip`: drop routes whose realm is absent and log once (lenient; AAE rebuild).
+handle_missing_realms(Rules, error) ->
+    _ = [
+        check_realm_exists(element(3, Rule))
+     || Rule <- Rules, element(3, Rule) =/= undefined
+    ],
+    Rules;
+handle_missing_realms(Rules, skip) ->
+    {Keep, Drop} = lists:partition(
+        fun(Rule) ->
+            Realm = element(3, Rule),
+            Realm =:= undefined orelse bondy_realm:exists(Realm)
+        end,
+        Rules
+    ),
+    _ =
+        case Drop of
+            [] ->
+                ok;
+            _ ->
+                ?LOG_WARNING(#{
+                    description =>
+                        "Skipping API Gateway routes whose realm does not "
+                        "exist yet (e.g. the spec replicated via anti-entropy "
+                        "before its realm). They load on the next rebuild once "
+                        "the realm is present.",
+                    realms => lists:usort([element(3, R) || R <- Drop])
+                })
+        end,
+    Keep.
 
 %% =============================================================================
 %% PRIVATE: PARSING THE API SPECIFICATION

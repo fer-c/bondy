@@ -60,6 +60,41 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc Throttle live (post-bootstrap) syncs adaptively. A converged shard only
+%% re-syncs to discover divergence; once its data has settled it has nothing to
+%% pull, yet a naive scheduler still dispatches a session against every peer
+%% every tick — the dominant steady-state cost of running AAE across many shards.
+%% When on (default), each shard syncs at the tick interval while its data is
+%% actively changing and backs off geometrically up to `oplog.aae.live_sync.max`
+%% once it goes quiescent, resetting to the fast cadence the moment its data
+%% moves again. Shards that back the authentication freshness fence are exempt
+%% and always sync every tick, so this never affects auth availability. When
+%% off, every live shard syncs every peer every tick (the historical
+%% behaviour). Only relevant when `oplog.aae` is on.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.aae.live_sync", "bondy_oplog.live_sync_adaptive", [
+  {datatype, {flag, on, off}},
+  {default, on}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Upper bound on the adaptive live-sync poll interval. Once a shard goes
+%% quiescent its sync cadence doubles each round up to this cap. Because bondy_db
+%% apply propagates pull-only (no eager push), this cap is also the steady-state
+%% cross-node convergence latency for a quiescent shard — set it below the
+%% convergence SLA you need. The first poll that pulls anything resets the shard
+%% to the fast cadence, so recovery is quick once it starts. Shards backing the
+%% auth fence ignore this cap (they always sync every tick). Only relevant when
+%% `oplog.aae` and `oplog.aae.live_sync` are on.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "oplog.aae.live_sync.max", "bondy_oplog.live_sync_max_ms", [
+  {datatype, {duration, ms}},
+  {default, "5s"}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc The number of peers the bondy_db sync scheduler samples from the
 %% Partisan cluster membership each tick. Only relevant when `oplog.aae` is on.
 %% @end

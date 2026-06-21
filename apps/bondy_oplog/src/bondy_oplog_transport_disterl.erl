@@ -61,6 +61,7 @@ request(PeerNode, InstanceId, Request, Opts) when
     Msg = {sync_protocol, InstanceId, Request},
     try gen_server:call(Target, Msg, Timeout) of
         {ok, _} = OK -> OK;
+        {ok, _, _} = OK -> OK;
         {error, _} = E -> E;
         Other -> {error, {unexpected_response, Other}}
     catch

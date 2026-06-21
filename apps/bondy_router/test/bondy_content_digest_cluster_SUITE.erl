@@ -1,0 +1,518 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_content_digest_cluster_SUITE).
+
+-include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
+
+-compile([nowarn_export_all, export_all]).
+
+%% A 2-node Partisan cluster (bondy_db AAE on) that proves the projection
+%% CONTENT digest (`bondy_oplog_content_digest`, the ISSUES.md AR-17 oracle, task
+%% #118) is a faithful cross-node convergence oracle where the MST root is NOT —
+%% specifically under ASYMMETRIC compaction, the failure mode AR-17 calls out:
+%%
+%%   - FALSE DIVERGED: one node compacts (empty MST ⇒ `undefined` root) while the
+%%     other has not (full MST ⇒ binary root) for IDENTICAL data. An MST-root
+%%     comparison reports DIVERGED; the content digest stays equal and reports
+%%     IN SYNC. `asymmetric_compaction_keeps_oracle_in_sync`.
+%%   - FALSE IN SYNC (the dangerous one): once BOTH nodes compact, both roots are
+%%     `undefined`, so a root comparison reports IN SYNC with nothing actually
+%%     verifying the projections match. The content digest still genuinely agrees
+%%     when they match AND still detects a real divergence injected while both
+%%     roots stay `undefined`. `both_compacted_digest_detects_real_divergence`.
+%%
+%% Both tests drive the PRODUCTION paths: writes through `bondy_db`, the live
+%% per-instance digest (`bondy_oplog_instance:content_digest/1`), and the peer
+%% digest fetched over the AAE Partisan transport with the `get_content_digest`
+%% request — the same request `bondy_observer_cli_sync` uses. The sync scheduler
+%% is quiesced (`set_dispatch(undefined)`) for the compaction phases so the
+%% asymmetric state stays frozen: a live scheduler would re-pull the compacted
+%% node's MST back from its peer, which is the very false-DIVERGED re-pull AR-17
+%% describes.
+
+-define(NODE_NAMES, [cdig1, cdig2]).
+-define(USERS_TABLE, security_users).
+%% security_users shards by realm, so distinct realm bands spread across shard
+%% instances (`phash2(realm_prefix, ShardCount)`) — giving several data-bearing
+%% compaction targets rather than a single shard.
+-define(BANDS, 16).
+%% Generous so the convergence assertions stay robust under CT load (200ms tick).
+-define(CONVERGE_MS, 60000).
+
+all() ->
+    [
+        asymmetric_compaction_keeps_oracle_in_sync,
+        both_compacted_digest_detects_real_divergence
+    ].
+
+suite() ->
+    [{timetrap, {minutes, 10}}].
+
+init_per_suite(Config) ->
+    Nodes = bondy_ct:start_cluster(?NODE_NAMES, Config),
+    %% The peer-side helpers below run on the cluster nodes, so make this module
+    %% loadable there.
+    _ = [push_module(Node, ?MODULE) || {_, Node, _} <- Nodes],
+    [{cluster, Nodes} | Config].
+
+end_per_suite(Config) ->
+    ok = bondy_ct:stop_cluster(?config(cluster, Config)),
+    Config.
+
+%% =============================================================================
+%% TESTS
+%% =============================================================================
+
+%% Asymmetric compaction: write + converge identical data on both nodes, then
+%% compact node 1's shards ONLY. Node 1's MSTs go empty (`undefined` root) while
+%% node 2 keeps its full binary roots — so an MST-root comparison reports
+%% DIVERGED for identical data (the false-DIVERGED failure mode). The content
+%% digest is compaction-invariant, so it is UNCHANGED by the compaction and still
+%% equal across nodes — locally and over the `get_content_digest` transport —
+%% reporting IN SYNC, which is correct.
+asymmetric_compaction_keeps_oracle_in_sync(Config) ->
+    [N1, N2] = nodes_of(Config),
+    Pairs = seed_pairs(<<"asym">>),
+
+    %% 1. Write through bondy_db on N1, converge to N2 via background AAE.
+    seed_and_converge(N1, N2, Pairs),
+
+    try
+        %% 2. Freeze the cluster: a live scheduler would re-pull a compacted
+        %% node's MST back from its peer (the false-DIVERGED re-pull). Drain any
+        %% in-flight applier so the baseline digests are stable.
+        quiesce(N1, N2),
+        ok = erpc:call(N1, ?MODULE, do_drain_all, []),
+        ok = erpc:call(N2, ?MODULE, do_drain_all, []),
+
+        %% 3. Baseline: the data-bearing, converged instances. Both nodes hold
+        %% identical content ⇒ equal digests AND equal binary roots, locally and
+        %% over the production transport.
+        Sigs1 = erpc:call(N1, ?MODULE, do_instance_sigs, []),
+        Sigs2 = erpc:call(N2, ?MODULE, do_instance_sigs, []),
+        Targets = converged_data_targets(Sigs1, Sigs2),
+        ct:pal("asym: ~p data-bearing converged target instances", [
+            length(Targets)
+        ]),
+        ?assert(length(Targets) >= 1),
+
+        lists:foreach(
+            fun(I) ->
+                {ready, D1, R1} = maps:get(I, Sigs1),
+                {ready, D2, R2} = maps:get(I, Sigs2),
+                ?assertEqual(D1, D2),
+                ?assertEqual(R1, R2),
+                ?assert(is_binary(R1)),
+                %% Over the transport: N1 asks N2 and N2 asks N1; each sees the
+                %% other's digest, and it equals the local one.
+                ?assertEqual({ready, D2}, peer_digest(N1, I)),
+                ?assertEqual({ready, D1}, peer_digest(N2, I)),
+                ?assert(oracle_in_sync(N1, I))
+            end,
+            Targets
+        ),
+
+        %% 4. ASYMMETRIC COMPACTION: compact N1's instances only.
+        lists:foreach(
+            fun(I) -> ?assertMatch({ok, _}, erpc:call(N1, ?MODULE, do_compact, [I])) end,
+            Targets
+        ),
+
+        Sigs1b = erpc:call(N1, ?MODULE, do_instance_sigs, []),
+        Sigs2b = erpc:call(N2, ?MODULE, do_instance_sigs, []),
+
+        lists:foreach(
+            fun(I) ->
+                {ready, D1, _} = maps:get(I, Sigs1),
+                {ready, D1b, R1b} = maps:get(I, Sigs1b),
+                {ready, D2b, R2b} = maps:get(I, Sigs2b),
+
+                %% The false-DIVERGED trigger: N1's MST is empty (`undefined`
+                %% root) while N2 still holds the full binary root — an MST-root
+                %% comparison would report DIVERGED for identical data.
+                ?assertEqual(undefined, R1b),
+                ?assert(is_binary(R2b)),
+                ?assertNotEqual(R1b, R2b),
+
+                %% The oracle is correct: compaction did not touch the digest, so
+                %% it is unchanged and still equal across nodes — locally and over
+                %% the transport — i.e. IN SYNC.
+                ?assertEqual(D1, D1b),
+                ?assertEqual(D1b, D2b),
+                ?assertEqual({ready, D2b}, peer_digest(N1, I)),
+                ?assertEqual({ready, D1b}, peer_digest(N2, I)),
+                ?assert(oracle_in_sync(N1, I))
+            end,
+            Targets
+        ),
+        ok
+    after
+        %% Restore AAE so the shared cluster heals before the next test (N2 still
+        %% holds the full MST, so N1 re-pulls and re-grows it).
+        unquiesce(N1, N2)
+    end.
+
+%% Symmetric compaction: the dangerous false-IN-SYNC case. Once BOTH nodes
+%% compact, both roots are `undefined`, so an MST-root comparison reports IN SYNC
+%% with nothing actually verifying the projections match. We prove the content
+%% digest (a) genuinely verifies the match (equal AND non-zero) and (b) detects a
+%% REAL divergence injected while both roots stay `undefined` — exactly what the
+%% root comparison cannot do.
+both_compacted_digest_detects_real_divergence(Config) ->
+    [N1, N2] = nodes_of(Config),
+    Pairs = seed_pairs(<<"sym">>),
+
+    seed_and_converge(N1, N2, Pairs),
+
+    try
+        quiesce(N1, N2),
+        ok = erpc:call(N1, ?MODULE, do_drain_all, []),
+        ok = erpc:call(N2, ?MODULE, do_drain_all, []),
+
+        Sigs1 = erpc:call(N1, ?MODULE, do_instance_sigs, []),
+        Sigs2 = erpc:call(N2, ?MODULE, do_instance_sigs, []),
+        Targets = converged_data_targets(Sigs1, Sigs2),
+        ct:pal("sym: ~p data-bearing converged target instances", [
+            length(Targets)
+        ]),
+        ?assert(length(Targets) >= 1),
+
+        %% SYMMETRIC COMPACTION: both nodes compact ⇒ both roots `undefined`.
+        lists:foreach(
+            fun(I) ->
+                ?assertMatch({ok, _}, erpc:call(N1, ?MODULE, do_compact, [I])),
+                ?assertMatch({ok, _}, erpc:call(N2, ?MODULE, do_compact, [I]))
+            end,
+            Targets
+        ),
+
+        SigsC1 = erpc:call(N1, ?MODULE, do_instance_sigs, []),
+        SigsC2 = erpc:call(N2, ?MODULE, do_instance_sigs, []),
+        lists:foreach(
+            fun(I) ->
+                {ready, Dc1, Rc1} = maps:get(I, SigsC1),
+                {ready, Dc2, Rc2} = maps:get(I, SigsC2),
+                %% Both roots `undefined` ⇒ a root comparison reports IN SYNC
+                %% trusting, not checking. The digest still genuinely agrees AND
+                %% is non-empty, so it is actually verifying the match.
+                ?assertEqual(undefined, Rc1),
+                ?assertEqual(undefined, Rc2),
+                ?assertEqual(Rc1, Rc2),
+                ?assertNotEqual(0, Dc1),
+                ?assertEqual(Dc1, Dc2)
+            end,
+            Targets
+        ),
+
+        %% Inject a REAL divergence on N1 with both MSTs empty: write a fresh cell
+        %% to an existing band, then re-compact that shard on N1 so its MST returns
+        %% to empty (root stays `undefined`). The projection — and thus the content
+        %% digest — now differs, but BOTH roots are still `undefined`. We pin the
+        %% assertions to the exact instance the cell routes to (a known target,
+        %% compacted on both nodes above, so N2's side is a known empty baseline).
+        Bands = [B || {B, _} <- Pairs],
+        DivBand = erpc:call(
+            N1, ?MODULE, do_band_on_target, [?USERS_TABLE, Bands, Targets]
+        ),
+        DivInst = erpc:call(
+            N1, ?MODULE, do_instance_for, [?USERS_TABLE, DivBand, <<"divergent">>]
+        ),
+        ct:pal("sym: injecting divergence into ~s via band ~s", [DivInst, DivBand]),
+        ?assert(lists:member(DivInst, Targets)),
+        {ready, PreD, _} = maps:get(DivInst, SigsC1),
+
+        %% `do_apply` is synchronous (append + drain), so the digest is updated
+        %% and the MST has re-grown by the time it returns.
+        ok = erpc:call(
+            N1, ?MODULE, do_apply, [
+                ?USERS_TABLE, DivBand, <<"divergent">>, val(DivBand, <<"divergent">>)
+            ]
+        ),
+        SigsDpre = erpc:call(N1, ?MODULE, do_instance_sigs, []),
+        {ready, PostD, PostR} = maps:get(DivInst, SigsDpre),
+        ct:pal("sym: divergent write ~s digest ~.16B -> ~.16B", [
+            DivInst, PreD, PostD
+        ]),
+        ?assertNotEqual(PreD, PostD),
+        ?assert(is_binary(PostR)),
+
+        %% Re-compact the diverged shard on N1 → empty MST again (`undefined`
+        %% root), digest unchanged (compaction-invariant).
+        ?assertMatch({ok, _}, erpc:call(N1, ?MODULE, do_compact, [DivInst])),
+        SigsD = erpc:call(N1, ?MODULE, do_instance_sigs, []),
+        {ready, Dd1, Rd1} = maps:get(DivInst, SigsD),
+        %% N2 has not changed since the symmetric compaction.
+        {ready, Dd2, Rd2} = maps:get(DivInst, SigsC2),
+
+        %% BOTH roots are still `undefined` — a root comparison STILL reports IN
+        %% SYNC (the dangerous lie) ...
+        ?assertEqual(undefined, Rd1),
+        ?assertEqual(undefined, Rd2),
+        ?assertEqual(Rd1, Rd2),
+        ?assertEqual(PostD, Dd1),
+
+        %% ... but the content digests DIFFER, so the oracle correctly reports
+        %% DIVERGED — locally and over the transport.
+        ?assertNotEqual(Dd1, Dd2),
+        {ready, PD} = peer_digest(N1, DivInst),
+        ?assertEqual(Dd2, PD),
+        ?assertNotEqual(Dd1, PD),
+        ?assertNot(oracle_in_sync(N1, DivInst)),
+        ok
+    after
+        unquiesce(N1, N2)
+    end.
+
+%% =============================================================================
+%% CONTROLLER-SIDE HELPERS
+%% =============================================================================
+
+%% @private
+nodes_of(Config) ->
+    [Node || {_, Node, _} <- ?config(cluster, Config)].
+
+%% @private
+%% The `(Band, Key)` cells to seed: one key per distinct realm band, so the cells
+%% spread across the realm-sharded table's shard instances.
+seed_pairs(Tag) ->
+    [{band_for(Tag, B), <<"k">>} || B <- lists:seq(1, ?BANDS)].
+
+%% @private
+band_for(Tag, B) ->
+    <<"com.bondy.cdig.", Tag/binary, ".", (integer_to_binary(B))/binary>>.
+
+%% @private
+val(Band, Key) ->
+    #{band_uri => Band, key => Key, marker => <<"cdig">>}.
+
+%% @private
+%% Write every cell on N1, then wait for each to converge on N2 via background
+%% AAE (nudging the scheduler each round).
+seed_and_converge(N1, N2, Pairs) ->
+    lists:foreach(
+        fun({B, K}) ->
+            ok = erpc:call(N1, ?MODULE, do_apply, [?USERS_TABLE, B, K, val(B, K)])
+        end,
+        Pairs
+    ),
+    lists:foreach(
+        fun({B, K}) -> ok = wait_converge(N2, B, K, val(B, K)) end,
+        Pairs
+    ).
+
+%% @private
+quiesce(N1, N2) ->
+    ok = erpc:call(N1, ?MODULE, do_set_dispatch, [off]),
+    ok = erpc:call(N2, ?MODULE, do_set_dispatch, [off]).
+
+%% @private
+unquiesce(N1, N2) ->
+    _ = catch erpc:call(N1, ?MODULE, do_set_dispatch, [on]),
+    _ = catch erpc:call(N2, ?MODULE, do_set_dispatch, [on]),
+    ok.
+
+%% @private
+%% The data-bearing, converged instances: non-empty digest, binary root, and the
+%% same digest + a binary root on the peer's snapshot. These are the meaningful
+%% compaction targets.
+converged_data_targets(Sigs1, Sigs2) ->
+    [
+        I
+     || {I, {ready, D1, R1}} <- maps:to_list(Sigs1),
+        D1 =/= 0,
+        is_binary(R1),
+        case maps:get(I, Sigs2, undefined) of
+            {ready, D2, R2} -> D2 =:= D1 andalso is_binary(R2);
+            _ -> false
+        end
+    ].
+
+%% @private
+%% `LocalNode`'s view of its single Partisan peer's digest for `InstId`, fetched
+%% with the `get_content_digest` request — the production observer path.
+peer_digest(LocalNode, InstId) ->
+    {S, D, _Fp} = erpc:call(LocalNode, ?MODULE, do_peer_sig, [InstId]),
+    {S, D}.
+
+%% @private
+%% The Stage-4 observer verdict (`bondy_observer_cli_sync:status/3`, live path),
+%% reproduced over the real cross-node signatures: equal content digests under
+%% matching topology fingerprints ⇒ IN SYNC — independent of the MST roots. (We
+%% reproduce the trivial verdict here rather than call the `-ifdef(TEST)`-gated
+%% `status/3`, which is not exported in the release build the cluster nodes run.)
+oracle_in_sync(LocalNode, InstId) ->
+    {LS, LD, LFp} = erpc:call(LocalNode, ?MODULE, do_local_digest_sig, [InstId]),
+    {PS, PD, PFp} = erpc:call(LocalNode, ?MODULE, do_peer_sig, [InstId]),
+    LS =:= ready andalso
+        PS =:= ready andalso
+        not (is_binary(LFp) andalso is_binary(PFp) andalso LFp =/= PFp) andalso
+        LD =:= PD.
+
+%% @private
+%% Polls `Node` until its local read of `(Band, Key)` returns `Expected`, forcing
+%% a sync tick each round so we don't merely wait on the periodic timer.
+wait_converge(Node, Band, Key, Expected) ->
+    Deadline = now_ms() + ?CONVERGE_MS,
+    wait_converge_loop(Node, Band, Key, Expected, Deadline).
+
+%% @private
+wait_converge_loop(Node, Band, Key, Expected, Deadline) ->
+    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
+    case erpc:call(Node, ?MODULE, do_read, [?USERS_TABLE, Band, Key]) of
+        {ok, {Expected, _Hlc}} ->
+            ok;
+        Other ->
+            case now_ms() > Deadline of
+                true ->
+                    error({converge_timeout, Node, Band, Key, Other});
+                false ->
+                    timer:sleep(200),
+                    wait_converge_loop(Node, Band, Key, Expected, Deadline)
+            end
+    end.
+
+%% @private
+now_ms() ->
+    erlang:monotonic_time(millisecond).
+
+%% @private
+push_module(Node, Mod) ->
+    {Mod, Bin, File} = code:get_object_code(Mod),
+    {module, Mod} = erpc:call(Node, code, load_binary, [Mod, File, Bin]),
+    ok.
+
+%% =============================================================================
+%% PEER-SIDE HELPERS (run on the cluster nodes via erpc)
+%% =============================================================================
+
+%% @private
+do_apply(Table, Band, Key, Val) ->
+    bondy_db:apply(table_handle(Table), Band, Key, {set, Val}).
+
+%% @private
+do_read(Table, Band, Key) ->
+    bondy_db:read(table_handle(Table), Band, Key).
+
+%% @private
+table_handle(Table) ->
+    case bondy_namespace_catalog:table(Table) of
+        undefined -> error({table_not_provisioned, Table});
+        Tab -> Tab
+    end.
+
+%% @private
+%% The oplog instance id the cell `(Realm, Key)` of `Table` routes to — the same
+%% placement `apply/4`/`read/3` derive (`shard_for/3` then the table's
+%% shard→instance map).
+do_instance_for(Table, Realm, Key) ->
+    #{instance_ids := Ids} = T = table_handle(Table),
+    maps:get(bondy_db:shard_for(T, Realm, Key), Ids).
+
+%% @private
+%% The first `Band` (with key `<<"divergent">>`) whose shard instance is one of
+%% `Targets` — so a write to it lands on an instance we compacted on both nodes.
+%% A shard that also carries non-converged bootstrap data is not a target, so we
+%% must pick a band that routes to a clean, converged one.
+do_band_on_target(Table, Bands, Targets) ->
+    #{instance_ids := Ids} = T = table_handle(Table),
+    OnTarget = [
+        B
+     || B <- Bands,
+        lists:member(maps:get(bondy_db:shard_for(T, B, <<"divergent">>), Ids), Targets)
+    ],
+    case OnTarget of
+        [B | _] -> B;
+        [] -> error({no_seeded_band_on_target, length(Bands), length(Targets)})
+    end.
+
+%% @private
+%% `InstanceId => {ready | warming, Digest, Root}` over every live instance on
+%% this node (`Root` is `undefined` for an empty / compacted MST).
+do_instance_sigs() ->
+    lists:foldl(
+        fun(I, Acc) ->
+            {Status, Digest} = bondy_oplog_instance:content_digest(I),
+            Root =
+                case catch bondy_oplog_instance:root_hash(I) of
+                    R when is_binary(R) -> R;
+                    _ -> undefined
+                end,
+            Acc#{I => {Status, Digest, Root}}
+        end,
+        #{},
+        bondy_oplog:list_instances()
+    ).
+
+%% @private
+%% The local digest signature the observer compares: `{Status, Digest,
+%% Fingerprint}`.
+do_local_digest_sig(InstId) ->
+    {Status, Digest} = bondy_oplog_instance:content_digest(InstId),
+    Fp =
+        case catch bondy_oplog:topology_fingerprint(bondy_oplog:db_of(InstId)) of
+            F when is_binary(F) -> F;
+            _ -> undefined
+        end,
+    {Status, Digest, Fp}.
+
+%% @private
+%% This node's single Partisan peer's digest signature for `InstId`, fetched over
+%% the AAE channel with `get_content_digest` (mirrors
+%% `bondy_observer_cli_sync:peer_sig/2`). `{Status, Digest, Fingerprint}`.
+do_peer_sig(InstId) ->
+    Peer = single_peer(),
+    Opts = #{timeout => 5000, channel => aae_channel()},
+    case
+        catch bondy_oplog_transport_partisan:request(
+            Peer, InstId, get_content_digest, Opts
+        )
+    of
+        {ok, {Status, Digest}, Fp} -> {Status, Digest, Fp};
+        Other -> error({peer_digest_failed, Peer, InstId, Other})
+    end.
+
+%% @private
+single_peer() ->
+    case partisan:nodes() of
+        [Peer | _] -> Peer;
+        _ -> error(no_partisan_peer)
+    end.
+
+%% @private
+aae_channel() ->
+    case catch bondy_config:get(aae_channel) of
+        Ch when is_atom(Ch) -> Ch;
+        _ -> bondy_aae
+    end.
+
+%% @private
+do_drain_all() ->
+    lists:foreach(
+        fun(I) -> _ = catch bondy_oplog_instance:await_apply(I) end,
+        bondy_oplog:list_instances()
+    ).
+
+%% @private
+%% Drain, then compact the instance to its CURRENT root (frontier = everything),
+%% emptying its MST. Mirrors `bondy_oplog_compaction_durable_test`. A no-op
+%% (`{ok, no_change}`) for an already-empty MST.
+do_compact(InstId) ->
+    _ = catch bondy_oplog_instance:await_apply(InstId),
+    case bondy_oplog_instance:root_hash(InstId) of
+        Root when is_binary(Root) ->
+            bondy_oplog_instance:compact(InstId, [Root]);
+        _ ->
+            {ok, no_change}
+    end.
+
+%% @private
+do_set_dispatch(off) ->
+    bondy_oplog_sync_scheduler:set_dispatch(undefined);
+do_set_dispatch(on) ->
+    bondy_oplog_sync_scheduler:set_dispatch(
+        fun bondy_oplog_sync_scheduler:default_dispatch/2
+    ).

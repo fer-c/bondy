@@ -57,6 +57,11 @@ adapter_test_() ->
         fun clear_is_bucket_scoped/1,
         fun clear_is_entity_scoped/1,
         fun cell_keys_is_entity_scoped/1,
+        fun content_digest_fold_empty_is_zero/1,
+        fun content_digest_fold_matches_manual_xor/1,
+        fun content_digest_fold_is_entity_scoped/1,
+        fun content_digest_fold_all_primary/1,
+        fun content_digest_fold_state_only_cell/1,
         fun info_reports_backend_and_bookie/1
     ]}.
 
@@ -456,9 +461,105 @@ info_reports_backend_and_bookie({Pid, _Dir}) ->
         ?assertMatch(#{backend := leveled, bookie := Pid}, Info)
     end.
 
+%% An empty bucket set folds to the empty digest (0).
+content_digest_fold_empty_is_zero({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        Runner = ?MOD:content_digest_fold(H, all_primary),
+        ?assert(is_function(Runner, 0)),
+        ?assertEqual(0, Runner())
+    end.
+
+%% The folded digest equals the manual XOR of `cell_hash(Bucket, Key, StateBytes)`
+%% over the cells — the same StateBytes the apply-path digest hook uses, so a
+%% recomputed digest is byte-identical to an incrementally-maintained one.
+content_digest_fold_matches_manual_xor({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        Cells = [
+            {<<"users">>, <<"u1">>, <<"state-1">>},
+            {<<"users">>, <<"u2">>, <<"state-2">>},
+            {<<"r1/users">>, <<"u3">>, <<"state-3">>}
+        ],
+        ok = ?MOD:put_batch(H, [{B, K, mk_frame(S)} || {B, K, S} <- Cells]),
+        Runner = ?MOD:content_digest_fold(H, {entity, <<"users">>}),
+        %% Single-use: the runner consumes (and closes) its snapshot on run.
+        Digest = Runner(),
+        ?assertEqual(manual_digest(Cells), Digest),
+        ?assertNotEqual(0, Digest)
+    end.
+
+%% Entity scope folds ONLY the entity's primary cells — index buckets
+%% (`/$idx/`), reserved marker buckets (`$idx*`), other co-located tables, and
+%% substring traps (`power_users`) are excluded, exactly as `cell_keys/2`.
+content_digest_fold_is_entity_scoped({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        F = mk_frame(<<"s">>),
+        ok = ?MOD:put_batch(H, [
+            {<<"users">>, <<"u_ss">>, F},
+            {<<"r1/users">>, <<"u_r1">>, F},
+            {<<"users/$idx/by_name">>, <<"active">>, F},
+            {<<"$idx_trusted">>, <<"m">>, F},
+            {<<"items">>, <<"i1">>, F},
+            {<<"power_users">>, <<"pu1">>, F}
+        ]),
+        Runner = ?MOD:content_digest_fold(H, {entity, <<"users">>}),
+        Expected = manual_digest([
+            {<<"users">>, <<"u_ss">>, <<"s">>},
+            {<<"r1/users">>, <<"u_r1">>, <<"s">>}
+        ]),
+        ?assertEqual(Expected, Runner())
+    end.
+
+%% `all_primary` folds every non-index bucket (the dedicated-Bookie variant).
+content_digest_fold_all_primary({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        F = mk_frame(<<"s">>),
+        ok = ?MOD:put_batch(H, [
+            {<<"r1">>, <<"k1">>, F},
+            {<<"r2">>, <<"k2">>, F},
+            {<<"r1/$idx/by_name">>, <<"active">>, F},
+            {<<"$idx_trusted">>, <<"m">>, F}
+        ]),
+        Runner = ?MOD:content_digest_fold(H, all_primary),
+        Expected = manual_digest([
+            {<<"r1">>, <<"k1">>, <<"s">>},
+            {<<"r2">>, <<"k2">>, <<"s">>}
+        ]),
+        ?assertEqual(Expected, Runner())
+    end.
+
+%% A `value_equals_state` cell stores ONLY the `?SK_STATE` subkey; the fold reads
+%% it and counts the cell exactly once (the `?SK_VALUE` skip clause is moot).
+content_digest_fold_state_only_cell({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        ok = ?MOD:put_batch(H, [
+            {<<"r1">>, <<"k1">>, mk_state_frame(<<"only-state">>)}
+        ]),
+        Runner = ?MOD:content_digest_fold(H, all_primary),
+        ?assertEqual(
+            manual_digest([{<<"r1">>, <<"k1">>, <<"only-state">>}]),
+            Runner()
+        )
+    end.
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+%% Manual XOR of the per-cell content-digest contributions, the oracle's
+%% reference computation.
+manual_digest(Cells) ->
+    lists:foldl(
+        fun({B, K, S}, Acc) ->
+            bondy_oplog_content_digest:add(Acc, B, K, S)
+        end,
+        bondy_oplog_content_digest:empty(),
+        Cells
+    ).
 
 handle(Pid) ->
     {ok, H} = ?MOD:open(ns, idx, 0, #{bookie => Pid}),

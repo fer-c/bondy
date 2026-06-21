@@ -115,6 +115,23 @@ table's lifecycle tied to a supervisor child.
     %% instance init via `set_ae_targets/2`; unchanged for the
     %% instance's lifetime. Empty list = wiring disabled.
     ae_targets = [] :: [{atom(), atom(), non_neg_integer()}],
+    %% Per-instance projection content digest counter
+    %% (`bondy_oplog_content_digest`), the MST-root-independent convergence
+    %% oracle. A single `atomics` word XOR-maintained by the applier after every
+    %% committed cell batch (across ALL shards this instance multiplexes) and
+    %% read by `content_digest/1` / the AAE responder / the observer. Allocated
+    %% and published once at instance init via `set_content_digest_ref/2`;
+    %% `undefined` until then (digest maintenance is then a no-op).
+    content_digest_ref :: bondy_oplog_content_digest:ref() | undefined,
+    %% Whether the content digest in `content_digest_ref` is AUTHORITATIVE yet.
+    %% `false` while a crash-restart recompute is still folding the durable
+    %% projection (the digest reflects only post-boot deltas, not the boot
+    %% content) — the convergence oracle reports `warming` and refuses an
+    %% IN_SYNC/DIVERGED verdict until this flips `true`, mirroring the observer
+    %% lifecycle gate. Set `true` at init for ephemeral instances (empty at
+    %% boot, no recompute) and for the clean-shutdown restore path; set `true`
+    %% by the recompute worker when the fold completes.
+    content_digest_ready = false :: boolean(),
     %% Demand-based applier→instance flow control. Single-slot atomic
     %% counter shared between the applier (increments before
     %% dispatching an `install_local_batch` cast) and the instance
@@ -213,6 +230,8 @@ table's lifecycle tied to a supervisor child.
 -export([overlay_tab/1]).
 -export([fast_path/1]).
 -export([ae_targets/1]).
+-export([content_digest_ref/1]).
+-export([content_digest_ready/1]).
 -export([fused/1]).
 -export([install_in_flight/1]).
 -export([max_install_in_flight/1]).
@@ -231,6 +250,8 @@ table's lifecycle tied to a supervisor child.
 -export([set_overlay_tab/2]).
 -export([set_fast_path/2]).
 -export([set_ae_targets/2]).
+-export([set_content_digest_ref/2]).
+-export([set_content_digest_ready/2]).
 -export([set_install_in_flight/3]).
 -export([set_lifecycle/2]).
 
@@ -475,6 +496,31 @@ ae_targets(InstanceId) ->
     field(InstanceId, #entry.ae_targets).
 
 ?DOC("""
+Returns the instance's projection content-digest counter ref
+(`bondy_oplog_content_digest:ref()`), or `undefined` if the instance has not
+published one (digest maintenance is then a no-op). Read by the apply path (to
+XOR in each committed batch's delta) and by `content_digest/1` / the AAE
+responder / the observer.
+""").
+-spec content_digest_ref(instance_id()) ->
+    bondy_oplog_content_digest:ref() | undefined.
+
+content_digest_ref(InstanceId) ->
+    field(InstanceId, #entry.content_digest_ref).
+
+?DOC("""
+Whether the instance's content digest is AUTHORITATIVE (`true`) or still
+`warming` (`false`) while a crash-restart recompute folds the durable
+projection. The convergence oracle reads this alongside `content_digest_ref/1`
+and refuses an IN_SYNC/DIVERGED verdict until it is `true`. `false` for an
+instance with no published row.
+""").
+-spec content_digest_ready(instance_id()) -> boolean().
+
+content_digest_ready(InstanceId) ->
+    field(InstanceId, #entry.content_digest_ready) =:= true.
+
+?DOC("""
 Returns the instance's ephemeral fused-writer flag. `true` only for
 ephemeral (ets projection) instances that opted into the fused
 single-process write path; `false` for every durable instance and
@@ -612,6 +658,32 @@ set_ae_targets(InstanceId, Targets) when
     is_list(Targets)
 ->
     _ = update_field(InstanceId, #entry.ae_targets, Targets),
+    ok.
+
+?DOC("""
+Publishes the instance's projection content-digest counter ref. Called once at
+instance init (after the row exists) with a fresh `bondy_oplog_content_digest:new_ref/0`.
+""").
+-spec set_content_digest_ref(
+    instance_id(), bondy_oplog_content_digest:ref()
+) -> ok.
+
+set_content_digest_ref(InstanceId, Ref) when is_binary(InstanceId) ->
+    _ = update_field(InstanceId, #entry.content_digest_ref, Ref),
+    ok.
+
+?DOC("""
+Marks the instance's content digest authoritative (`true`) or `warming`
+(`false`). Set at init (`true` for ephemeral / clean-shutdown restore, `false`
+when a crash-restart recompute is launched) and flipped `true` by the recompute
+worker when the projection fold completes.
+""").
+-spec set_content_digest_ready(instance_id(), boolean()) -> ok.
+
+set_content_digest_ready(InstanceId, Ready) when
+    is_binary(InstanceId), is_boolean(Ready)
+->
+    _ = update_field(InstanceId, #entry.content_digest_ready, Ready),
     ok.
 
 ?DOC("""

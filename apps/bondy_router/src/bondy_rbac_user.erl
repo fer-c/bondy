@@ -1713,16 +1713,43 @@ store(RealmUri, #{username := Username} = User, #{rebase := true}) ->
     %% a plain set — a fresh bondy_db write already dominates via its HLC.
     %% Membership replicates via its own relation cells, so a rebase of the user
     %% cell does NOT reconcile it.
-    ok = bondy_db:apply(table(), RealmUri, Username, {set, strip_groups(User)}),
+    ok = durable_apply(table(), RealmUri, Username, {set, strip_groups(User)}),
     {ok, User};
 store(RealmUri, #{username := Username} = User, _) ->
     %% Capture the previous value to tell a create from an update, the way
     %% plum_db passed `Old` to the on_update callback.
     Old = do_get(RealmUri, Username),
     ok = reconcile_membership(RealmUri, Username, maps:get(groups, User, [])),
-    ok = bondy_db:apply(table(), RealmUri, Username, {set, strip_groups(User)}),
+    ok = durable_apply(table(), RealmUri, Username, {set, strip_groups(User)}),
     ok = do_on_update(RealmUri, Username, Old == undefined),
     {ok, User}.
+
+%% @private
+%% A `bondy_db:apply` whose projection-await timeout is tolerated. `apply/4`
+%% appends the event to the WAL durably and THEN waits for the applier to
+%% project it; under heavy anti-entropy load — or while a shard's projection
+%% backend is recovering — that wait can time out even though the write is
+%% already durable and WILL be projected once the applier drains. A transient
+%% projection-await timeout must NOT crash a boot/realm-config apply (which would
+%% brick the node), so we treat it as success and log. Any other error still
+%% fails the write.
+durable_apply(Table, RealmUri, Key, Event) ->
+    case bondy_db:apply(Table, RealmUri, Key, Event) of
+        ok ->
+            ok;
+        {error, timeout} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "User write durably appended but the projection wait timed "
+                    "out; continuing. The value projects once the applier "
+                    "drains (check the shard's projection backend if persistent).",
+                realm_uri => RealmUri,
+                username => Key
+            }),
+            ok;
+        {error, Reason} ->
+            error({bondy_db_apply, Reason})
+    end.
 
 %% @private
 password_opts(_, #{password_opts := Opts}) when is_map(Opts) ->

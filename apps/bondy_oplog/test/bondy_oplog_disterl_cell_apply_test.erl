@@ -60,7 +60,9 @@ setup() ->
                 "bondymst_cell_" ++
                     integer_to_list(os:system_time(microsecond))
             ),
-            {ok, _} = net_kernel:start([Name, shortnames]),
+            %% OTP-28: the legacy list form `net_kernel:start([Name, shortnames])`
+            %% is gone; use start/2 with the options map.
+            {ok, _} = net_kernel:start(Name, #{name_domain => shortnames}),
             true = erlang:set_cookie(node(), bondymsttestcookie),
             ok;
         _ ->
@@ -380,12 +382,21 @@ start_peer_node(NameSuffix) ->
     Cookie = atom_to_list(erlang:get_cookie()),
     PeerOpts = #{
         name => Name,
-        host => "127.0.0.1",
+        %% Match the controller's short hostname (from `node()`); a literal
+        %% "127.0.0.1" forces a longname under our shortnames controller and the
+        %% peer would exit with `nodistribution` (OTP-28).
+        host => controller_host(),
         connection => standard_io,
         args => ["-setcookie", Cookie, "-pa" | code:get_path()]
     },
     {ok, Peer, Node} = peer:start_link(PeerOpts),
     {ok, Peer, Node}.
+
+controller_host() ->
+    case string:split(atom_to_list(node()), "@") of
+        [_, Host] -> Host;
+        _ -> "localhost"
+    end.
 
 setup_peer(Node) ->
     %% Start bondy_db on the peer (chain: bondy_db -> bondy_oplog -> bondy_mst);

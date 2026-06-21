@@ -1669,24 +1669,56 @@ do_diff(_, _, undefined, _, _, Acc) ->
 do_diff(T, Store1, ARoot, _, undefined, Acc) ->
     {ro_to_list(T, Store1, Acc, ARoot), Acc};
 do_diff(T, Store1, ARoot, Store2, BRoot, Acc) ->
-    APage = ro_store_get(Store1, Acc, ARoot),
-    ALow = bondy_mst_page:low(APage),
-    AEntries = bondy_mst_page:list(APage),
-    ALevel = bondy_mst_page:level(APage),
-
-    BPage = ro_store_get(Store2, Acc, BRoot),
-    BEntries = bondy_mst_page:list(BPage),
-    BLow = bondy_mst_page:low(BPage),
-    BLevel = bondy_mst_page:level(BPage),
-
-    case BLevel of
-        ALevel ->
-            do_diff_rec(T, Store1, ALow, AEntries, Store2, BLow, BEntries, Acc);
-        BLevel when ALevel > BLevel ->
-            do_diff_rec(T, Store1, ALow, AEntries, Store2, BRoot, [], Acc);
-        BLevel when ALevel < BLevel ->
-            do_diff_rec(T, Store1, ARoot, [], Store2, BLow, BEntries, Acc)
+    case {ro_store_get(Store1, Acc, ARoot), ro_store_get(Store2, Acc, BRoot)} of
+        {undefined, undefined} ->
+            %% Dangling-page recovery (see the note above `merge_aux/5`):
+            %% a hash resolved to no page in either store. Treat both
+            %% subtrees as empty rather than crashing on
+            %% `bondy_mst_page:list(undefined)`. With the pack store now
+            %% serving physically-present pages this should not happen for a
+            %% live tree; the guard remains for genuinely-absent pages.
+            log_dangling_diff(ARoot, BRoot),
+            {[], Acc};
+        {undefined, _} ->
+            %% A-side dangling: treat A's subtree as empty, so every key
+            %% under BRoot is reported as changed.
+            log_dangling_diff(ARoot, BRoot),
+            {ro_to_list(T, Store2, Acc, BRoot), Acc};
+        {_, undefined} ->
+            %% B-side dangling: symmetric.
+            log_dangling_diff(ARoot, BRoot),
+            {ro_to_list(T, Store1, Acc, ARoot), Acc};
+        {APage, BPage} ->
+            ALow = bondy_mst_page:low(APage),
+            AEntries = bondy_mst_page:list(APage),
+            ALevel = bondy_mst_page:level(APage),
+            BEntries = bondy_mst_page:list(BPage),
+            BLow = bondy_mst_page:low(BPage),
+            BLevel = bondy_mst_page:level(BPage),
+            case BLevel of
+                ALevel ->
+                    do_diff_rec(
+                        T, Store1, ALow, AEntries, Store2, BLow, BEntries, Acc
+                    );
+                BLevel when ALevel > BLevel ->
+                    do_diff_rec(
+                        T, Store1, ALow, AEntries, Store2, BRoot, [], Acc
+                    );
+                BLevel when ALevel < BLevel ->
+                    do_diff_rec(
+                        T, Store1, ARoot, [], Store2, BLow, BEntries, Acc
+                    )
+            end
     end.
+
+%% @private
+log_dangling_diff(ARoot, BRoot) ->
+    ?LOG_WARNING(#{
+        description =>
+            "diff: dangling page, treating subtree as empty",
+        a_root => ARoot,
+        b_root => BRoot
+    }).
 
 %% @private
 do_diff_rec(T, Store1, ALow, [], Store2, BLow, [], Acc) ->

@@ -226,7 +226,10 @@ get_event_cold_miss_test() ->
         end
     end).
 
-get_event_tombstoned_is_cold_miss_test() ->
+get_event_tombstoned_still_served_test() ->
+    %% A tombstoned page whose bytes are still present is served on get (the
+    %% `free_set` is a GC/enumeration hint, not a read mask). The page is in
+    %% the writer's pending buffer, so the telemetry source is `pending`.
     with_telemetry(fun() ->
         Dir = mk_tmp_dir(),
         try
@@ -235,10 +238,10 @@ get_event_tombstoned_is_cold_miss_test() ->
             {H, S1} = bondy_mst_store:put(S, Page),
             _ = recv_event([bondy_mst, page_store, put]),
             S2 = bondy_mst_store:delete(S1, H),
-            undefined = bondy_mst_store:get(S2, H),
+            Page = bondy_mst_store:get(S2, H),
             {M, _} = recv_event([bondy_mst, page_store, get]),
-            ?assertEqual(cold_miss, maps:get(source, M)),
-            ?assertEqual(0, maps:get(page_bytes, M)),
+            ?assertEqual(pending, maps:get(source, M)),
+            ?assert(maps:get(page_bytes, M) > 0),
             ok = bondy_mst_store:close(S2)
         after
             rmrf(Dir)
