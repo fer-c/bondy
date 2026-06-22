@@ -292,10 +292,7 @@ resolve_config(Opts) ->
             true ->
                 Opts;
             false ->
-                case application:get_env(bondy_oplog, oplog_latency) of
-                    {ok, M} when is_map(M) -> M;
-                    _ -> #{}
-                end
+                bondy_oplog_config:oplog_latency_opts()
         end,
     Enabled = maps:get(enabled, Cfg, true),
     IntervalMs =
@@ -443,7 +440,7 @@ run_probe(InstanceId) ->
 %% Defaults to `undefined` (probing disabled), so `bondy_oplog` carries no
 %% upward dependency on `bondy_db`.
 probe_mfa() ->
-    application:get_env(bondy_oplog, latency_probe, undefined).
+    bondy_oplog_config:latency_probe().
 
 empty_snapshot() ->
     #{count => 0, sum => 0, buckets => []}.

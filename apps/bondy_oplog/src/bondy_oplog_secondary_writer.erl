@@ -318,8 +318,10 @@ maybe_request_rebuild(NS, IName, Entry) ->
 
 %% Prepend a batch tagged with its stream (kept reversed; `group_by/2`
 %% restores per-stream arrival order at flush).
-prepend(_Stream, [], Buf) -> Buf;
-prepend(Stream, [Op | Rest], Buf) -> prepend(Stream, Rest, [{Stream, Op} | Buf]).
+prepend(_Stream, [], Buf) ->
+    Buf;
+prepend(Stream, [Op | Rest], Buf) ->
+    prepend(Stream, Rest, [{Stream, Op} | Buf]).
 
 arm_timer(#state{flush_timer = Ref} = State) when is_reference(Ref) ->
     State;

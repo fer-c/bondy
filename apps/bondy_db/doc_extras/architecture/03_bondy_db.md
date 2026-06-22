@@ -475,6 +475,15 @@ on restart) keep no manifest. The `core` DB's partition strategy
 (`partition_strategy`, default `aggregate`) is part of the frozen set:
 it is what decides which shard a `(realm, key)` write routes to.
 
+The frozen manifest also yields a **topology fingerprint** that a node
+advertises during anti-entropy. Two peers compare their applied
+frontiers — the cross-node convergence oracle (`bondy_oplog`,
+[chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)) —
+only when their fingerprints agree, so a node that keys its data
+differently is never mistaken for a divergent replica of the same
+data. The operator sync view reads convergence this way: it compares
+applied frontiers, not MST roots.
+
 ```mermaid
 flowchart LR
     APP[Application] --> FACADE[bondy_db]

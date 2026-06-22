@@ -12,20 +12,20 @@ applications. Users can be assigned group memberships.
 
 ## Storage
 
-Users are persisted in `bondy_db` (design §11.4 — cut over from plum_db). The
+Users are persisted in `bondy_db`. The
 durable `security_users` table is provisioned by `bondy_namespace_catalog`
 (`fold => lww`, `shard_by => realm`). Each user (and each alias index entry)
 is a cell keyed by its `Username` / `Alias` binary, addressed as
-`(Table, RealmUri, Key)` — the realm is the bucket, mirroring the old
-`{security_users, RealmUri}` plum_db prefix.
+`(Table, RealmUri, Key)` — the realm is the bucket.
 
-The plum_db prefix callbacks are gone. Their **local** side-effects —
-revoking the user's tickets, closing local sessions and publishing the
-`{[bondy, user, added | updated | deleted], ...}` events — now fire **inline**
-at the write / delete chokepoints (`do_on_update/3`, `do_on_delete/2`). The
-**remote** `on_merge` side-effect (closing sessions when a peer's AAE merge
-shows a delete or credential change) has no equivalent yet: it is deferred to
-the `oplog.aae` phase, where it becomes a `bondy_db` publish/reactor seam.
+The **local** side-effects — revoking the user's tickets, closing local
+sessions and publishing the `{[bondy, user, added | updated | deleted], ...}`
+events — fire **inline** at the write / delete chokepoints (`do_on_update/3`,
+`do_on_delete/2`). The **remote** side-effect — closing local sessions when a
+peer's anti-entropy merge shows a user *delete* — is the `publish => true` /
+`bondy_aae_reactor:react_user/2` seam (see `bondy_namespace_catalog`); a remote
+credential change is a `set`, a no-op there, with the auth freshness fence
+covering credential staleness instead.
 """.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -205,7 +205,9 @@ end#{
 }.
 -type add_opts() :: #{
     password_opts => bondy_password:opts(),
-    rebase => boolean(),
+    %% `true` when applying declarative config (idempotent write, no lifecycle
+    %% side-effects) — see `bondy_realm:apply_config/0`.
+    declarative => boolean(),
     actor_id => term(),
     if_exists => fail | update
 }.
@@ -692,7 +694,10 @@ lookup(RealmUri, Username0) ->
                             Error
                     end;
                 Val0 ->
-                    {ok, with_groups(RealmUri, Username, from_term({Username, Val0}))}
+                    {ok,
+                        with_groups(
+                            RealmUri, Username, from_term({Username, Val0})
+                        )}
             end
     end.
 
@@ -710,7 +715,6 @@ fetch(RealmUri, Username) ->
         {error, not_found} ->
             error({no_such_user, Username})
     end.
-
 
 -doc """
 Returns the current `token_version` for `Username` in realm `RealmUri`.
@@ -746,7 +750,6 @@ token_version(RealmUri, Username0) ->
                     {error, not_found}
             end
     end.
-
 
 -spec list(uri()) -> list(t()).
 
@@ -1212,8 +1215,8 @@ member_retract(RealmUri, Username, Group) ->
 
 %% @private
 %% Bring the relation in line with the user's desired group set: assert the
-%% added groups, retract the removed ones. Called at every (non-rebase) user
-%% store, so a no-op set (desired == current) costs one forward-band scan.
+%% added groups, retract the removed ones. Called at every (non-declarative)
+%% user store, so a no-op set (desired == current) costs one forward-band scan.
 reconcile_membership(RealmUri, Username, Desired0) ->
     Desired = ordsets:from_list(Desired0),
     Current = ordsets:from_list(member_groups(RealmUri, Username)),
@@ -1277,7 +1280,6 @@ all_member_groups(RealmUri) ->
 %% page need not be globally ordered (min/max bound each shard's band).
 page_member_groups(_RealmUri, []) ->
     #{};
-
 page_member_groups(RealmUri, Users) ->
     Table = member_table(),
     Names = [maps:get(username, U) || U <- Users],
@@ -1318,9 +1320,12 @@ scan_member_band(RealmUri, Shard, Lo, Hi, Acc) ->
                 fun({Key, _V, _Hlc} = Row, {A, _Last}) ->
                     case decode_fwd_member(Row) of
                         {ok, {U, G}} ->
-                            {maps:update_with(
-                                U, fun(Gs) -> [G | Gs] end, [G], A
-                            ), Key};
+                            {
+                                maps:update_with(
+                                    U, fun(Gs) -> [G | Gs] end, [G], A
+                                ),
+                                Key
+                            };
                         skip ->
                             {A, Key}
                     end
@@ -1498,9 +1503,9 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0, Opts) when
     Username = maps:get(username, User0),
 
     %% Key validations first
-    %% We avoid checking when we are rebasing
-    Rebase = maps:get(rebase, Opts, false),
-    Rebase == true orelse not_exists_check(RealmUri, Username),
+    %% We skip the existence check when applying declarative config (overwrite).
+    Declarative = maps:get(declarative, Opts, false),
+    Declarative == true orelse not_exists_check(RealmUri, Username),
     ok = groups_exists_check(RealmUri, maps:get(groups, User0, [])),
 
     %% We split the user into LocalUser, SSOUser and Opts
@@ -1517,7 +1522,7 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0, Opts) when
         meta => #{}
     }),
 
-    Flag = Rebase == true orelse not exists(SSOUri, Username),
+    Flag = Declarative == true orelse not exists(SSOUri, Username),
     ok = maybe_add_sso_user(Flag, RealmUri, SSOUri, SSOUser, Opts),
 
     %% We finally add the local user to the realm
@@ -1527,9 +1532,9 @@ do_add(RealmUri, User0, Opts) ->
     Username = maps:get(username, User0),
 
     %% Key validations first
-    %% We avoid checking when we are rebasing
-    Rebase = maps:get(rebase, Opts, false),
-    Rebase == true orelse not_exists_check(RealmUri, Username),
+    %% We skip the existence check when applying declarative config (overwrite).
+    Declarative = maps:get(declarative, Opts, false),
+    Declarative == true orelse not_exists_check(RealmUri, Username),
     ok = groups_exists_check(RealmUri, maps:get(groups, User0, [])),
 
     %% We split the user into LocalUser, SSOUSer and Opts
@@ -1683,7 +1688,12 @@ update_groups(RealmUri, all, Groupnames, Fun) ->
 update_groups(RealmUri, Users, Groupnames, Fun) when is_list(Users) ->
     _ = [update_groups(RealmUri, User, Groupnames, Fun) || User <- Users],
     ok;
-update_groups(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Groupnames, Fun) when
+update_groups(
+    RealmUri,
+    #{type := ?USER_TYPE, username := Username} = User,
+    Groupnames,
+    Fun
+) when
     is_function(Fun, 2)
 ->
     %% The current group set is read from the authoritative membership relation
@@ -1707,13 +1717,24 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
 %% `groups`) is reconciled into the relation. The user-cell write still happens
 %% on every membership change, so its HLC — the `token_version` — keeps
 %% advancing (a removed/added group forces the zookie forward, design §9.3).
-store(RealmUri, #{username := Username} = User, #{rebase := true}) ->
-    %% Dirty/rebase write: like plum_db:dirty_put it writes WITHOUT firing the
-    %% lifecycle side-effects. The rebase (plum_db dvvset lineage) collapses to
-    %% a plain set — a fresh bondy_db write already dominates via its HLC.
-    %% Membership replicates via its own relation cells, so a rebase of the user
-    %% cell does NOT reconcile it.
-    ok = durable_apply(table(), RealmUri, Username, {set, strip_groups(User)}),
+store(RealmUri, #{username := Username} = User, #{declarative := true}) ->
+    %% Declarative config apply: write WITHOUT firing the runtime lifecycle
+    %% side-effects, and IDEMPOTENTLY — emit a write only when the stored value
+    %% differs. Re-reading the same config file on every boot must not re-stamp
+    %% the user cell with a fresh HLC (which would diverge the cross-node content
+    %% digest); the op-based CRDT + anti-entropy handle convergence, so no
+    %% deterministic-version rebase is needed. The user object is deterministic
+    %% (see `bondy_realm:validate_rbac_config` for the deterministic salt), so an
+    %% unchanged config compares equal. Membership replicates via its own
+    %% relation cells, so this does NOT reconcile group membership.
+    Desired = strip_groups(User),
+    case do_get(RealmUri, Username) of
+        Desired ->
+            %% Unchanged — no write, no new operation, convergence undisturbed.
+            ok;
+        _ ->
+            ok = durable_apply(table(), RealmUri, Username, {set, Desired})
+    end,
     {ok, User};
 store(RealmUri, #{username := Username} = User, _) ->
     %% Capture the previous value to tell a create from an update, the way

@@ -134,6 +134,7 @@ it).
 -export([apply/4]).
 -export([apply_batch/4]).
 -export([apply_many/1]).
+-export([reconcile/4]).
 -export([map_update/4]).
 -export([counter_inc/4]).
 -export([probe_write/1]).
@@ -879,6 +880,48 @@ apply(
                     ok
             end,
             Result
+    end.
+
+-doc """
+Idempotent set: ensure `(Realm, Key)` in `Table` holds `Value`, emitting a
+write **only when the stored value differs**. A no-op when the value already
+matches.
+
+This is the write used to apply *declarative configuration* (the security and
+API-gateway config files re-read on every boot). Because the substrate is an
+operation-based CRDT reconciled by anti-entropy, multi-node agreement needs no
+deterministic-version "rebase": re-asserting an unchanged value produces no
+operation at all, so the op-set is stable across boots and the per-shard
+projection (and the applied frontier over it) never drift. Only a genuine change
+emits a fresh `{set, Value}`, which wins by HLC exactly as any later write does.
+
+This relies on `Value` being **deterministic** for a given configuration —
+identical on every node and every boot — so an unchanged config compares equal.
+Config objects are built to satisfy this (e.g. the security config derives a
+deterministic password salt). A value that embeds per-apply state (a wall-clock
+timestamp, a random token) would defeat the comparison and must be made
+deterministic at its source.
+
+Returns `ok` whether or not a write was emitted; surfaces the underlying
+`apply/4` error when a write is attempted and fails.
+""".
+-spec reconcile(
+    Table :: table(),
+    Realm :: realm(),
+    Key :: binary(),
+    Value :: term()
+) -> ok | {error, term()}.
+
+reconcile(Table, Realm, Key, Value) ->
+    case read(Table, Realm, Key) of
+        {ok, {Value, _Hlc}} ->
+            %% Stored value already equals the desired value: no write, so no
+            %% new operation enters the op-set and convergence is undisturbed.
+            ok;
+        _ ->
+            %% Absent, cleared, changed, or a transient read error — (re)assert
+            %% the desired value. A fresh write dominates by HLC.
+            apply(Table, Realm, Key, {set, Value})
     end.
 
 -doc """
@@ -1921,7 +1964,6 @@ Used by the relation layer to walk shards for partition-ordered pagination
 shard_count(#{shard_count := SC}) ->
     SC.
 
-
 -doc """
 The application-facing AE freshness fence (`STORAGE_ARCHITECTURE` §9.1/§10.5).
 
@@ -2153,7 +2195,8 @@ provision_shard(
                                 _ -> undefined
                             end,
                         publish_ns => maps:get(
-                            publish_ns, maps:get(applier, OplogOpts, #{}),
+                            publish_ns,
+                            maps:get(applier, OplogOpts, #{}),
                             undefined
                         ),
                         secondary_indexes => SecIndexes,
@@ -2470,7 +2513,9 @@ start_or_join_shard_instance(
                 ok ->
                     {ok, InstanceId, CacheHandle};
                 {error, _} = Err ->
-                    ok = bondy_oplog_core_registry:unregister(NS, ?INDEX, Shard),
+                    ok = bondy_oplog_core_registry:unregister(
+                        NS, ?INDEX, Shard
+                    ),
                     ok = release_cache(Topology, TableState, CacheHandle),
                     Err
             end
@@ -2555,7 +2600,9 @@ teardown_shard(NS, Shard, InstanceIds, CacheHandles, Topology, TableState) ->
 %% shared Bookie, which stays up until DB shutdown). Best-effort throughout: a
 %% dead instance or stale handle never aborts the teardown (it is also the
 %% rollback path for a half-built table).
-teardown_shared_shard(NS, Shard, InstanceIds, CacheHandles, Topology, TableState) ->
+teardown_shared_shard(
+    NS, Shard, InstanceIds, CacheHandles, Topology, TableState
+) ->
     Bucket = collapse_bucket(maps:get(entity_type, TableState)),
     InstanceId = maps:get(Shard, InstanceIds, undefined),
     _ =
@@ -2693,8 +2740,14 @@ provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
         {ok, TableState, _NewState} ->
             case
                 provision_index_shards(
-                    NS, Name, SecShardCount, CoalesceMs, Topology, TableState,
-                    DbName, Strategy
+                    NS,
+                    Name,
+                    SecShardCount,
+                    CoalesceMs,
+                    Topology,
+                    TableState,
+                    DbName,
+                    Strategy
                 )
             of
                 {ok, CacheHandles, Writers} ->
@@ -2722,8 +2775,15 @@ provision_index_shards(
         SecShardCount,
         fun(Shard) ->
             provision_index_shard(
-                NS, Name, SecShardCount, CoalesceMs, Topology, TableState,
-                DbName, Strategy, Shard
+                NS,
+                Name,
+                SecShardCount,
+                CoalesceMs,
+                Topology,
+                TableState,
+                DbName,
+                Strategy,
+                Shard
             )
         end,
         fun(S, Caches, Writers) ->
@@ -2741,8 +2801,15 @@ provision_index_shards(
 %% `set_writer_pid/4` stamp lands) drains dispatched index ops into the
 %% projection.
 provision_index_shard(
-    NS, Name, SecShardCount, CoalesceMs, Topology, TableState,
-    DbName, Strategy, Shard
+    NS,
+    Name,
+    SecShardCount,
+    CoalesceMs,
+    Topology,
+    TableState,
+    DbName,
+    Strategy,
+    Shard
 ) ->
     WriterKey = writer_key_for(Strategy, DbName, NS, Name, Shard),
     case Topology:route(Shard, TableState) of
@@ -3456,16 +3523,23 @@ as `Key`.
 shard_for(#{shard_count := SC} = Table, Realm, Key) ->
     case maps:get(partition_strategy, Table, entity) of
         entity ->
-            #{db_topology := Topology, entity_type := ET,
-              table_state := TS} = Table,
+            #{
+                db_topology := Topology,
+                entity_type := ET,
+                table_state := TS
+            } = Table,
             Bucket = Topology:bucket_for(ET, Realm, TS),
             SKey = cell_key(Topology, Realm, Key),
             erlang:phash2({Bucket, SKey}, SC);
         aggregate ->
-            Root = aggregate_root(maps:get(aggregate_root, Table, identity), Key),
+            Root = aggregate_root(
+                maps:get(aggregate_root, Table, identity), Key
+            ),
             erlang:phash2({Realm, Root}, SC);
         realm ->
-            Prefix = realm_prefix(Realm, maps:get(realm_prefix_depth, Table, 1)),
+            Prefix = realm_prefix(
+                Realm, maps:get(realm_prefix_depth, Table, 1)
+            ),
             erlang:phash2(Prefix, SC)
     end.
 

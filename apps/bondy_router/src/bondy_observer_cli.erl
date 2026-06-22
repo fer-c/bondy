@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_observer_cli).
 -moduledoc """
 Launcher for Bondy's `observer_cli` plugin dashboard (the Cluster and Sync
@@ -27,11 +26,9 @@ bondy_db AAE sync status).
 -export([plugins/0]).
 -export([start/0]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc "The observer_cli plugin specs for Bondy's Cluster and Sync panes.".
 -spec plugins() -> [map()].
@@ -53,7 +50,6 @@ plugins() ->
             sort_column => 5
         }
     ].
-
 
 -doc """
 Register the Bondy plugins and open the `observer_cli` plugin dashboard. Blocks

@@ -594,7 +594,6 @@ refresh_rbac_context(#session{id = Id} = Session) ->
 refresh_rbac_context(Id) when is_binary(Id) ->
     refresh_rbac_context(fetch(Id)).
 
-
 -doc """
 Invalidates the cached RBAC context for the session so the next authorisation
 rebuilds it from the subject's current grants (`STORAGE_ARCHITECTURE` §9.5).

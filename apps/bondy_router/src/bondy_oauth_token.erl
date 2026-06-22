@@ -8,7 +8,7 @@
 -moduledoc """
 
 ## Storage
-Tokens are stored in the bondy_db `bondy_oauth_token` core table (design §11.4 — cut over from plum_db), bucketed by the authentication realm `RealmUri` (either the realm this user is connecting to or its associated SSO realm). The key is the sha256 hash of the user's username (`authid`); the value is the user's `bondy_oauth_token_set`, stored directly as a term in an `lww_register` cell (`clear` deletes). The catalogue (`bondy_namespace_catalog`) provisions the table.
+Tokens are stored in the bondy_db `bondy_oauth_token` core table, bucketed by the authentication realm `RealmUri` (either the realm this user is connecting to or its associated SSO realm). The key is the sha256 hash of the user's username (`authid`); the value is the user's `bondy_oauth_token_set`, stored directly as a term in an `lww_register` cell (`clear` deletes). The catalogue (`bondy_namespace_catalog`) provisions the table.
 
 Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (`oplog.aae`); until then storage is node-local.
 
@@ -300,7 +300,9 @@ import_legacy(#{
                 issuer => AuthRealmUri,
                 authrealm => AuthRealmUri,
                 authid => AuthId,
-                authscope => bondy_auth_scope:new(AuthRealmUri, ClientId, DeviceId),
+                authscope => bondy_auth_scope:new(
+                    AuthRealmUri, ClientId, DeviceId
+                ),
                 authroles => Groups,
                 authgrants => AuthGrants,
                 token_version => user_token_version(AuthRealmUri, AuthId),
@@ -313,7 +315,9 @@ import_legacy(#{
             Key = store_key(AuthId),
             Set0 = fetch_set(Table, AuthRealmUri, Key),
             Set1 = bondy_oauth_token_set:add(Set0, T),
-            {_Truncated, Set} = bondy_oauth_token_set:truncate(Set1, ?MAX_TOKENS),
+            {_Truncated, Set} = bondy_oauth_token_set:truncate(
+                Set1, ?MAX_TOKENS
+            ),
             ok = bondy_db:apply(Table, AuthRealmUri, Key, {set, Set}),
             ok = write_legacy_pointer(AuthRealmUri, RefreshToken, Key, TokenId),
             ok
@@ -664,9 +668,9 @@ store_key(AuthId) ->
 
 %% @private
 %% The open bondy_db `bondy_oauth_token` table handle. Raises if the catalogue
-%% has not provisioned it — after the §11.4 cut-over the table is a hard
-%% dependency (the catalogue, a `bondy_sup` child, opens it at boot, well before
-%% any auth flow issues or revokes a token).
+%% has not provisioned it — the table is a hard dependency (the catalogue, a
+%% `bondy_sup` child, opens it at boot, well before any auth flow issues or
+%% revokes a token).
 table() ->
     case bondy_namespace_catalog:table(?BONDY_DB_OAUTH_TOKEN_TAB) of
         undefined -> error(oauth_token_table_unavailable);
@@ -897,7 +901,9 @@ legacy_key(RefreshToken) ->
 %% @private
 write_legacy_pointer(AuthRealmUri, RefreshToken, StoreKey, TokenId) ->
     Pointer = #{type => ?LEGACY_POINTER, key => StoreKey, id => TokenId},
-    bondy_db:apply(table(), AuthRealmUri, legacy_key(RefreshToken), {set, Pointer}).
+    bondy_db:apply(
+        table(), AuthRealmUri, legacy_key(RefreshToken), {set, Pointer}
+    ).
 
 %% @private
 read_legacy_pointer(AuthRealmUri, RefreshToken) ->

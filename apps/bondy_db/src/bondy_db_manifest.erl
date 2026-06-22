@@ -51,7 +51,6 @@ wiped on restart) have no manifest.
 Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
 """).
 
-
 %% The manifest schema version. Bump when the manifest *envelope* shape changes
 %% (not when a frozen value changes — that is a topology divergence, not a
 %% schema change).
@@ -67,7 +66,6 @@ Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
 -define(HASH_ALGO, phash2).
 
 -define(FILENAME, "MANIFEST").
-
 
 -type frozen() :: #{
     db := atom(),
@@ -110,7 +108,6 @@ Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
 -export_type([divergence/0]).
 -export_type([decision/0]).
 
-
 %% API
 -export([build/1]).
 -export([diff/2]).
@@ -120,13 +117,9 @@ Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
 -export([reconcile/3]).
 -export([write/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Reconcile the `Configured` frozen topology against the manifest on disk under
@@ -158,8 +151,9 @@ the logging so callers only branch on the result.
     OnMismatch :: mismatch_policy()
 ) -> {ok, decision(), frozen()} | {error, term()}.
 
-reconcile(Dir, Configured0, OnMismatch)
-when is_map(Configured0) andalso (OnMismatch == warn orelse OnMismatch == stop) ->
+reconcile(Dir, Configured0, OnMismatch) when
+    is_map(Configured0) andalso (OnMismatch == warn orelse OnMismatch == stop)
+->
     Configured = finalize(Configured0),
     case read(Dir) of
         {error, not_found} ->
@@ -201,7 +195,6 @@ when is_map(Configured0) andalso (OnMismatch == warn orelse OnMismatch == stop) 
             Err
     end.
 
-
 -doc """
 Wrap a frozen keying map in a manifest envelope (schema `version`,
 informational `created_at`, and a `checksum` over the frozen map).
@@ -216,7 +209,6 @@ build(Frozen0) when is_map(Frozen0) ->
         checksum => checksum(Frozen),
         frozen => Frozen
     }.
-
 
 -doc """
 A cross-node–portable digest of the frozen keying topology: a SHA-256 over a
@@ -238,7 +230,6 @@ SHA-256 simply widens the digest for the cross-node comparison.
 fingerprint(Frozen0) when is_map(Frozen0) ->
     crypto:hash(sha256, term_to_binary(finalize(Frozen0), [deterministic])).
 
-
 -doc """
 Compare two frozen topologies and return the list of diverging keys. An empty
 list means they are identical. Each divergence is
@@ -252,8 +243,13 @@ changed attribute). `'$absent'` marks a table present on only one side.
 diff(Configured0, OnDisk) when is_map(Configured0) andalso is_map(OnDisk) ->
     Configured = finalize(Configured0),
     Scalars = [
-        db, topology_module, partition_strategy, shard_count,
-        realm_prefix_depth, hash_algo, key_encoding_version,
+        db,
+        topology_module,
+        partition_strategy,
+        shard_count,
+        realm_prefix_depth,
+        hash_algo,
+        key_encoding_version,
         instances_strategy
     ],
     ScalarDivs = [
@@ -261,18 +257,17 @@ diff(Configured0, OnDisk) when is_map(Configured0) andalso is_map(OnDisk) ->
      || K <- Scalars,
         maps:get(K, Configured, undefined) =/= maps:get(K, OnDisk, undefined)
     ],
-    ScalarDivs ++ diff_tables(
-        maps:get(tables, Configured, #{}),
-        maps:get(tables, OnDisk, #{})
-    ).
-
+    ScalarDivs ++
+        diff_tables(
+            maps:get(tables, Configured, #{}),
+            maps:get(tables, OnDisk, #{})
+        ).
 
 -doc "The manifest file path for the data directory `Dir`.".
 -spec path(Dir :: file:filename_all()) -> file:filename_all().
 
 path(Dir) ->
     filename:join(Dir, ?FILENAME).
-
 
 -doc """
 Read and validate the manifest under `Dir`.
@@ -301,7 +296,6 @@ read(Dir) ->
         {error, Reason} ->
             {error, {unreadable_manifest, Reason}}
     end.
-
 
 -doc """
 Atomically write `Manifest` under `Dir` (temp file + rename), as a single
@@ -332,13 +326,9 @@ write(Dir, Manifest) when is_map(Manifest) ->
             Err
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 %% Stamp the substrate-owned keying invariants onto a caller-supplied frozen
@@ -361,14 +351,12 @@ finalize(Frozen) when is_map(Frozen) ->
             )
     }.
 
-
 %% @private
 %% phash2 is deterministic for a given term within an OTP major version and the
 %% manifest is read by the same node that wrote it, so this is a stable
 %% integrity check (not a cross-version-portable digest).
 checksum(Frozen) ->
     erlang:phash2(Frozen).
-
 
 %% @private
 diff_tables(Configured, OnDisk) ->
@@ -384,19 +372,20 @@ diff_tables(Configured, OnDisk) ->
         Names
     ).
 
-
 %% @private
 diff_table(Name, '$absent', OnDisk) ->
     [{{table, Name}, '$absent', OnDisk}];
-
 diff_table(Name, Configured, '$absent') ->
     [{{table, Name}, Configured, '$absent'}];
-
 diff_table(Name, Configured, OnDisk) ->
     lists:filtermap(
         fun(Attr) ->
-            case {maps:get(Attr, Configured, undefined),
-                  maps:get(Attr, OnDisk, undefined)} of
+            case
+                {
+                    maps:get(Attr, Configured, undefined),
+                    maps:get(Attr, OnDisk, undefined)
+                }
+            of
                 {Same, Same} -> false;
                 {CVal, DVal} -> {true, {{table, Name, Attr}, CVal, DVal}}
             end
@@ -404,16 +393,13 @@ diff_table(Name, Configured, OnDisk) ->
         [shard_by, aggregate_root]
     ).
 
-
 %% @private
 handle_mismatch(Dir, Divergences, OnDisk, warn) ->
     log_mismatch(Dir, Divergences, warning),
     {ok, {mismatch, Divergences}, OnDisk};
-
 handle_mismatch(Dir, Divergences, _OnDisk, stop) ->
     log_mismatch(Dir, Divergences, error),
     {error, topology_mismatch}.
-
 
 %% @private
 log_mismatch(Dir, Divergences, Level) ->

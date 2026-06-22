@@ -450,7 +450,9 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt0) ->
         %% authentication, not just the bearer-token path.
         case security_fence() of
             ok ->
-                case CBMod:authenticate(Signature, DataIn, Ctxt0, CBModState0) of
+                case
+                    CBMod:authenticate(Signature, DataIn, Ctxt0, CBModState0)
+                of
                     {ok, DataOut, CBModState1} ->
                         Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
                         {ok, DataOut, Ctxt};

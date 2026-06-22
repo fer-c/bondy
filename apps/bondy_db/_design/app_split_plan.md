@@ -1,7 +1,7 @@
 # How the storage stack splits into three packages
 
 The storage substrate is three OTP packages stacked
-`bondy_db → bondy_oplog → bondy_mst`. [The overview](architecture/00_overview.md)
+`bondy_db → bondy_oplog → bondy_mst`. [The overview](../doc_extras/architecture/00_overview.md)
 introduces them from the consumer's side; this note explains *why the
 boundaries fall where they do*, because the split deliberately does **not**
 follow the module-name prefixes.
@@ -44,7 +44,7 @@ leveled projection backend and the leveled tag — live in **`bondy_db`**
 - **`bondy_oplog`** — the write/replication framework (instance, WAL, applier,
   sync scheduler/session, compaction), the core registry + read API + the
   change-notification dispatcher, and the native CRDT catalogue
-  ([chapter 05](architecture/05_crdt_model.md)). Depends only on `bondy_mst`.
+  ([chapter 05](../doc_extras/architecture/05_crdt_model.md)). Depends only on `bondy_mst`.
 - **`bondy_db`** — the consumer table facade, the storage topologies
   (`shared_shards`, `per_entity`, `single_bookie`, `memory`) and their leveled
   plumbing, the topology manifest, and the leveled projection. Depends on
@@ -58,5 +58,5 @@ leveled projection backend and the leveled tag — live in **`bondy_db`**
 The clean stack is `bondy_db → bondy_oplog → bondy_mst`, but it cuts *across* the
 old prefixes: the core substrate moves down into `bondy_oplog` because it cycles
 with the oplog, and the leveled modules move up into `bondy_db`. See
-[the overview](architecture/00_overview.md) for how the three cooperate at run
+[the overview](../doc_extras/architecture/00_overview.md) for how the three cooperate at run
 time.

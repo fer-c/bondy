@@ -13,19 +13,17 @@ input to lowercase use `string:casefold/1`.
 
 ## Storage
 
-Groups are persisted in `bondy_db` (design §11.4 — cut over from plum_db). The
-durable `security_groups` table is provisioned by `bondy_namespace_catalog`
-(`fold => lww`, `shard_by => realm`); each group is a cell keyed by its `Name`
-binary, addressed as `(Table, RealmUri, Name)`. The value carries the group's
-`groups` property (its parent groups, for role inheritance) — group *membership*
-is held on the user side (`user.groups`), so there is nothing inline to split;
-the `security_group_members` reverse-index table stays dormant until the
-`oplog.aae` phase.
+Groups are persisted in `bondy_db`. The durable `security_groups` table is
+provisioned by `bondy_namespace_catalog` (`fold => lww`, `shard_by => realm`);
+each group is a cell keyed by its `Name` binary, addressed as
+`(Table, RealmUri, Name)`. The value carries the group's `groups` property (its
+parent groups, for role inheritance). Group *membership* is not held here: it
+is the cell-per-fact `security_group_members` relation, read and written
+through `bondy_rbac_user`.
 
-The plum_db prefix callbacks are gone: the **local** `on_update`/`on_delete`
-side-effects (the `{[bondy, rbac, group, added | updated | deleted], ...}`
-events) fire **inline** at the write / delete chokepoints; `on_merge` was a
-no-op.
+The **local** `on_update`/`on_delete` side-effects (the
+`{[bondy, rbac, group, added | updated | deleted], ...}` events) fire **inline**
+at the write / delete chokepoints; the remote `on_merge` is a no-op.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -104,7 +102,9 @@ no-op.
 -type external() :: t().
 -type name() :: binary() | anonymous | all.
 -type add_opts() :: #{
-    rebase => boolean(),
+    %% `true` when applying declarative config (idempotent write, no lifecycle
+    %% event) — see `bondy_realm:apply_config/0`.
+    declarative => boolean(),
     actor_id => term(),
     if_exists => fail | update
 }.
@@ -619,9 +619,9 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     ok = not_reserved_name_check(Name),
     ok = group_exists_check(RealmUri, maps:get(groups, Group)),
 
-    %% We avoid checking when we are rebasing
-    Rebase = maps:get(rebase, Opts, false),
-    Rebase == true orelse not_exists_check(RealmUri, Name),
+    %% We skip the existence check when applying declarative config (overwrite).
+    Declarative = maps:get(declarative, Opts, false),
+    Declarative == true orelse not_exists_check(RealmUri, Name),
 
     case store(RealmUri, Name, Group, Opts) of
         ok ->
@@ -631,11 +631,14 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     end.
 
 %% @private
-store(RealmUri, Name, Group, #{rebase := true}) ->
-    %% Dirty/rebase write: like plum_db:dirty_put it writes WITHOUT firing the
-    %% lifecycle event. The rebase (plum_db dvvset lineage) collapses to a plain
-    %% set — a fresh bondy_db write already dominates via its HLC.
-    bondy_db:apply(table(), RealmUri, Name, {set, Group});
+store(RealmUri, Name, Group, #{declarative := true}) ->
+    %% Declarative config apply: write WITHOUT firing the lifecycle event, and
+    %% IDEMPOTENTLY (a write only when the value changes). Re-reading the same
+    %% config file on every boot must not re-stamp the group cell with a fresh
+    %% HLC — that would diverge cross-node convergence. The op-based CRDT
+    %% + anti-entropy handle convergence, so no deterministic-version write is
+    %% needed.
+    bondy_db:reconcile(table(), RealmUri, Name, Group);
 store(RealmUri, Name, Group, _) ->
     %% Capture the previous value to tell a create from an update (the way
     %% plum_db passed `Old` to the on_update callback), then fire the event.

@@ -237,9 +237,12 @@ tracking) as `bondy_oplog_wal`.
 The novel bit of `bondy_oplog` is **how events get from one node to
 another**. Two pieces conspire:
 
-1. The **MST** is a content-addressed structure. Two peers can
-   compare roots and know in one round-trip whether they agree.
-   Chapter 02 (in the bondy_mst library docs) has the details.
+1. The **MST** is a content-addressed structure. Two peers compare
+   roots and, in one round-trip, find exactly which pages they differ
+   on. Chapter 02 (in the bondy_mst library docs) has the details.
+   (Root comparison finds the *differences* to pull; whether two
+   nodes hold the *same data* is judged separately, by the content
+   digest — see below.)
 2. A **single node-global `bondy_oplog_sync_scheduler`** ticks every
    `sync_interval_ms` (default 500 ms). On each tick it iterates
    the locally-running instances and, per instance, asks the
@@ -276,6 +279,19 @@ sequenceDiagram
 The session is short-lived and asynchronous. It does not block
 writes, and a failing session is just retried on the next tick.
 
+A converged instance has nothing to pull, yet a naive scheduler would
+still spawn a session against every peer on every tick. The
+**live-sync throttle** (on by default) makes the cadence adaptive: an
+instance dispatches every tick while its MST root is moving, then
+backs the poll window off — doubling up to `live_sync_max_ms` (default
+5 s) — once the root goes quiescent, and snaps back to the base
+interval the moment a poll pulls something. Because `bondy_db` is
+pull-only, that capped window is also the steady-state convergence
+latency for an idle shard. One exception: an instance that backs the
+read-side freshness fence is **never** throttled, because its sync
+round is what re-stamps the fence heartbeat (below) — backing it off
+would trip the fence on inactivity.
+
 A successful round does one more thing: it **advances the shard's
 freshness signal**. Each `(NS, primary, Shard)` carries a wait-free
 `ae_atomics` timestamp that `bump_ae_on_sync/2` stamps with the current
@@ -297,6 +313,18 @@ overlay Bondy already uses for its cluster membership and messaging —
 `bondy_oplog_transport_inline` (same-VM, used for tests). Bondy runs on
 Partisan, not Distributed Erlang, so a Bondy deployment uses the
 Partisan transport.
+
+Root comparison tells a peer which pages to pull; it does not, on its
+own, establish that two nodes hold the same data — compaction empties
+the MST, so a converged instance's root is `undefined` and witnesses
+nothing. Convergence is judged instead by a per-instance **applied
+frontier**, a `#{Origin => max Seq}` version vector over applied events
+(compaction-invariant), which a peer fetches with a `get_frontier`
+request alongside `get_root`. The construction and its three-source
+recovery are covered in
+[chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle);
+on this side, the responder serves the request and the operator sync
+view is what compares the two frontiers.
 
 ## Replication is anti-entropy only
 
@@ -490,4 +518,13 @@ Implementation:
 - `bondy_oplog_transport.erl` (+ `_partisan.erl` / `_disterl.erl` /
   `_inline.erl`) — the transport behaviour and its three
   implementations; Bondy uses the Partisan transport.
+- `bondy_oplog_registry.erl` holds the per-instance **applied frontier**
+  (the convergence oracle) and its idempotent max-merge;
+  `bondy_oplog_cell_apply.erl` advances it on the apply path and
+  `bondy_oplog_responder.erl` serves the `get_frontier` request
+  ([chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)).
+- `bondy_oplog_config.erl` — the layer's public configuration surface:
+  one accessor per tunable (scheduler cadence, the live-sync throttle
+  bounds, the fence isolation policy, GC concurrency), each holding
+  its default once.
 - `bondy_oplog_validator.erl` (+ `_crypto.erl` / `_trust.erl`).

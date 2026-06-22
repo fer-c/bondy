@@ -50,7 +50,9 @@ issue(RealmUri, Authid, OidcProvider, OidcTokens, Opts) when
 ->
     try
         Realm = bondy_realm:fetch(RealmUri),
-        Kid = bondy_realm:get_random_kid(Realm),
+        %% Pick the signing key atomically: keys are generated lazily, so the
+        %% kid and its private key must come from the same realm.
+        {Kid, PrivKey} = bondy_realm:get_random_private_key(Realm),
 
         IssuedAt = ?NOW,
         ExpirySecs = maps:get(
@@ -115,7 +117,6 @@ issue(RealmUri, Authid, OidcProvider, OidcTokens, Opts) when
 
         JWT = jose_jwt:from(Claims),
 
-        PrivKey = bondy_realm:get_private_key(Realm, Kid),
         {_, Ticket} = jose_jws:compact(jose_jwt:sign(PrivKey, JWT)),
 
         ok = bondy_ticket:store_ticket(RealmUri, Authid, Claims),

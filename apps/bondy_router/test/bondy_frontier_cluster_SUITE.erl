@@ -3,38 +3,39 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_content_digest_cluster_SUITE).
+-module(bondy_frontier_cluster_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
 -compile([nowarn_export_all, export_all]).
 
-%% A 2-node Partisan cluster (bondy_db AAE on) that proves the projection
-%% CONTENT digest (`bondy_oplog_content_digest`, the ISSUES.md AR-17 oracle, task
-%% #118) is a faithful cross-node convergence oracle where the MST root is NOT —
-%% specifically under ASYMMETRIC compaction, the failure mode AR-17 calls out:
+%% A 2-node Partisan cluster (bondy_db AAE on) that proves the applied-frontier
+%% version vector (`bondy_oplog_instance:frontier/1`) is a faithful cross-node
+%% convergence oracle where the MST root is NOT — specifically under ASYMMETRIC
+%% compaction, the failure mode the root cannot survive:
 %%
 %%   - FALSE DIVERGED: one node compacts (empty MST ⇒ `undefined` root) while the
 %%     other has not (full MST ⇒ binary root) for IDENTICAL data. An MST-root
-%%     comparison reports DIVERGED; the content digest stays equal and reports
-%%     IN SYNC. `asymmetric_compaction_keeps_oracle_in_sync`.
+%%     comparison reports DIVERGED; the frontier is compaction-invariant, stays
+%%     equal, and reports IN SYNC. `asymmetric_compaction_keeps_oracle_in_sync`.
 %%   - FALSE IN SYNC (the dangerous one): once BOTH nodes compact, both roots are
 %%     `undefined`, so a root comparison reports IN SYNC with nothing actually
-%%     verifying the projections match. The content digest still genuinely agrees
-%%     when they match AND still detects a real divergence injected while both
-%%     roots stay `undefined`. `both_compacted_digest_detects_real_divergence`.
+%%     verifying the projections match. The frontier still genuinely agrees when
+%%     they match (equal AND non-empty) AND detects a real divergence injected
+%%     while both roots stay `undefined`.
+%%     `both_compacted_frontier_detects_real_divergence`.
 %%
 %% Both tests drive the PRODUCTION paths: writes through `bondy_db`, the live
-%% per-instance digest (`bondy_oplog_instance:content_digest/1`), and the peer
-%% digest fetched over the AAE Partisan transport with the `get_content_digest`
+%% per-instance frontier (`bondy_oplog_instance:frontier/1`), and the peer
+%% frontier fetched over the AAE Partisan transport with the `get_frontier`
 %% request — the same request `bondy_observer_cli_sync` uses. The sync scheduler
 %% is quiesced (`set_dispatch(undefined)`) for the compaction phases so the
 %% asymmetric state stays frozen: a live scheduler would re-pull the compacted
-%% node's MST back from its peer, which is the very false-DIVERGED re-pull AR-17
-%% describes.
+%% node's MST back from its peer, which is the very false-DIVERGED re-pull the
+%% frontier oracle exists to avoid.
 
--define(NODE_NAMES, [cdig1, cdig2]).
+-define(NODE_NAMES, [cfront1, cfront2]).
 -define(USERS_TABLE, security_users).
 %% security_users shards by realm, so distinct realm bands spread across shard
 %% instances (`phash2(realm_prefix, ShardCount)`) — giving several data-bearing
@@ -46,7 +47,7 @@
 all() ->
     [
         asymmetric_compaction_keeps_oracle_in_sync,
-        both_compacted_digest_detects_real_divergence
+        both_compacted_frontier_detects_real_divergence
     ].
 
 suite() ->
@@ -70,10 +71,10 @@ end_per_suite(Config) ->
 %% Asymmetric compaction: write + converge identical data on both nodes, then
 %% compact node 1's shards ONLY. Node 1's MSTs go empty (`undefined` root) while
 %% node 2 keeps its full binary roots — so an MST-root comparison reports
-%% DIVERGED for identical data (the false-DIVERGED failure mode). The content
-%% digest is compaction-invariant, so it is UNCHANGED by the compaction and still
-%% equal across nodes — locally and over the `get_content_digest` transport —
-%% reporting IN SYNC, which is correct.
+%% DIVERGED for identical data (the false-DIVERGED failure mode). The frontier is
+%% compaction-invariant, so it is UNCHANGED by the compaction and still equal
+%% across nodes — locally and over the `get_frontier` transport — reporting IN
+%% SYNC, which is correct.
 asymmetric_compaction_keeps_oracle_in_sync(Config) ->
     [N1, N2] = nodes_of(Config),
     Pairs = seed_pairs(<<"asym">>),
@@ -84,14 +85,14 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
     try
         %% 2. Freeze the cluster: a live scheduler would re-pull a compacted
         %% node's MST back from its peer (the false-DIVERGED re-pull). Drain any
-        %% in-flight applier so the baseline digests are stable.
+        %% in-flight applier so the baseline frontiers are stable.
         quiesce(N1, N2),
         ok = erpc:call(N1, ?MODULE, do_drain_all, []),
         ok = erpc:call(N2, ?MODULE, do_drain_all, []),
 
         %% 3. Baseline: the data-bearing, converged instances. Both nodes hold
-        %% identical content ⇒ equal digests AND equal binary roots, locally and
-        %% over the production transport.
+        %% identical content ⇒ equal frontiers AND equal binary roots, locally
+        %% and over the production transport.
         Sigs1 = erpc:call(N1, ?MODULE, do_instance_sigs, []),
         Sigs2 = erpc:call(N2, ?MODULE, do_instance_sigs, []),
         Targets = converged_data_targets(Sigs1, Sigs2),
@@ -102,15 +103,15 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
 
         lists:foreach(
             fun(I) ->
-                {ready, D1, R1} = maps:get(I, Sigs1),
-                {ready, D2, R2} = maps:get(I, Sigs2),
-                ?assertEqual(D1, D2),
+                {F1, R1} = maps:get(I, Sigs1),
+                {F2, R2} = maps:get(I, Sigs2),
+                ?assertEqual(F1, F2),
                 ?assertEqual(R1, R2),
                 ?assert(is_binary(R1)),
                 %% Over the transport: N1 asks N2 and N2 asks N1; each sees the
-                %% other's digest, and it equals the local one.
-                ?assertEqual({ready, D2}, peer_digest(N1, I)),
-                ?assertEqual({ready, D1}, peer_digest(N2, I)),
+                %% other's frontier, and it equals the local one.
+                ?assertEqual(F2, peer_frontier(N1, I)),
+                ?assertEqual(F1, peer_frontier(N2, I)),
                 ?assert(oracle_in_sync(N1, I))
             end,
             Targets
@@ -118,7 +119,9 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
 
         %% 4. ASYMMETRIC COMPACTION: compact N1's instances only.
         lists:foreach(
-            fun(I) -> ?assertMatch({ok, _}, erpc:call(N1, ?MODULE, do_compact, [I])) end,
+            fun(I) ->
+                ?assertMatch({ok, _}, erpc:call(N1, ?MODULE, do_compact, [I]))
+            end,
             Targets
         ),
 
@@ -127,9 +130,9 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
 
         lists:foreach(
             fun(I) ->
-                {ready, D1, _} = maps:get(I, Sigs1),
-                {ready, D1b, R1b} = maps:get(I, Sigs1b),
-                {ready, D2b, R2b} = maps:get(I, Sigs2b),
+                {F1, _} = maps:get(I, Sigs1),
+                {F1b, R1b} = maps:get(I, Sigs1b),
+                {F2b, R2b} = maps:get(I, Sigs2b),
 
                 %% The false-DIVERGED trigger: N1's MST is empty (`undefined`
                 %% root) while N2 still holds the full binary root — an MST-root
@@ -138,13 +141,13 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
                 ?assert(is_binary(R2b)),
                 ?assertNotEqual(R1b, R2b),
 
-                %% The oracle is correct: compaction did not touch the digest, so
-                %% it is unchanged and still equal across nodes — locally and over
-                %% the transport — i.e. IN SYNC.
-                ?assertEqual(D1, D1b),
-                ?assertEqual(D1b, D2b),
-                ?assertEqual({ready, D2b}, peer_digest(N1, I)),
-                ?assertEqual({ready, D1b}, peer_digest(N2, I)),
+                %% The oracle is correct: compaction did not touch the frontier,
+                %% so it is unchanged and still equal across nodes — locally and
+                %% over the transport — i.e. IN SYNC.
+                ?assertEqual(F1, F1b),
+                ?assertEqual(F1b, F2b),
+                ?assertEqual(F2b, peer_frontier(N1, I)),
+                ?assertEqual(F1b, peer_frontier(N2, I)),
                 ?assert(oracle_in_sync(N1, I))
             end,
             Targets
@@ -158,11 +161,11 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
 
 %% Symmetric compaction: the dangerous false-IN-SYNC case. Once BOTH nodes
 %% compact, both roots are `undefined`, so an MST-root comparison reports IN SYNC
-%% with nothing actually verifying the projections match. We prove the content
-%% digest (a) genuinely verifies the match (equal AND non-zero) and (b) detects a
-%% REAL divergence injected while both roots stay `undefined` — exactly what the
-%% root comparison cannot do.
-both_compacted_digest_detects_real_divergence(Config) ->
+%% with nothing actually verifying the projections match. We prove the frontier
+%% (a) genuinely verifies the match (equal AND non-empty) and (b) detects a REAL
+%% divergence injected while both roots stay `undefined` — exactly what the root
+%% comparison cannot do.
+both_compacted_frontier_detects_real_divergence(Config) ->
     [N1, N2] = nodes_of(Config),
     Pairs = seed_pairs(<<"sym">>),
 
@@ -194,73 +197,79 @@ both_compacted_digest_detects_real_divergence(Config) ->
         SigsC2 = erpc:call(N2, ?MODULE, do_instance_sigs, []),
         lists:foreach(
             fun(I) ->
-                {ready, Dc1, Rc1} = maps:get(I, SigsC1),
-                {ready, Dc2, Rc2} = maps:get(I, SigsC2),
+                {Fc1, Rc1} = maps:get(I, SigsC1),
+                {Fc2, Rc2} = maps:get(I, SigsC2),
                 %% Both roots `undefined` ⇒ a root comparison reports IN SYNC
-                %% trusting, not checking. The digest still genuinely agrees AND
-                %% is non-empty, so it is actually verifying the match.
+                %% trusting, not checking. The frontier still genuinely agrees
+                %% AND is non-empty, so it is actually verifying the match.
                 ?assertEqual(undefined, Rc1),
                 ?assertEqual(undefined, Rc2),
                 ?assertEqual(Rc1, Rc2),
-                ?assertNotEqual(0, Dc1),
-                ?assertEqual(Dc1, Dc2)
+                ?assert(map_size(Fc1) >= 1),
+                ?assertEqual(Fc1, Fc2)
             end,
             Targets
         ),
 
         %% Inject a REAL divergence on N1 with both MSTs empty: write a fresh cell
-        %% to an existing band, then re-compact that shard on N1 so its MST returns
-        %% to empty (root stays `undefined`). The projection — and thus the content
-        %% digest — now differs, but BOTH roots are still `undefined`. We pin the
-        %% assertions to the exact instance the cell routes to (a known target,
-        %% compacted on both nodes above, so N2's side is a known empty baseline).
+        %% to an existing band, then re-compact that shard on N1 so its MST
+        %% returns to empty (root stays `undefined`). The write is a new event
+        %% from N1's origin, so N1's frontier advances and now differs from N2's —
+        %% while BOTH roots are still `undefined`. We pin the assertions to the
+        %% exact instance the cell routes to (a known target, compacted on both
+        %% nodes above, so N2's side is a known frozen baseline).
         Bands = [B || {B, _} <- Pairs],
         DivBand = erpc:call(
             N1, ?MODULE, do_band_on_target, [?USERS_TABLE, Bands, Targets]
         ),
         DivInst = erpc:call(
-            N1, ?MODULE, do_instance_for, [?USERS_TABLE, DivBand, <<"divergent">>]
+            N1, ?MODULE, do_instance_for, [
+                ?USERS_TABLE, DivBand, <<"divergent">>
+            ]
         ),
-        ct:pal("sym: injecting divergence into ~s via band ~s", [DivInst, DivBand]),
+        ct:pal("sym: injecting divergence into ~s via band ~s", [
+            DivInst, DivBand
+        ]),
         ?assert(lists:member(DivInst, Targets)),
-        {ready, PreD, _} = maps:get(DivInst, SigsC1),
+        {PreF, _} = maps:get(DivInst, SigsC1),
 
-        %% `do_apply` is synchronous (append + drain), so the digest is updated
+        %% `do_apply` is synchronous (append + drain), so the frontier is updated
         %% and the MST has re-grown by the time it returns.
         ok = erpc:call(
             N1, ?MODULE, do_apply, [
-                ?USERS_TABLE, DivBand, <<"divergent">>, val(DivBand, <<"divergent">>)
+                ?USERS_TABLE,
+                DivBand,
+                <<"divergent">>,
+                val(DivBand, <<"divergent">>)
             ]
         ),
         SigsDpre = erpc:call(N1, ?MODULE, do_instance_sigs, []),
-        {ready, PostD, PostR} = maps:get(DivInst, SigsDpre),
-        ct:pal("sym: divergent write ~s digest ~.16B -> ~.16B", [
-            DivInst, PreD, PostD
+        {PostF, PostR} = maps:get(DivInst, SigsDpre),
+        ct:pal("sym: divergent write ~s frontier ~p -> ~p", [
+            DivInst, PreF, PostF
         ]),
-        ?assertNotEqual(PreD, PostD),
+        ?assertNotEqual(PreF, PostF),
         ?assert(is_binary(PostR)),
 
         %% Re-compact the diverged shard on N1 → empty MST again (`undefined`
-        %% root), digest unchanged (compaction-invariant).
+        %% root), frontier unchanged (compaction-invariant).
         ?assertMatch({ok, _}, erpc:call(N1, ?MODULE, do_compact, [DivInst])),
         SigsD = erpc:call(N1, ?MODULE, do_instance_sigs, []),
-        {ready, Dd1, Rd1} = maps:get(DivInst, SigsD),
+        {Fd1, Rd1} = maps:get(DivInst, SigsD),
         %% N2 has not changed since the symmetric compaction.
-        {ready, Dd2, Rd2} = maps:get(DivInst, SigsC2),
+        {Fd2, Rd2} = maps:get(DivInst, SigsC2),
 
         %% BOTH roots are still `undefined` — a root comparison STILL reports IN
         %% SYNC (the dangerous lie) ...
         ?assertEqual(undefined, Rd1),
         ?assertEqual(undefined, Rd2),
         ?assertEqual(Rd1, Rd2),
-        ?assertEqual(PostD, Dd1),
+        ?assertEqual(PostF, Fd1),
 
-        %% ... but the content digests DIFFER, so the oracle correctly reports
-        %% DIVERGED — locally and over the transport.
-        ?assertNotEqual(Dd1, Dd2),
-        {ready, PD} = peer_digest(N1, DivInst),
-        ?assertEqual(Dd2, PD),
-        ?assertNotEqual(Dd1, PD),
+        %% ... but the frontiers DIFFER, so the oracle correctly reports DIVERGED
+        %% — locally and over the transport.
+        ?assertNotEqual(Fd1, Fd2),
+        ?assertEqual(Fd2, peer_frontier(N1, DivInst)),
         ?assertNot(oracle_in_sync(N1, DivInst)),
         ok
     after
@@ -283,11 +292,11 @@ seed_pairs(Tag) ->
 
 %% @private
 band_for(Tag, B) ->
-    <<"com.bondy.cdig.", Tag/binary, ".", (integer_to_binary(B))/binary>>.
+    <<"com.bondy.cfront.", Tag/binary, ".", (integer_to_binary(B))/binary>>.
 
 %% @private
 val(Band, Key) ->
-    #{band_uri => Band, key => Key, marker => <<"cdig">>}.
+    #{band_uri => Band, key => Key, marker => <<"cfront">>}.
 
 %% @private
 %% Write every cell on N1, then wait for each to converge on N2 via background
@@ -295,7 +304,9 @@ val(Band, Key) ->
 seed_and_converge(N1, N2, Pairs) ->
     lists:foreach(
         fun({B, K}) ->
-            ok = erpc:call(N1, ?MODULE, do_apply, [?USERS_TABLE, B, K, val(B, K)])
+            ok = erpc:call(N1, ?MODULE, do_apply, [
+                ?USERS_TABLE, B, K, val(B, K)
+            ])
         end,
         Pairs
     ),
@@ -316,41 +327,39 @@ unquiesce(N1, N2) ->
     ok.
 
 %% @private
-%% The data-bearing, converged instances: non-empty digest, binary root, and the
-%% same digest + a binary root on the peer's snapshot. These are the meaningful
-%% compaction targets.
+%% The data-bearing, converged instances: non-empty frontier, binary root, and
+%% the same frontier + a binary root on the peer's snapshot. These are the
+%% meaningful compaction targets.
 converged_data_targets(Sigs1, Sigs2) ->
     [
         I
-     || {I, {ready, D1, R1}} <- maps:to_list(Sigs1),
-        D1 =/= 0,
+     || {I, {F1, R1}} <- maps:to_list(Sigs1),
+        map_size(F1) >= 1,
         is_binary(R1),
         case maps:get(I, Sigs2, undefined) of
-            {ready, D2, R2} -> D2 =:= D1 andalso is_binary(R2);
+            {F2, R2} -> F2 =:= F1 andalso is_binary(R2);
             _ -> false
         end
     ].
 
 %% @private
-%% `LocalNode`'s view of its single Partisan peer's digest for `InstId`, fetched
-%% with the `get_content_digest` request — the production observer path.
-peer_digest(LocalNode, InstId) ->
-    {S, D, _Fp} = erpc:call(LocalNode, ?MODULE, do_peer_sig, [InstId]),
-    {S, D}.
+%% `LocalNode`'s view of its single Partisan peer's frontier for `InstId`,
+%% fetched with the `get_frontier` request — the production observer path.
+peer_frontier(LocalNode, InstId) ->
+    {F, _Fp} = erpc:call(LocalNode, ?MODULE, do_peer_sig, [InstId]),
+    F.
 
 %% @private
-%% The Stage-4 observer verdict (`bondy_observer_cli_sync:status/3`, live path),
-%% reproduced over the real cross-node signatures: equal content digests under
-%% matching topology fingerprints ⇒ IN SYNC — independent of the MST roots. (We
-%% reproduce the trivial verdict here rather than call the `-ifdef(TEST)`-gated
-%% `status/3`, which is not exported in the release build the cluster nodes run.)
+%% The observer verdict (`bondy_observer_cli_sync:status/3`, live path),
+%% reproduced over the real cross-node signatures: equal frontiers under matching
+%% topology fingerprints ⇒ IN SYNC — independent of the MST roots. (We reproduce
+%% the verdict here rather than call the `-ifdef(TEST)`-gated `status/3`, which is
+%% not exported in the release build the cluster nodes run.)
 oracle_in_sync(LocalNode, InstId) ->
-    {LS, LD, LFp} = erpc:call(LocalNode, ?MODULE, do_local_digest_sig, [InstId]),
-    {PS, PD, PFp} = erpc:call(LocalNode, ?MODULE, do_peer_sig, [InstId]),
-    LS =:= ready andalso
-        PS =:= ready andalso
-        not (is_binary(LFp) andalso is_binary(PFp) andalso LFp =/= PFp) andalso
-        LD =:= PD.
+    {LF, LFp} = erpc:call(LocalNode, ?MODULE, do_local_frontier_sig, [InstId]),
+    {PF, PFp} = erpc:call(LocalNode, ?MODULE, do_peer_sig, [InstId]),
+    not (is_binary(LFp) andalso is_binary(PFp) andalso LFp =/= PFp) andalso
+        LF =:= PF.
 
 %% @private
 %% Polls `Node` until its local read of `(Band, Key)` returns `Expected`, forcing
@@ -422,7 +431,9 @@ do_band_on_target(Table, Bands, Targets) ->
     OnTarget = [
         B
      || B <- Bands,
-        lists:member(maps:get(bondy_db:shard_for(T, B, <<"divergent">>), Ids), Targets)
+        lists:member(
+            maps:get(bondy_db:shard_for(T, B, <<"divergent">>), Ids), Targets
+        )
     ],
     case OnTarget of
         [B | _] -> B;
@@ -430,49 +441,51 @@ do_band_on_target(Table, Bands, Targets) ->
     end.
 
 %% @private
-%% `InstanceId => {ready | warming, Digest, Root}` over every live instance on
-%% this node (`Root` is `undefined` for an empty / compacted MST).
+%% `InstanceId => {Frontier, Root}` over every live instance on this node
+%% (`Frontier` is the applied version vector `#{Origin => max Seq}`; `Root` is
+%% `undefined` for an empty / compacted MST).
 do_instance_sigs() ->
     lists:foldl(
         fun(I, Acc) ->
-            {Status, Digest} = bondy_oplog_instance:content_digest(I),
+            Frontier = bondy_oplog_instance:frontier(I),
             Root =
                 case catch bondy_oplog_instance:root_hash(I) of
                     R when is_binary(R) -> R;
                     _ -> undefined
                 end,
-            Acc#{I => {Status, Digest, Root}}
+            Acc#{I => {Frontier, Root}}
         end,
         #{},
         bondy_oplog:list_instances()
     ).
 
 %% @private
-%% The local digest signature the observer compares: `{Status, Digest,
-%% Fingerprint}`.
-do_local_digest_sig(InstId) ->
-    {Status, Digest} = bondy_oplog_instance:content_digest(InstId),
+%% The local frontier signature the observer compares: `{Frontier, Fingerprint}`.
+do_local_frontier_sig(InstId) ->
+    Frontier = bondy_oplog_instance:frontier(InstId),
     Fp =
-        case catch bondy_oplog:topology_fingerprint(bondy_oplog:db_of(InstId)) of
+        case
+            catch bondy_oplog:topology_fingerprint(bondy_oplog:db_of(InstId))
+        of
             F when is_binary(F) -> F;
             _ -> undefined
         end,
-    {Status, Digest, Fp}.
+    {Frontier, Fp}.
 
 %% @private
-%% This node's single Partisan peer's digest signature for `InstId`, fetched over
-%% the AAE channel with `get_content_digest` (mirrors
-%% `bondy_observer_cli_sync:peer_sig/2`). `{Status, Digest, Fingerprint}`.
+%% This node's single Partisan peer's frontier signature for `InstId`, fetched
+%% over the AAE channel with `get_frontier` (mirrors
+%% `bondy_observer_cli_sync:peer_sig/2`). `{Frontier, Fingerprint}`.
 do_peer_sig(InstId) ->
     Peer = single_peer(),
     Opts = #{timeout => 5000, channel => aae_channel()},
     case
         catch bondy_oplog_transport_partisan:request(
-            Peer, InstId, get_content_digest, Opts
+            Peer, InstId, get_frontier, Opts
         )
     of
-        {ok, {Status, Digest}, Fp} -> {Status, Digest, Fp};
-        Other -> error({peer_digest_failed, Peer, InstId, Other})
+        {ok, Frontier, Fp} -> {Frontier, Fp};
+        Other -> error({peer_frontier_failed, Peer, InstId, Other})
     end.
 
 %% @private

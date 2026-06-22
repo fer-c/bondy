@@ -284,7 +284,8 @@ index) WITHOUT touching the bondy_db projection — the AAE merge of the owner's
 `clear` (a DELETE / self-clean / EVICT, design §9.6) already removed the
 projection cell, and this brings the materialised view into line. Idempotent.
 """.
--spec remove_indices(Partition :: pid(), Entry :: entry()) -> ok | {error, any()}.
+-spec remove_indices(Partition :: pid(), Entry :: entry()) ->
+    ok | {error, any()}.
 
 remove_indices(Partition, Entry) when is_pid(Partition) ->
     Result = bondy_registry_store:delete_indices(store(Partition), Entry),

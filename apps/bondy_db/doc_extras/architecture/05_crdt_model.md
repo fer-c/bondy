@@ -360,6 +360,15 @@ value byte-for-byte without decoding the full state. When
 omitted and the state bytes double as the value; the read side's
 `kernel:decode_value_bytes/2` knows the difference.
 
+Those same encoded state bytes are the unit of cross-node agreement:
+the state is the byte stream the MST stores and anti-entropy ships, and
+two nodes that have converged on a cell hold byte-identical state for it
+(see [chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)
+for how convergence itself is judged — by the applied frontier, not by
+re-hashing this state). Keeping the state encoding deterministic and
+independent of how a projection backend lays the frame out is therefore
+a correctness requirement, not just a convenience.
+
 ## Batched operations (packing many commands)
 
 A single write to a Map (or set) cell can carry **many** commands at

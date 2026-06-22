@@ -17,6 +17,18 @@ behind a tidy facade. They have crisp jobs and crisper interfaces:
 Everything else (the applier, the projection, the cache, the CRDT
 catalogue) is glue between those three.
 
+The three are **layered**, with dependencies running one way:
+`bondy_db` → `bondy_oplog` → `bondy_mst` (plus each layer's own leaf
+dependencies — Leveled under `bondy_db`, the cluster transport under
+`bondy_oplog`). Nothing lower ever calls up, so the graph is acyclic
+and each package is a standalone OTP application usable on its own. A
+layer configures the one below it through that layer's public API:
+`bondy_db:open/2` passes per-instance options down to
+`bondy_oplog:start_instance/2`, which in turn selects the `bondy_mst`
+store backend. Layer-wide tuning that is not per-instance rides each
+layer's own application environment — never one layer writing
+another's.
+
 ## The 30-second picture
 
 ```mermaid
@@ -114,8 +126,14 @@ A few things the diagram is hiding to keep it readable:
 - The overlay (step 4) is what makes the event visible to **reads**
   before the projection catches up. It is the read-your-writes
   primitive.
-- The sync session uses **MST root comparison**, not a full event
-  exchange. That is the whole point of `bondy_mst` — see chapter 02 (in the bondy_mst library docs).
+- The sync session uses **MST root comparison** to find which *pages*
+  a peer is missing, not a full event exchange — that is the whole
+  point of `bondy_mst` (see chapter 02, in the bondy_mst library
+  docs). Whether two nodes hold the *same data* is a separate
+  question, answered by a per-instance **applied frontier** rather than
+  the root: compaction empties the MST, so an empty-MST peer's root no
+  longer witnesses its contents
+  (see [chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)).
 - **Ephemeral tables have a fused variant** of this picture: the
   applier collapses into the instance (one process runs
   drain→verify→apply→install inline) and the WAL can be an
@@ -252,7 +270,16 @@ the chapters that follow make sense:
    converged cluster's live MST is empty; new replicas bootstrap
    from a snapshot, not from the full history
    ([chapter 06](06_compaction_and_bootstrap.md)).
-7. **Changes are observable.** A table can opt into change
+7. **Convergence is verified by the applied frontier, not the MST root.**
+   Precisely because the MST empties (item 6), root equality cannot
+   answer "do two nodes hold the same data?" — two converged peers in
+   different compaction states show different roots, and two
+   both-compacted peers both show `undefined`. Each instance instead
+   maintains a compaction-invariant **applied frontier** — a per-origin
+   version vector of applied events — and peers compare frontiers to
+   judge agreement
+   ([chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)).
+8. **Changes are observable.** A table can opt into change
    notification: every write publishes a node-local event, and writes
    that arrive from a *peer* through anti-entropy publish a distinct
    *merge* event — the seam a node-local reactor uses to act on what

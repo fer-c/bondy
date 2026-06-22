@@ -8,9 +8,9 @@
 %% This is the worked reference for the commutative ops-based CRDT pattern
 %% and the subject of `bondy_oplog_crdt_commutative_test`. It uses ONLY the
 %% commutative helper and `bondy_oplog_crdt` — never the deprecated
-%% `bondy_oplog_fold` family. Production CRDTs are migrated under the
-%% rollout (`architecture_regrounding_plan.md` §7); this stays in `test/`
-%% as the contract's executable specification.
+%% `bondy_oplog_fold` family. Production CRDTs implement this same
+%% commutative contract; this stays in `test/` as the contract's
+%% executable specification.
 %%
 %% State : an ordset of opaque elements.
 %% Op    : {add, Element}.

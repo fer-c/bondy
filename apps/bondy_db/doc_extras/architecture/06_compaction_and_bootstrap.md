@@ -55,10 +55,19 @@ A handful of consequences fall out of this:
    lifetime.** A long-quiet cluster's MST shrinks to nothing.
 2. **A new replica syncs the snapshot once, then catches up the
    small live tail.** Not the whole history.
-3. **The MST root hash changes when truncation happens** — and that
-   is fine, because every replica that has seen the same set of
-   peers truncates to the same watermark and arrives at the same
-   tree.
+3. **The MST root changes when truncation happens.** Two replicas
+   that have truncated to the same watermark hold the same live tail
+   and so compute the same root. But two replicas in *different*
+   compaction states do not — even when they hold identical data —
+   and a fully compacted instance has an empty MST whose root is
+   `undefined`. The root tracks the *live window*, not the
+   *materialised state*.
+4. **Convergence is therefore judged by what was applied, not by the
+   MST root.** Because truncation moves the root without changing the
+   data, root equality is not a faithful "do two nodes hold the same
+   data?" oracle. The oracle is a separate **applied frontier** — a
+   per-origin version vector of applied events; it is the subject of [its
+   own section](#the-applied-frontier-the-convergence-oracle) below.
 
 ## What does "stable" mean here?
 
@@ -260,6 +269,12 @@ The library policy is **one checkpoint per instance** — the most
 recent one. Older checkpoints are not retained. The live MST plus the
 latest checkpoint fully reconstruct the application state.
 
+The checkpoint slot additionally carries the instance's applied
+frontier — the convergence-oracle version vector for the compacted
+prefix — written at every compaction commit and at clean shutdown, so it
+is restored on the next start rather than rebuilt from a projection scan
+(see [The applied frontier](#the-applied-frontier-the-convergence-oracle)).
+
 ## The CRDT module (the COG interpreter)
 
 The substrate is meaning-agnostic. Each instance is bound at start
@@ -327,6 +342,97 @@ mental model. Practically, it means:
   the live tail, never the size of history.
 - **New replicas don't replay the world.** They get the snapshot
   and a small live tail (next section).
+
+## The applied frontier: the convergence oracle
+
+The empty-MST steady state forces a question the rest of the
+architecture has quietly assumed away: once two converged peers both
+hold an empty MST, *how does anything verify they actually hold the
+same data?* The MST root cannot answer it. Truncation moves the root
+without changing the data, so two peers in different compaction states
+compute different roots for identical data, and a fully compacted
+instance's root is `undefined`. Comparing roots in this regime yields
+two failure modes — a false **diverged** verdict for identical data
+(one peer compacted, one not), and, once both peers compact to empty,
+a false **in-sync** verdict in which both advertise `undefined` and
+nothing has been compared at all.
+
+The convergence oracle is therefore taken over **what each instance has
+applied**, not over the MST. Each instance maintains an **applied
+frontier**: a version vector mapping every event origin to the highest
+sequence number it has applied from that origin,
+
+```
+frontier = #{ Origin => max Seq applied from Origin }
+```
+
+over every `{HLC, Origin, Seq}` `cell_apply` event the instance has
+materialised. One property of the op-log makes a per-origin maximum a
+complete summary of the applied set: **delivery is causal — no per-origin
+gaps.** Because an origin's events apply in sequence order with nothing
+skipped (see [chapter 02](02_event_log_and_keys.md)), knowing the
+maximum sequence applied from an origin is equivalent to knowing
+*exactly which* of that origin's events have been applied. Two instances
+with equal frontiers have therefore applied the same op-set, and the
+op-based CRDT guarantees the same op-set yields the same state (see
+[chapter 05](05_crdt_model.md)). Two further properties make this the
+right oracle:
+
+- **It is compaction-invariant.** The frontier is a cumulative *applied
+  position*, not a snapshot of live state. Compaction truncates the MST
+  and advances the checkpoint; it removes none of the positions already
+  reached. An empty MST and a full MST over the same applied history
+  carry the same frontier.
+- **It is cheap.** The frontier is `O(#origins)` — one integer per node
+  that has ever authored an event — not `O(#cells)`. There is no fold
+  over the projection at any point, on any path.
+
+It is maintained on the apply path: at each commit barrier the applier
+**max-merges** the batch's per-origin maxima into the frontier (see
+[chapter 04](04_applier.md)). Max-merge is idempotent and monotone, which
+is what makes recovery trivial — re-applying an event that is already
+counted leaves the frontier unchanged.
+
+### Recovery: three durable sources, no recompute
+
+Because max-merge is idempotent, an instance reconstructs its frontier at
+`init/1` by merging three durable sources, in any order, with no
+projection rescan and no transient "not yet authoritative" state:
+
+1. **The compaction checkpoint** carries the frontier of the *compacted
+   prefix* — the events truncated from both the WAL and the MST, whose
+   maxima are recoverable nowhere else. `terminate/2` and every
+   compaction commit persist it.
+2. **The live MST** carries the uncompacted, already-applied events
+   (compaction watermark → durable root). A clean restart resumes at the
+   tail, so these never replay; their maxima are folded directly out of
+   the MST's `cell_apply` keys — `O(live MST)`, bounded by compaction.
+3. **The WAL tail** carries events past the durable root, which the
+   applier replays on the normal apply path after `init/1`, topping up
+   the frontier as it goes.
+
+This is deliberately *not* a fold over the materialised projection. An
+`O(#cells)` rescan on every restart was the cold-boot cost the frontier
+exists to avoid; reconstruction here is bounded by the live op-log, which
+compaction keeps small.
+
+### Comparing across peers
+
+A peer fetches another's frontier with a `get_frontier` request over the
+anti-entropy channel; the reply carries the frontier map and the node's
+keying-topology fingerprint (see
+[chapter 03](03_bondy_db.md#the-topology-manifest)). Two instances are
+judged converged when their fingerprints agree (the projections are keyed
+the same way, so the frontiers are comparable) and the frontiers are
+equal — including the case where both are empty, which the MST root could
+not distinguish from "untested". The operator sync view reads convergence
+this way; the MST root survives only as a fallback for a peer too old to
+answer the frontier request.
+
+The frontier holder and its max-merge live in `bondy_oplog_registry`; it
+is maintained on the apply path in `bondy_oplog_cell_apply` and
+reconstructed at startup in `bondy_oplog_instance` (`restore_frontier`
+from the checkpoint, `frontier_from_mst` from the live tree).
 
 ## Bootstrap: how a new peer joins
 
@@ -638,6 +744,7 @@ snapshot.
 
 | Hazard | Catch |
 |---|---|
+| Two peers both compact to an empty MST and both advertise an `undefined` root, so a root comparison reports "in sync" without comparing anything. | Convergence is judged by the [applied frontier](#the-applied-frontier-the-convergence-oracle), a per-origin version vector that is compaction-invariant and equal even when both MSTs are empty; the MST root is not the oracle. |
 | Silent peer pins the watermark forever. | `peer_timeout_ms` filters stale peer entries (default 30s); the frontier ignores them. |
 | Replica truncates a prefix the application still cares about. | `interpret_cog` must consume the prefix into the snapshot first. The compaction cycle is `frontier → events → interpret_cog → snapshot → truncate` — the snapshot is durable *before* the MST mutation. |
 | Two compactions race. | One-at-a-time guard in `bondy_oplog_instance`: a second `compact` request while one is in flight replies `{ok, no_change}`. |

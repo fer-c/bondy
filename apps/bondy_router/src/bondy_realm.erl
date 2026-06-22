@@ -37,8 +37,8 @@ Realm security is enabled by default.
 ## Storage
 
 Realms are persisted to disk and replicated across the cluster via the
-bondy_db `bondy_realm` core table (design §11.4 — ninth domain cut over from
-plum_db). Unlike the per-realm tables, the realm table is a **global registry**:
+bondy_db `bondy_realm` core table. Unlike the per-realm tables, the realm table
+is a **global registry**:
 all realms share a single bondy_db band (the empty binary, like the API Gateway
 specs) and are keyed by their Uri, with `shard_by => key` spreading them across
 shards. `list/0` therefore scatter-scans the band across every shard. Realms'
@@ -288,22 +288,23 @@ connected to any realm.
         default => [],
         datatype => {list, map}
     },
-    %% A set of keys used for signing
-    %% TODO if this is a property do not gen keys!!!!
+    %% A set of keys used for signing. The validator no longer generates keys;
+    %% an absent/empty list yields an empty keyset and the create path
+    %% (`maybe_gen_keys/2`) decides whether to mint them eagerly or defer to
+    %% lazy generation on first use. See the REALM KEY MATERIAL section.
     <<"private_keys">> => #{
         alias => private_keys,
         key => private_keys,
         required => true,
-        default => fun gen_keys/0,
+        default => [],
         validator => fun validate_keys/1
     },
-    %% A set of keys used for encryption
-    %% TODO if this is a property do not gen keys!!!!
+    %% A set of keys used for encryption. Generated like the signing keys above.
     <<"encryption_keys">> => #{
         alias => encryption_keys,
         key => encryption_keys,
         required => true,
-        default => fun gen_encryption_keys/0,
+        default => [],
         validator => fun validate_encryption_keys/1
     },
     <<"info">> => #{
@@ -783,6 +784,7 @@ connected to any realm.
 -export([get_public_key/2]).
 -export([get_random_encryption_kid/1]).
 -export([get_random_kid/1]).
+-export([get_random_private_key/1]).
 -export([get_oidc_provider/2]).
 -export([info/1]).
 -export([is_allowed_authmethod/2]).
@@ -805,6 +807,8 @@ connected to any realm.
 -export([update/2]).
 -export([uri/1]).
 -export([strip_private_keys/1]).
+-export([split_for_import/1]).
+-export([keys_value_to_entries/1]).
 
 -export([suspend/1]).
 -export([close/2]).
@@ -1192,11 +1196,39 @@ get_public_key(Uri, Kid) when is_binary(Uri) ->
 
 -spec get_random_kid(t() | uri()) -> binary().
 
+get_random_kid(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
+    %% Signing keys are generated lazily; mint (and persist) them on first use.
+    Realm = init_keys(Realm0),
+    get_random_kid(Realm);
 get_random_kid(#realm{private_keys = Keys}) ->
     Kids = maps:keys(Keys),
     lists:nth(rand:uniform(length(Kids)), Kids);
 get_random_kid(Uri) when is_binary(Uri) ->
     get_random_kid(fetch(Uri)).
+
+-doc """
+Returns a random signing key as `{Kid, PrivateKey}`, generating (and persisting)
+the realm's signing keys on first use if it has none yet.
+
+Use this in preference to the `get_random_kid/1` + `get_private_key/2` pair on
+the same realm record: because keys are generated lazily, picking a kid may
+generate keys that are NOT present in the in-hand `#realm{}` record, so a
+follow-up `get_private_key/2` on that stale record would return `undefined`.
+This function returns the matching key atomically.
+""".
+-spec get_random_private_key(t() | uri()) -> {binary(), map()}.
+
+get_random_private_key(#realm{private_keys = Keys} = Realm0) when
+    map_size(Keys) == 0
+->
+    Realm = init_keys(Realm0),
+    get_random_private_key(Realm);
+get_random_private_key(#realm{private_keys = Keys}) ->
+    Kids = maps:keys(Keys),
+    Kid = lists:nth(rand:uniform(length(Kids)), Kids),
+    {Kid, to_private_key(maps:get(Kid, Keys))};
+get_random_private_key(Uri) when is_binary(Uri) ->
+    get_random_private_key(fetch(Uri)).
 
 -spec encryption_keys(t() | uri()) -> [map()].
 
@@ -1223,6 +1255,14 @@ get_encryption_key(Uri, Kid) when is_binary(Uri) ->
 
 -spec get_random_encryption_kid(t() | uri()) -> map().
 
+get_random_encryption_kid(#realm{encryption_keys = Keys} = Realm0) when
+    map_size(Keys) == 0
+->
+    %% Encryption keys are generated lazily; mint (and persist) them on first
+    %% use.
+    Data = #{encryption_keys => gen_encryption_keys()},
+    Realm = merge_and_store(Realm0, Data, #{}),
+    get_random_encryption_kid(Realm);
 get_random_encryption_kid(#realm{encryption_keys = Keys}) ->
     Kids = maps:keys(Keys),
     lists:nth(rand:uniform(length(Kids)), Kids);
@@ -1468,11 +1508,17 @@ apply_config() ->
         undefined ->
             ok;
         Filename ->
-            %% We rebase all objects i.e. we will use a dirty put storing a
-            %% deterministic value that will override the existing object. This
-            %% is to ensure all nodes create the same object (hashing to the
-            %% same value) so that we do not trigger AAE.
-            from_file(Filename, #{rebase => true})
+            %% Apply the security config declaratively. Each object is written
+            %% with `bondy_db:reconcile` (an idempotent set), so re-applying the
+            %% unchanged file on every boot emits NO operations and never
+            %% perturbs cross-node convergence — the op-based CRDT + anti-entropy
+            %% reconcile multi-node writes, so plum_db's deterministic-version
+            %% "rebase" hack is obsolete. The `declarative` flag carries that
+            %% intent: overwrite-if-present and skip the runtime lifecycle
+            %% side-effects. (Idempotency relies on each object being
+            %% deterministic across nodes/boots; see `validate_rbac_config` for
+            %% the deterministic password salt.)
+            from_file(Filename, #{declarative => true})
     end.
 
 -doc "Loads a security config file from `Filename`.".
@@ -1482,7 +1528,7 @@ from_file(Filename) ->
     from_file(Filename, #{}).
 
 -doc "Loads a security config file from `Filename`.".
--spec from_file(Filename :: file:filename_all(), #{rebase := boolean()}) ->
+-spec from_file(Filename :: file:filename_all(), #{declarative => boolean()}) ->
     ok | no_return().
 
 from_file(Filename, Opts) ->
@@ -1674,19 +1720,17 @@ grants(Uri, Opts) when is_binary(Uri) ->
 %% PRIVATE
 %% =============================================================================
 %%
-%% The plum_db prefix callbacks were removed with the bondy_db cut-over (design
-%% §11.4). The LOCAL callbacks (`on_update`/`on_delete`/`on_erase`) were no-ops —
-%% the real local lifecycle is the inline `on_create/1`/`on_update/1`/
-%% `on_delete/1` notifications fired from the create/update/delete paths. The
-%% only meaningful one was the REMOTE `on_merge` (close all sessions when a peer
-%% deleted the realm via AAE) — that side-effect is DEFERRED to the oplog.aae
-%% phase, where it becomes a publish/reactor seam (same deferral as the bridge
-%% sync and the user on_merge).
+%% The realm table has no prefix callbacks. The LOCAL lifecycle is the inline
+%% `on_create/1`/`on_update/1`/`on_delete/1` notifications fired from the
+%% create/update/delete paths. The REMOTE side-effect — close all sessions when
+%% a peer deletes the realm via anti-entropy — is the `publish => true` /
+%% `bondy_aae_reactor:react_realm/2` seam (see `bondy_namespace_catalog`),
+%% exactly as the user on_merge works.
 
 %% @private
 add_master_realm() ->
     Data = validate(?MASTER_REALM, ?MASTER_REALM_VALIDATOR),
-    do_create(Data, #{rebase => true}).
+    do_create(Data, #{declarative => true}).
 
 %% @private
 validate(Map0, Spec) ->
@@ -1734,8 +1778,6 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
     PassOpts0 = password_opts(Realm),
     Len = 16,
 
-    %% We pass a time-based salt so that within a given window all nodes
-    %% performing this operation will generate the same salt, which will mean
     Users = [
         %% The following is not ideal but users shouldn't be providing
         %% passwords on the security configuration file anyway, instead they
@@ -1743,11 +1785,14 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
         %% TODO Review the idea of banning the creation of static users w/
         %% passwords altogether.
 
-        %% We will be rebasing the plum_db_object during insertion, so we do
-        %% need the user object hash to be the same, otherwise we will have
-        %% differences on the AAE hashtrees. The following makes sure we
-        %% generate exactly the same salted password on every node. This is
-        %% obviously assuming each node uses the same configuration file.
+        %% A DETERMINISTIC salt (derived from the module hash, not a random
+        %% one) so the salted password — and therefore the whole user object —
+        %% is byte-identical on every node and every boot. That determinism is
+        %% what lets the declarative config apply be idempotent: `store` uses
+        %% `bondy_db:reconcile`, which re-writes the cell only when the value
+        %% actually changes, so re-reading the same config file at boot emits no
+        %% operations and never diverges cross-node convergence. (Assumes
+        %% every node uses the same configuration file and build.)
         begin
             Secret = module_info(md5),
             Bin = term_to_binary(data, [deterministic]),
@@ -1859,11 +1904,51 @@ add_or_update(#{<<"uri">> := Uri} = Data0, Opts) ->
     end.
 
 %% @private
-do_create(#{uri := Uri} = Map, Opts) ->
+do_create(#{uri := Uri} = Map0, Opts) ->
+    Map = maybe_gen_keys(Map0, Opts),
     Realm0 = #realm{uri = Uri},
     Realm = merge_and_store(Realm0, Map, Opts),
     ok = on_create(Realm),
     Realm.
+
+%% @private
+%% Decide whether to mint key material eagerly at create time. See the REALM KEY
+%% MATERIAL section for the rationale. Eager for an authoritative create (not
+%% declarative) or a bootstrapping (solo) node; deferred to lazy generation for
+%% a clustered node applying declarative config. A keyset explicitly supplied in
+%% the create map is always kept verbatim.
+maybe_gen_keys(Map, Opts) ->
+    Declarative =
+        is_map(Opts) andalso maps:get(declarative, Opts, false) =:= true,
+    case (not Declarative) orelse is_solo() of
+        true ->
+            Map#{
+                private_keys => ensure_keys(
+                    maps:get(private_keys, Map, []), fun gen_keys/0
+                ),
+                encryption_keys => ensure_keys(
+                    maps:get(encryption_keys, Map, []), fun gen_encryption_keys/0
+                )
+            };
+        false ->
+            Map
+    end.
+
+%% @private
+ensure_keys([], Gen) -> Gen();
+ensure_keys(Keys, _) -> Keys.
+
+%% @private
+%% True only for a deployment that never had a peer (a bootstrapping single
+%% node). `partisan_peer_service:members/0` lists the full known membership
+%% (including currently-unreachable peers), so a clustered node — even when
+%% partitioned — is not solo. On any error (e.g. queried before Partisan is
+%% ready) we answer `false` and defer to lazy generation, which is always safe.
+is_solo() ->
+    case partisan_peer_service:members() of
+        {ok, Members} when is_list(Members) -> length(Members) =< 1;
+        _ -> false
+    end.
 
 %% @private
 -spec do_lookup(uri()) -> {ok, t()} | {error, not_found}.
@@ -1878,6 +1963,7 @@ do_lookup(Uri) ->
             try
                 Realm = from_term(Term),
                 ok = store(Uri, Realm),
+                ok = store_keys(Uri, Realm),
                 {ok, Realm}
             catch
                 throw:badarg ->
@@ -1902,9 +1988,14 @@ table() ->
 
 %% @private
 %% Reads the realm record (or a legacy term, migrated by `do_lookup`), or
-%% `undefined` (mirrors the old `plum_db:get/2`).
+%% `undefined`. Key material lives in the separate `bondy_realm_keys` cell (it
+%% is NOT part of the realm's bondy_db identity), so a `#realm{}` read merges it
+%% back in from there; legacy terms are returned as-is for `do_lookup` to
+%% migrate.
 do_get(Uri) ->
     case bondy_db:read(table(), ?REALM_BAND, Uri) of
+        {ok, {#realm{} = Realm, _Hlc}} ->
+            merge_keys(Realm, read_keys(Uri));
         {ok, {Value, _Hlc}} ->
             Value;
         {error, not_found} ->
@@ -1931,27 +2022,235 @@ merge_and_store(Realm0, Map, Opts) ->
     %% We then create the realm
     Uri = Realm#realm.uri,
 
+    %% Identity/config cell (key material stripped) + the separate key cell.
     ok = store(Uri, Realm),
+    ok = store_keys(Uri, Realm),
 
     %% We finally apply all the RBAC objects that have been validated
-    %% but for them we do use the Opts as we received it (potentially using
-    %% rebase).
+    %% but for them we do use the Opts as we received it (potentially the
+    %% `declarative` config-apply flag).
     ok = apply_rbac_config(Realm, RBACConfig, Opts),
 
     Realm.
 
 %% @private
-%% Writes the realm record to the global band keyed by its Uri. The historical
-%% `rebase` (dirty_put) / normal split is gone: a fresh bondy_db write already
-%% dominates by HLC, so the plum_db actorID/clock merge-refusal that forced
-%% `rebase => false` for realms no longer applies.
+%% Writes the realm IDENTITY record (key material stripped) to the global band
+%% keyed by its Uri. The realm's bondy_db identity — and therefore its cross-node
+%% convergence — is its Uri + config, NEVER the random signing/encryption keys,
+%% which live in their own `bondy_realm_keys` cell (`store_keys/2`). Idempotent: a
+%% write is emitted only when the stored record actually changes, so re-applying
+%% the config file on every boot does not re-stamp the cell with a fresh HLC
+%% (which would diverge convergence cross-node). Convergence is
+%% handled by the op-based CRDT + anti-entropy; no deterministic-version rebase
+%% is needed.
 store(Uri, Realm) ->
-    case bondy_db:apply(table(), ?REALM_BAND, Uri, {set, Realm}) of
+    case bondy_db:reconcile(table(), ?REALM_BAND, Uri, strip_keys(Realm)) of
         ok ->
             ok;
         {error, Reason} ->
             throw(Reason)
     end.
+
+%% =============================================================================
+%% PRIVATE: REALM KEY MATERIAL (separate `bondy_realm_keys` cell)
+%% =============================================================================
+%% The realm's signing/encryption keys are random per generation, so they must
+%% NOT be part of the realm's bondy_db identity (the identity cell + its cross-node
+%% convergence must be Uri + config, deterministic across nodes). They live in their
+%% own `bondy_realm_keys` cell, an add-wins map of `kid => key bundle` keyed by
+%% the realm Uri. Add-wins means concurrent rotations — each minting a fresh
+%% kid — merge to the UNION on every node, so the keys converge (and an imported
+%% realm's keys are preserved) without a deterministic-version write.
+%%
+%% Key generation is gated so that the add-wins union does not accumulate a
+%% redundant set per node (`maybe_gen_keys/2`):
+%%
+%%   * An AUTHORITATIVE create — a non-declarative `create/1` (API) — generates
+%%     eagerly. It has a single creator node, so the keys are written once and
+%%     propagate to peers via anti-entropy before any token is issued; this is
+%%     what makes cross-node JWT verification of the first token reliable.
+%%   * A BOOTSTRAPPING node (solo Partisan membership) also generates eagerly,
+%%     even for declarative config-declared realms: it is the authoritative
+%%     origin of those realms, so it mints their keys early for peers to inherit.
+%%   * A node applying DECLARATIVE config while part of a cluster (a joiner, or a
+%%     node re-reading the config file at boot) DEFERS: it creates the realm
+%%     key-free and inherits the cluster's keys via anti-entropy, so joiners do
+%%     not each mint a redundant set.
+%%
+%% Whatever is deferred is still covered by LAZY generation on first use (the
+%% empty-keyset clauses in `private_keys/1`, `encryption_keys/1`,
+%% `get_random_kid/1`, `get_random_private_key/1`, `get_random_encryption_kid/1`),
+%% so a realm is never stuck without keys: a node that genuinely needs a key
+%% before anti-entropy delivers one mints its own (union-merged). There is no
+%% precise bootstrap-vs-join detection (boot-time membership is racy and Bondy
+%% joins via dynamic peer discovery); the solo check plus the declarative flag
+%% plus lazy fallback together keep the common case at exactly one keyset.
+
+%% @private
+%% The open `bondy_realm_keys` table handle. Raises if the catalogue has not
+%% provisioned it yet.
+keys_table() ->
+    case bondy_namespace_catalog:table(?BONDY_DB_REALM_KEYS_TAB) of
+        undefined ->
+            error(bondy_realm_keys_table_unavailable);
+        Table ->
+            Table
+    end.
+
+%% @private
+%% Empty ALL key material from the realm record — the value stored in the
+%% identity cell. Keys are persisted separately by `store_keys/2`.
+strip_keys(#realm{} = R) ->
+    R#realm{private_keys = #{}, public_keys = #{}, encryption_keys = #{}}.
+
+%% @private
+%% Decompose a realm's key maps into `bondy_realm_keys` entries, one per `kid`:
+%% a signing kid carries `{private, public}`, an encryption kid `{encryption}`.
+%% The stored JWK values are carried verbatim (no re-encode) so a read merges
+%% them back byte-identical.
+keys_to_entries(#realm{
+    private_keys = Priv0, public_keys = Pub, encryption_keys = Enc
+}) ->
+    Priv =
+        case Priv0 of
+            undefined -> #{};
+            _ -> Priv0
+        end,
+    Signing = [
+        {Kid, #{private => maps:get(Kid, Priv, undefined), public => P}}
+     || {Kid, P} <- maps:to_list(Pub)
+    ],
+    Encryption = [
+        {Kid, #{encryption => E}}
+     || {Kid, E} <- maps:to_list(Enc)
+    ],
+    maps:from_list(Signing ++ Encryption).
+
+%% @private
+%% Rebuild a realm's key maps from the `bondy_realm_keys` aw-map value
+%% (`#{kid => [Bundle]}`; distinct kids per rotation ⇒ each list is a singleton).
+%% When the keys cell is EMPTY, the identity record's own keys are kept untouched
+%% — this preserves a pre-split realm whose keys still live in the identity cell
+%% (migrated to the keys cell on its next store), and a brand-new realm read
+%% before its keys cell write lands. Only a populated keys cell is authoritative.
+merge_keys(#realm{} = R, KeysMap) when map_size(KeysMap) > 0 ->
+    {Priv, Pub, Enc} = maps:fold(
+        fun fold_key_entry/3, {#{}, #{}, #{}}, KeysMap
+    ),
+    R#realm{private_keys = Priv, public_keys = Pub, encryption_keys = Enc};
+merge_keys(#realm{} = R, _Empty) ->
+    R.
+
+%% @private
+fold_key_entry(Kid, Bundles, {P, Pu, E}) ->
+    case bundle_of(Bundles) of
+        #{encryption := EncK} ->
+            {P, Pu, E#{Kid => EncK}};
+        #{public := PubK} = B ->
+            P1 =
+                case maps:get(private, B, undefined) of
+                    undefined -> P;
+                    PrivK -> P#{Kid => PrivK}
+                end,
+            {P1, Pu#{Kid => PubK}, E};
+        _ ->
+            {P, Pu, E}
+    end.
+
+%% @private
+%% An aw-map value is a sibling list; rotations use distinct kids so it is a
+%% singleton. Tolerate a bare map for forward-compatibility.
+bundle_of([B | _]) -> B;
+bundle_of(B) when is_map(B) -> B.
+
+%% @private
+%% Read the realm's key material from its `bondy_realm_keys` cell, or `#{}` when
+%% absent (keys arrive via creation, rotation, or anti-entropy).
+read_keys(Uri) ->
+    case bondy_db:read(keys_table(), ?REALM_BAND, Uri) of
+        {ok, {KeysMap, _Hlc}} when is_map(KeysMap) ->
+            KeysMap;
+        {error, not_found} ->
+            #{}
+    end.
+
+%% @private
+%% Persist the realm's key material to its `bondy_realm_keys` cell, idempotently:
+%% `put` only the kids whose bundle is new or changed, `rmv` kids that are gone
+%% (revoked). Because it is called from `merge_and_store/3` (every create /
+%% update / lazy key generation), the idempotent diff keeps re-applying config
+%% from churning the keys cell — only a genuine key change emits an op.
+store_keys(Uri, #realm{} = Realm) ->
+    Desired = keys_to_entries(Realm),
+    Current = read_keys(Uri),
+    Table = keys_table(),
+    %% Add / update changed or new kids.
+    ok = maps:foreach(
+        fun(Kid, Bundle) ->
+            case current_bundle(Current, Kid) of
+                Bundle -> ok;
+                _ -> aw_apply(Table, Uri, {put, Kid, Bundle})
+            end
+        end,
+        Desired
+    ),
+    %% Remove kids no longer present (revoked).
+    _ = [
+        aw_apply(Table, Uri, {rmv, Kid})
+     || Kid <- maps:keys(Current),
+        not maps:is_key(Kid, Desired)
+    ],
+    ok.
+
+%% @private
+current_bundle(Current, Kid) ->
+    case maps:get(Kid, Current, undefined) of
+        undefined -> undefined;
+        Bundles -> bundle_of(Bundles)
+    end.
+
+%% @private
+aw_apply(Table, Uri, Op) ->
+    case bondy_db:apply(Table, ?REALM_BAND, Uri, Op) of
+        ok -> ok;
+        {error, Reason} -> throw(Reason)
+    end.
+
+-doc """
+Split a realm value for import. Returns `{Identity, KeyEntries}` where `Identity`
+is the realm record with key material stripped (the value for the `bondy_realm`
+identity cell) and `KeyEntries` is `[{Kid, Bundle}]` for the `bondy_realm_keys`
+cell.
+
+A post-split backup's realm record is already key-stripped, so `KeyEntries` is
+empty and the keys arrive via their own `bondy_realm_keys` entries. A pre-split
+(or legacy) backup carries the keys inside the realm record; they are extracted
+here so the imported realm lands in the split layout (identity cell key-free,
+keys in the aw-map cell) rather than re-introducing key bytes into the identity.
+""".
+-spec split_for_import(t() | term()) -> {term(), [{binary(), map()}]}.
+
+split_for_import(#realm{} = R) ->
+    {strip_keys(R), maps:to_list(keys_to_entries(R))};
+split_for_import(Term) ->
+    try from_term(Term) of
+        #realm{} = R -> split_for_import(R);
+        _ -> {Term, []}
+    catch
+        _:_ -> {Term, []}
+    end.
+
+-doc """
+Translate a `bondy_realm_keys` cell's exported value (the materialized aw-map
+`#{kid => [Bundle]}`) into `[{Kid, Bundle}]` for re-application as `{put, Kid,
+Bundle}` ops on import — an aw-map cannot be restored with a `{set, _}`.
+""".
+-spec keys_value_to_entries(map() | term()) -> [{binary(), map()}].
+
+keys_value_to_entries(Map) when is_map(Map) ->
+    [{Kid, bundle_of(Bundles)} || {Kid, Bundles} <- maps:to_list(Map)];
+keys_value_to_entries(_) ->
+    [].
 
 %% @private
 fold_props(allow_connections, V, Realm) ->
@@ -2062,8 +2361,10 @@ keys_to_jwts(Old, New) ->
     ]).
 
 %% private
+%% An empty key list is accepted as-is: signing keys are generated lazily on
+%% first use, not eagerly at create time (see the REALM KEY MATERIAL section).
 validate_keys([]) ->
-    {ok, gen_keys()};
+    {ok, []};
 validate_keys(L) when is_list(L) ->
     do_validate_keys(L);
 validate_keys(_) ->
@@ -2084,8 +2385,10 @@ gen_keys() ->
     ].
 
 %% private
+%% An empty key list is accepted as-is: encryption keys are generated lazily on
+%% first use, not eagerly at create time (see the REALM KEY MATERIAL section).
 validate_encryption_keys([]) ->
-    {ok, gen_encryption_keys()};
+    {ok, []};
 validate_encryption_keys(L) when is_list(L) ->
     do_validate_keys(L);
 validate_encryption_keys(_) ->

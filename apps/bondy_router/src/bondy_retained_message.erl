@@ -8,9 +8,9 @@
 When publishing an event a topic the Publisher can ask the Broker to
 retain the event being published as the most-recent event on this topic.
 
-Retained events are stored in `bondy_db` (the durable `core` DB, design §11.4 —
-cut over from plum_db), keyed by topic within a realm and matched via
-key-ordered `bondy_db:range_all/5` prefix / wildcard scans.
+Retained events are stored in `bondy_db` (the durable `core` DB), keyed by
+topic within a realm and matched via key-ordered `bondy_db:range_all/5` prefix /
+wildcard scans.
 
 **This is experimental and does not scale with high traffic at the
 moment.**
@@ -18,14 +18,12 @@ moment.**
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
-%% For the `?EOT` end-of-table sentinel (and, historically, the prefix macros).
-%% Retiring this plum_db header is a later cleanup step (removal roadmap §d).
+%% For the `?EOT` end-of-table sentinel.
 -include("bondy_db_tables.hrl").
 
 %% The bondy_db table name (declared in `bondy_namespace_catalog:tables/0`,
-%% durable `core` DB). Replaces the old plum_db `{retained_messages, Realm}`
-%% prefix; the realm is now the bondy_db shard/realm argument, not part of a
-%% prefix tuple.
+%% durable `core` DB). The realm is the bondy_db shard/realm argument, not part
+%% of the key.
 -define(TABLE, retained_messages).
 
 -record(bondy_retained_message, {
@@ -204,12 +202,11 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     Size = term_size(Retained),
     Table = table(),
     %% Counter delta: read the existing value (if any) so we can subtract its
-    %% size before adding the new one. plum_db did this inside a put-Modifier
-    %% closure; bondy_db has no modifier, so we read-then-apply. Single-node,
-    %% experimental feature — approximate counters under a concurrent
-    %% same-topic write race are acceptable (the trie / routing path is
-    %% unaffected). The remote-replication counter sync (the retired plum_db
-    %% `object_update` subscription) is deferred to the oplog.aae phase.
+    %% size before adding the new one. bondy_db has no put-modifier, so we
+    %% read-then-apply. Single-node, experimental feature — approximate counters
+    %% under a concurrent same-topic write race are acceptable (the trie /
+    %% routing path is unaffected). The remote-replication counter sync is
+    %% deferred until bondy_db anti-entropy reconciles the counters.
     _ =
         case bondy_db:read(Table, Realm, Topic) of
             {ok, {#bondy_retained_message{} = Old, _Hlc}} ->

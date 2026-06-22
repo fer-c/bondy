@@ -1,7 +1,7 @@
 # Why bondy_db is operation-based: the Canteen × MST grounding
 
 This is the design rationale behind
-[the CRDT model](architecture/05_crdt_model.md): why `bondy_db` materialises
+[the CRDT model](../doc_extras/architecture/05_crdt_model.md): why `bondy_db` materialises
 application state by *interpreting a log of operations* rather than by *merging
 states*, and why that distinction is load-bearing. It draws on two ideas — the
 **Merkle Search Tree** (Auvolat & Taïani) and the **Canteen** operation-based
@@ -19,7 +19,7 @@ grow-only *set of operations*, each keyed by its dot `{HLC, Origin, Seq}`,
 reconciled by set-union anti-entropy. Two peers compare roots and exchange only
 the pages they differ on. This is the one place state-based reconciliation
 belongs: it reconciles the *op-set*, not the application's meaning of those ops
-([chapters 01](architecture/01_bondy_oplog.md) and 02).
+([chapters 01](../doc_extras/architecture/01_bondy_oplog.md) and 02).
 
 **Layer 2 — application semantics (operation-based).** A table's value for a
 cell is produced by replaying the converged op-set through a COG-interpreter,
@@ -52,7 +52,7 @@ predecessors arrive. `bondy_db` needs none, and the reason is structural:
 The only real ordering obligation that remains — never truncate a stable event
 before it has been interpreted into the projection — is enforced by the
 replay-before-truncate guard in compaction
-([chapter 06](architecture/06_compaction_and_bootstrap.md)).
+([chapter 06](../doc_extras/architecture/06_compaction_and_bootstrap.md)).
 
 ## The one performance-driven choice: eager materialisation
 
@@ -73,7 +73,7 @@ as the sole kernel:
 A CRDT module declares which it is (`order_independent/0`), and that marker —
 validated by test — selects the path. The result keeps reads O(1) while keeping
 `interpret_cog` the one authoritative semantics
-([chapter 05](architecture/05_crdt_model.md)).
+([chapter 05](../doc_extras/architecture/05_crdt_model.md)).
 
 ## What the grounding buys
 
@@ -89,9 +89,9 @@ validated by test — selects the path. The result keeps reads O(1) while keepin
 
 ## See also
 
-- [The CRDT model](architecture/05_crdt_model.md) — the as-built behaviour
+- [The CRDT model](../doc_extras/architecture/05_crdt_model.md) — the as-built behaviour
   contract and the native catalogue.
-- [bondy_oplog: the write side](architecture/01_bondy_oplog.md) — the MST op-set
+- [bondy_oplog: the write side](../doc_extras/architecture/01_bondy_oplog.md) — the MST op-set
   layer and leaderless replication.
-- [Compaction & bootstrap](architecture/06_compaction_and_bootstrap.md) — how
+- [Compaction & bootstrap](../doc_extras/architecture/06_compaction_and_bootstrap.md) — how
   the bounded op-set and the replay-before-truncate guard work.

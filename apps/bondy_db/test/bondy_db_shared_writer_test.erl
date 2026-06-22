@@ -32,8 +32,10 @@
 shared_writer_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         gen("one_writer_per_secshard", fun one_writer_per_secshard/1),
-        gen("independent_index_projections",
-            fun independent_index_projections/1),
+        gen(
+            "independent_index_projections",
+            fun independent_index_projections/1
+        ),
         gen("refcounted_writer_teardown", fun refcounted_writer_teardown/1)
     ]}.
 
@@ -120,7 +122,9 @@ one_writer_per_secshard({_Db, Users, Groups, _Sup, _Dir}) ->
 independent_index_projections({_Db, Users, Groups, _Sup, _Dir}) ->
     R = <<"r1">>,
     %% Same key, same indexed term in both tables.
-    ok = bondy_db:apply(Users, R, <<"k1">>, {set, bondy_db:tick(Users), <<"x">>}),
+    ok = bondy_db:apply(
+        Users, R, <<"k1">>, {set, bondy_db:tick(Users), <<"x">>}
+    ),
     ok = bondy_db:apply(
         Groups, R, <<"k1">>, {set, bondy_db:tick(Groups), <<"x">>}
     ),
@@ -170,7 +174,10 @@ refcounted_writer_teardown({_Db, Users, Groups, _Sup, _Dir}) ->
 
     %% `groups`' index is unaffected — a fresh write still indexes.
     ok = bondy_db:apply(
-        Groups, <<"r1">>, <<"post_close">>, {set, bondy_db:tick(Groups), <<"pc">>}
+        Groups,
+        <<"r1">>,
+        <<"post_close">>,
+        {set, bondy_db:tick(Groups), <<"pc">>}
     ),
     ok = flush_index(Groups, by_value),
     ?assertEqual(
@@ -213,7 +220,9 @@ writer_pids(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     maps:from_list([
         begin
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             {Shard, Pid}
@@ -227,7 +236,9 @@ flush_index(Table, IndexName) ->
     #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
     lists:foreach(
         fun(Shard) ->
-            {ok, Entry} = bondy_oplog_core_registry:lookup(NS, IndexName, Shard),
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             ok = bondy_oplog_secondary_writer:flush_sync(Pid)
@@ -239,7 +250,8 @@ wait_until(_Pred, 0) ->
     timeout;
 wait_until(Pred, N) ->
     case Pred() of
-        true -> ok;
+        true ->
+            ok;
         false ->
             timer:sleep(10),
             wait_until(Pred, N - 1)

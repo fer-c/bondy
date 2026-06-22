@@ -22,6 +22,17 @@ default:
     @just --list
 
 # -----------------------------------------------------------------------------
+# Static checks
+# -----------------------------------------------------------------------------
+
+# Enforce the storage-stack layering invariant: dependencies flow strictly
+# bondy_db -> bondy_oplog -> bondy_mst, with no cycles and no layer-skips.
+# Scoped xref check over those three apps (see scripts/check_layering.escript).
+xref-layering:
+    rebar3 compile
+    ./scripts/check_layering.escript _build/default/lib
+
+# -----------------------------------------------------------------------------
 # Local benchmarks (oplog/db layer). Compile the umbrella with rebar3,
 # fetch the bench Mix deps, then run scripts under bench/benchmarks.
 # Reports land in bench/_output/<name>/index.html.

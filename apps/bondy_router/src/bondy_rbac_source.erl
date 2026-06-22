@@ -13,13 +13,12 @@ input to lowercase use `string:casefold/1`.
 
 ### Storage
 
-Sources are stored in the bondy_db `security_sources` core table (design §11.4
-— eighth domain cut over from plum_db). The store is realm-sharded; the compound
-`{Username, AMask, Authmethod}` key is encoded to a binary with
-`term_to_binary/1`. That encoding is not order-preserving and the match is on
-the `Username` (and optionally the `AMask`) — never the `Authmethod` alone — so
-the `plum_db:match` patterns become a realm scan (`bondy_db:list/2`) that decodes
-each key and filters. Storage-only (no change reactor).
+Sources are stored in the bondy_db `security_sources` core table. The store is
+realm-sharded; the compound `{Username, AMask, Authmethod}` key is encoded to a
+binary with `term_to_binary/1`. That encoding is not order-preserving and the
+match is on the `Username` (and optionally the `AMask`) — never the
+`Authmethod` alone — so a lookup is a realm scan (`bondy_db:list/2`) that
+decodes each key and filters. Storage-only (no change reactor).
 """.
 -include_lib("partisan/include/partisan_util.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -98,7 +97,9 @@ each key and filters. Storage-only (no change reactor).
 }.
 
 -type add_opts() :: #{
-    rebase => boolean(),
+    %% `true` when applying declarative config (idempotent write, no runtime
+    %% side-effects) — see `bondy_realm:apply_config/0`.
+    declarative => boolean(),
     actor_id => term()
 }.
 
@@ -381,12 +382,22 @@ do_add(RealmUri, Usernames, #{type := source} = Source, Opts) ->
     ),
     {ok, Source}.
 
-%% Both the historical `rebase` (dirty_put) and normal paths collapse to a
-%% single lww write: a fresh bondy_db write already dominates by HLC, and
-%% sources carry no lifecycle side-effects, so the `rebase`/`actor_id` opts no
-%% longer apply.
-store(RealmUri, Key, Source, _Opts) ->
-    case bondy_db:apply(table(), RealmUri, encode_key(Key), {set, Source}) of
+%% Sources carry no lifecycle side-effects. A runtime write is a plain lww set
+%% (dominates by HLC); a declarative config apply (`declarative`) is IDEMPOTENT
+%% via `bondy_db:reconcile`, so re-reading the same config file on every boot emits
+%% no operation and never re-stamps the cell with a fresh HLC (which would
+%% diverge cross-node convergence). The op-based CRDT + anti-entropy
+%% handle convergence; plum_db's deterministic-version rebase is obsolete.
+store(RealmUri, Key, Source, Opts) ->
+    EncKey = encode_key(Key),
+    %% `Opts` may be a map (`#{declarative => true}` from config apply) or a
+    %% plain list, so guard with `is_map/1`.
+    Result =
+        case is_map(Opts) andalso maps:get(declarative, Opts, false) =:= true of
+            true -> bondy_db:reconcile(table(), RealmUri, EncKey, Source);
+            false -> bondy_db:apply(table(), RealmUri, EncKey, {set, Source})
+        end,
+    case Result of
         ok ->
             {ok, Source};
         Error ->

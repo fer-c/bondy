@@ -16,6 +16,10 @@
 %% These atoms are the bondy_db logical table names. They are persisted as part
 %% of the on-disk layout, so changing them requires migrating existing data.
 -define(BONDY_DB_REALM_TAB, bondy_realm).
+%% The realm's signing/encryption key material, stored OUT of the realm
+%% identity cell (see `bondy_realm`): the realm's bondy_db identity/digest is its
+%% Uri + config, never the volatile random key bytes.
+-define(BONDY_DB_REALM_KEYS_TAB, bondy_realm_keys).
 -define(BONDY_DB_USER_TAB, security_users).
 -define(BONDY_DB_GROUP_TAB, security_groups).
 -define(BONDY_DB_GROUP_MEMBERS_TAB, security_group_members).

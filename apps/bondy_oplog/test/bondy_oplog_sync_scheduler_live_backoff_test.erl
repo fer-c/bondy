@@ -52,7 +52,9 @@ cleanup(_) ->
 %% A never-before-seen instance always dispatches (records the entry).
 first_sight_dispatches() ->
     Id = mk_id(),
-    ?assert(bondy_oplog_sync_scheduler:live_decide(Id, root(1), 0, ?BASE, ?MAX)).
+    ?assert(
+        bondy_oplog_sync_scheduler:live_decide(Id, root(1), 0, ?BASE, ?MAX)
+    ).
 
 %% Same root, clock has not reached the next-due time → skip.
 unchanged_root_skips_within_window() ->

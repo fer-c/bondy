@@ -429,7 +429,7 @@ without protocol changes.
 -export([root_hash/1]).
 -export([aae_root/1]).
 -export([diagnose_root/1]).
--export([content_digest/1]).
+-export([frontier/1]).
 -export([fold_range/5]).
 -export([range/3]).
 -export([truncate_prefix/2]).
@@ -1119,36 +1119,15 @@ diagnose_root(Target) ->
     gen_server:call(target(Target), diagnose_root).
 
 -doc """
-The instance's projection CONTENT digest and its readiness — the
-MST-root-independent convergence oracle (`bondy_oplog_content_digest`, AR-17).
-
-Returns `{ready, Digest}` once the digest is authoritative, or
-`{warming, PartialDigest}` while a crash-restart recompute is still folding the
-durable projection (the partial reflects only post-boot apply deltas, NOT the
-boot content — a `warming` digest MUST NOT be treated as an IN_SYNC/DIVERGED
-signal). An instance with no published digest counter returns `{warming, 0}`.
-
-Unlike `root_hash/1`, this reads LOCK-FREE straight from the per-instance
-`atomics` counter and the registry flag (like `bondy_oplog_high_water`), NOT
-routed through the gen_server: the oracle read must add no load to the instance
-process that serves AAE `get_pages`, and the single-word counter is read
-atomically (never torn).
+The instance's applied-frontier version vector `#{Origin => max Seq}` — the
+compaction-invariant convergence oracle. Two nodes with equal frontiers have
+applied the same op-set (causal delivery ⇒ a per-origin max Seq identifies the
+applied prefix). Read lock-free from the registry.
 """.
--spec content_digest(instance_id()) ->
-    {ready | warming, bondy_oplog_content_digest:t()}.
+-spec frontier(instance_id()) -> #{binary() => non_neg_integer()}.
 
-content_digest(InstanceId) when is_binary(InstanceId) ->
-    Digest =
-        case bondy_oplog_registry:content_digest_ref(InstanceId) of
-            undefined -> bondy_oplog_content_digest:empty();
-            Ref -> bondy_oplog_content_digest:read_ref(Ref)
-        end,
-    Status =
-        case bondy_oplog_registry:content_digest_ready(InstanceId) of
-            true -> ready;
-            false -> warming
-        end,
-    {Status, Digest}.
+frontier(InstanceId) when is_binary(InstanceId) ->
+    bondy_oplog_registry:frontier(InstanceId).
 
 -spec fold_range(
     instance_id() | pid(),
@@ -1683,7 +1662,6 @@ install_catalogue_batch(Pid, ModeAndCells) when is_pid(Pid) ->
             {error, instance_not_found}
     end.
 
-
 ?DOC("""
 Adds a table to a shard instance shared by several tables (the one-log-per-shard
 multiplexer). `Bucket` is the table's entity-type tag, `Target` its
@@ -1711,7 +1689,9 @@ register_table(InstanceId, Bucket, Target, TableOpts) when
                     {error, instance_not_running};
                 Pid ->
                     gen_server:call(
-                        Pid, {register_table, Bucket, Target, TableOpts}, infinity
+                        Pid,
+                        {register_table, Bucket, Target, TableOpts},
+                        infinity
                     )
             end;
         _ ->
@@ -1724,7 +1704,6 @@ register_table(InstanceId, Bucket, Target, TableOpts) when
                     )
             end
     end.
-
 
 ?DOC("""
 Removes a table previously added with `register_table/4` from a shared shard
@@ -1945,7 +1924,7 @@ init({InstanceId, Opts}) ->
     %% Single read covers both: the checkpoint envelope carries the
     %% watermark, so calling current_watermark/1 first is redundant
     %% and (on a durable backend) a wasted disk read.
-    {Watermark, CachedCheckpoint0} =
+    {Watermark, CachedCheckpoint} =
         case CkptMod:get_checkpoint(CkptState) of
             {ok, W0, S0} ->
                 {W0, {W0, S0}};
@@ -1954,14 +1933,6 @@ init({InstanceId, Opts}) ->
             {error, CkptErr} ->
                 error({compaction_checkpoint_corrupted, InstanceId, CkptErr})
         end,
-    %% A clean-shutdown content-digest seed (AR-17 convergence oracle) rides in
-    %% the checkpoint's state slot for a durable projection-backed instance.
-    %% Lift it out and NORMALISE the cached checkpoint back to the plain
-    %% `projection_managed` marker so the in-memory state, the published registry
-    %% row, and the on-disk checkpoint (re-tagged at digest recovery) all agree.
-    %% `DigestSeed` is `{ok, Digest}` for a clean restart, or `none` (crash /
-    %% legacy / non-projection checkpoint ⇒ recompute).
-    {DigestSeed, CachedCheckpoint} = take_clean_digest_seed(CachedCheckpoint0),
     CrdtMod = maps:get(crdt_module, Opts, undefined),
     %% Seed HLC from the highest persisted event key, so a restart with
     %% a durable backend doesn't issue keys below the previous high
@@ -2078,26 +2049,23 @@ init({InstanceId, Opts}) ->
     %% startup: a malformed list crashes init before any peer can interact.
     AeTargets = validate_ae_targets(maps:get(ae_targets, Opts, [])),
     ok = bondy_oplog_registry:set_ae_targets(InstanceId, AeTargets),
-    %% Publish + recover the projection content-digest counter (the MST-root-
-    %% independent convergence oracle, AR-17). One atomics word per instance; the
-    %% apply path XORs each committed batch's delta into it, and `content_digest/1`
-    %% / the AAE responder / the observer read it. Recovery:
-    %%   - ephemeral instances: empty at boot (volatile projection), ready now;
-    %%   - durable, clean restart: RESTORE the exact digest from the checkpoint
-    %%     seed (consumed below), ready now;
-    %%   - durable, crash restart: RECOMPUTE asynchronously from a boot-state
-    %%     projection snapshot captured HERE.
-    %%
-    %% INVARIANT: this runs in the QUIESCENT init window — the ref is freshly `0`
-    %% and the applier cannot drain yet (it gates on `set_lifecycle/2`, published
-    %% further below at the end of init), so the snapshots `recover_content_digest`
-    %% captures freeze the projection's boot state. The async fold then yields the
-    %% boot digest and XORs it into the (by-then live-advanced) ref. Do NOT move
-    %% the lifecycle publish above this point.
-    DigestRef = bondy_oplog_content_digest:new_ref(),
-    ok = bondy_oplog_registry:set_content_digest_ref(InstanceId, DigestRef),
-    ok = recover_content_digest(
-        InstanceId, DigestRef, Backend, CkptMod, CkptState, Watermark, DigestSeed
+    %% Restore the applied-frontier convergence oracle (`#{Origin => max Seq}`)
+    %% from THREE durable sources, each max-merged (idempotent, monotone) into
+    %% the registry holder published above:
+    %%   1. the compaction checkpoint — the COMPACTED prefix's maxima (events
+    %%      truncated from the WAL and the MST, recoverable nowhere else);
+    %%   2. the live MST's `cell_apply` keys — the uncompacted, already-applied
+    %%      events (compaction watermark → durable root). A clean restart resumes
+    %%      at the tail, so these never replay and must be folded out directly;
+    %%   3. the applier's WAL-tail replay (events past the durable root), which
+    %%      tops up on the normal apply path after init.
+    %% No recompute fold over the projection and no `warming` state — that was
+    %% the cold-boot meltdown. The MST fold is O(live MST), bounded by compaction.
+    %% The registry row exists (published above), which `merge_frontier/2`
+    %% requires.
+    ok = restore_frontier(InstanceId, CachedCheckpoint),
+    ok = bondy_oplog_registry:merge_frontier(
+        InstanceId, frontier_from_mst(MST)
     ),
     %% Publish the lock-free `append_fast` bundle iff the validator
     %% advertises `is_stateless/0 -> true`. The bundle lets callers
@@ -2411,7 +2379,9 @@ do_handle_call({unregister_table, Bucket}, _From, State) ->
     ),
     FD = FD0#fused_drain{cell_apply_source = Source},
     {reply, ok, State#state{fused_drain = FD}};
-do_handle_call({replay_pairs, _LastRoot}, _From, #state{mst = undefined} = State) ->
+do_handle_call(
+    {replay_pairs, _LastRoot}, _From, #state{mst = undefined} = State
+) ->
     {reply, {ok, no_change}, State};
 do_handle_call(
     {replay_pairs, LastRoot}, _From, #state{mst = MST, instance_id = Id} = State
@@ -3476,23 +3446,19 @@ terminate(_Reason, #state{
     instance_id = InstanceId,
     mst = MST,
     backend = Backend,
-    has_projection = HasProjection,
     watermark = Watermark,
     compaction_checkpoint = CkptMod,
     compaction_checkpoint_state = CkptState,
     overlay = Overlay
 }) ->
-    %% Clean-shutdown content-digest seed (AR-17). For a DURABLE projection-backed
-    %% instance whose digest is authoritative, persist the EXACT digest into the
-    %% checkpoint so the next start RESTORES it in O(1) instead of recomputing
-    %% from a full projection fold. Sound because the projection is write-through
-    %% (durable at write time), so at any clean stop the digest matches the
-    %% durable projection exactly. Skipped when the digest is still `warming` (a
-    %% partial value must not be persisted as exact) and for ephemeral / bare-
-    %% oplog instances. Best-effort and BEFORE `close/1`: a failure just falls
-    %% back to a recompute next boot.
-    _ = maybe_write_clean_digest_seed(
-        InstanceId, Backend, HasProjection, Watermark, CkptMod, CkptState
+    %% Persist the applied-frontier convergence oracle into the checkpoint on a
+    %% clean stop so the next start restores the compacted-prefix maxima (the
+    %% suffix replays from the WAL tail). Durable backends only — an ephemeral
+    %% instance has no checkpoint and rebuilds the frontier from the apply path.
+    %% Best-effort and BEFORE `close/1`: a failure just falls back to a
+    %% WAL-replay-only frontier next boot.
+    _ = maybe_persist_frontier(
+        InstanceId, Backend, Watermark, CkptMod, CkptState
     ),
     %% Leave the registry row in place so that on a one_for_all subtree
     %% restart the dyn_sup mapping (`sup_pid`) survives. The row's
@@ -3530,188 +3496,48 @@ terminate(_Reason, #state{
 %% =============================================================================
 
 %% @private
-%% A clean-shutdown content-digest seed in the checkpoint state slot
-%% (`{projection_managed, content_digest_clean, Digest}`), extracted and the
-%% cached checkpoint normalised back to the plain `projection_managed` marker.
-%% Returns `{Seed, NormalisedCachedCheckpoint}` where `Seed` is `{ok, Digest}`
-%% or `none`.
-take_clean_digest_seed({W, {projection_managed, content_digest_clean, Digest}}) when
-    is_integer(Digest)
+%% Restore the applied-frontier convergence oracle from the compaction
+%% checkpoint payload into the registry holder (a max-merge). The payload carries
+%% the version vector of the COMPACTED prefix — the events truncated from the
+%% WAL, which the applier's WAL-tail replay can no longer observe. A plain
+%% `projection_managed` marker or a bare-CRDT checkpoint carries no frontier
+%% (`_Other` clause): the holder stays empty and WAL replay alone reconstructs
+%% it. An origin whose events were ALL compacted away would then be momentarily
+%% under-counted — conservative (the oracle reads "behind", never a false IN
+%% SYNC) and self-healing at the next checkpoint write, which persists the full
+%% frontier.
+restore_frontier(_InstanceId, undefined) ->
+    ok;
+restore_frontier(InstanceId, {_W, {projection_managed, frontier, FrontierVV}}) when
+    is_map(FrontierVV)
 ->
-    {{ok, Digest}, {W, projection_managed}};
-take_clean_digest_seed(Other) ->
-    {none, Other}.
+    bondy_oplog_registry:merge_frontier(InstanceId, FrontierVV);
+restore_frontier(_InstanceId, _Other) ->
+    ok.
 
 %% @private
-%% Recover the per-instance projection content digest at init (AR-17). Runs in
-%% the QUIESCENT init window (ref freshly 0, applier not yet draining). For a
-%% durable projection-backed instance it either restores the exact clean-shutdown
-%% seed (and consumes it) or launches an async recompute over a boot-state
-%% snapshot; for an ephemeral / bare-oplog instance the digest is empty at boot
-%% and immediately authoritative.
-recover_content_digest(
-    InstanceId, DigestRef, _Backend, CkptMod, CkptState, Watermark, DigestSeed
-) ->
-    case durable_digest_entries(InstanceId) of
-        [] ->
-            %% Ephemeral or bare-oplog: empty at boot, reconverges via the apply
-            %% path / anti-entropy. Authoritative immediately.
-            bondy_oplog_registry:set_content_digest_ready(InstanceId, true);
-        Entries ->
-            case DigestSeed of
-                {ok, Digest} ->
-                    %% Clean restart: the projection matches the seed exactly
-                    %% (write-through). Install it, then CONSUME the seed on disk
-                    %% (re-tag the plain marker) so a crash THIS run recomputes
-                    %% rather than reusing a now-stale seed.
-                    ok = bondy_oplog_content_digest:set_ref(DigestRef, Digest),
-                    _ = catch CkptMod:put_checkpoint(
-                        CkptState, Watermark, projection_managed
-                    ),
-                    bondy_oplog_registry:set_content_digest_ready(
-                        InstanceId, true
-                    );
-                none ->
-                    %% Crash / legacy restart: recompute from a boot-state
-                    %% snapshot, off the boot path. Mark `warming` until done.
-                    ok = bondy_oplog_registry:set_content_digest_ready(
-                        InstanceId, false
-                    ),
-                    Runners = capture_digest_runners(Entries),
-                    _ = spawn(fun() ->
-                        do_recompute_content_digest(
-                            InstanceId, DigestRef, Runners
-                        )
-                    end),
-                    ok
-            end
-    end.
-
-%% @private
-%% This instance's primary registry entries whose projection adapter is DURABLE
-%% (exports `content_digest_fold/2`) and carries a cell scope. Ephemeral (ETS)
-%% entries are excluded — their projection is volatile, so the digest is empty at
-%% boot and reconverges from anti-entropy.
-durable_digest_entries(InstanceId) ->
-    [
-        E
-     || E <- bondy_oplog_core_registry:primary_entries_for_instance(InstanceId),
-        bondy_oplog_projection_adapter:content_digest_fold_exported(
-            bondy_oplog_core_registry:entry_projection_adapter(E)
-        ),
-        bondy_oplog_core_registry:entry_primary_cell_scope(E) =/= undefined
-    ].
-
-%% @private
-%% Capture one eager boot-state snapshot fold per durable entry. Called in the
-%% quiescent init window so the snapshots freeze the projection at boot; the
-%% returned 0-arity runnables execute later in the recompute worker. Aggregates
-%% every shard/table this instance multiplexes (the digest is per-instance).
-capture_digest_runners(Entries) ->
-    [
-        begin
-            Adapter = bondy_oplog_core_registry:entry_projection_adapter(E),
-            Handle = bondy_oplog_core_registry:entry_projection_handle(E),
-            Scope = bondy_oplog_core_registry:entry_primary_cell_scope(E),
-            Adapter:content_digest_fold(Handle, Scope)
-        end
-     || E <- Entries
-    ].
-
-%% @private
-%% Recompute worker (off the boot path). Runs the captured boot-state snapshot
-%% folds, XOR-combines them into the boot digest, and XORs it into the live ref.
-%% The ref was `0` when the snapshots were captured (init, pre-drain), so by now
-%% it holds exactly the post-boot apply deltas; XOR-ing the boot digest in yields
-%% the exact current digest (`current = boot XOR deltas`). A failure leaves the
-%% instance `warming`; the next restart retries.
-do_recompute_content_digest(InstanceId, DigestRef, Runners) ->
-    try
-        BootDigest = lists:foldl(
-            fun(Runner, Acc) ->
-                bondy_oplog_content_digest:combine(Acc, Runner())
-            end,
-            bondy_oplog_content_digest:empty(),
-            Runners
-        ),
-        ok = bondy_oplog_content_digest:apply_delta(DigestRef, BootDigest),
-        ok = bondy_oplog_registry:set_content_digest_ready(InstanceId, true),
-        ?LOG_INFO(#{
-            description =>
-                "Projection content digest recomputed at cold start",
-            instance_id => InstanceId,
-            digest => bondy_oplog_content_digest:to_hex(
-                bondy_oplog_content_digest:read_ref(DigestRef)
+%% Persist the live applied-frontier version vector into the compaction
+%% checkpoint as `{projection_managed, frontier, FrontierVV}` so the next start
+%% restores the compacted-prefix maxima (see `restore_frontier/2`). Durable
+%% backends only — an ephemeral instance has no checkpoint. The registry read is
+%% wrapped in `catch`: at node shutdown the core registry may already be gone,
+%% and a miss just falls back to a WAL-replay-only frontier next boot.
+maybe_persist_frontier(InstanceId, Backend, Watermark, CkptMod, CkptState) ->
+    is_durable_backend(Backend) andalso
+        (catch begin
+            FrontierVV = bondy_oplog_registry:frontier(InstanceId),
+            CkptMod:put_checkpoint(
+                CkptState,
+                Watermark,
+                {projection_managed, frontier, FrontierVV}
             )
-        })
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description =>
-                    "Projection content digest recompute failed; the "
-                    "convergence oracle stays 'warming' for this instance "
-                    "until a restart retries",
-                instance_id => InstanceId,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end.
-
-%% @private
-%% Persist the exact content digest into the checkpoint on a clean stop so the
-%% next start restores it in O(1) (see `recover_content_digest/7`). Only for a
-%% durable projection-backed instance with an authoritative digest; otherwise a
-%% no-op. Best-effort.
-maybe_write_clean_digest_seed(
-    InstanceId, Backend, HasProjection, Watermark, CkptMod, CkptState
-) ->
-    %% Cheap state-based fast-reject (ephemeral / bare-oplog) before the exact
-    %% gate, which mirrors `recover_content_digest/7` so we only seed an instance
-    %% that would actually restore it (a durable projection that exports
-    %% `content_digest_fold/2`). The registry read is wrapped — at node shutdown
-    %% the core registry may already be gone; a miss just means a recompute next
-    %% boot (the safe fallback).
-    HasDurableProjection =
-        is_durable_backend(Backend) andalso HasProjection andalso
-            has_durable_digest_entries(InstanceId),
-    case HasDurableProjection of
-        true ->
-            case bondy_oplog_registry:content_digest_ready(InstanceId) of
-                true ->
-                    case bondy_oplog_registry:content_digest_ref(InstanceId) of
-                        undefined ->
-                            ok;
-                        Ref ->
-                            Digest = bondy_oplog_content_digest:read_ref(Ref),
-                            Seed =
-                                {projection_managed, content_digest_clean,
-                                    Digest},
-                            _ = catch CkptMod:put_checkpoint(
-                                CkptState, Watermark, Seed
-                            ),
-                            ok
-                    end;
-                _NotReady ->
-                    ok
-            end;
-        _NotDurable ->
-            ok
-    end.
+        end),
+    ok.
 
 %% @private
 is_durable_backend(ets) -> false;
 is_durable_backend(map) -> false;
 is_durable_backend(_) -> true.
-
-%% @private
-%% Whether this instance has at least one durable digest entry, defensively (the
-%% core registry may be gone at shutdown ⇒ treat as none, recompute next boot).
-has_durable_digest_entries(InstanceId) ->
-    case catch durable_digest_entries(InstanceId) of
-        [_ | _] -> true;
-        _ -> false
-    end.
 
 %% @private
 %% Builds a signed event for each `{Op, Meta}` item, hands the resulting
@@ -4342,6 +4168,35 @@ max_local_seq(MST, LocalOrigin) ->
     ).
 
 %% @private
+%% Reconstruct the applied-frontier version vector `#{Origin => max Seq}` from
+%% the live MST's `cell_apply` event keys at init. The MST holds the uncompacted,
+%% already-applied events (between the compaction watermark and the durable
+%% root); a clean restart resumes PAST them, so the apply path never refires for
+%% them and the frontier must be folded out of the MST directly. Counts the SAME
+%% events the apply path counts (`{cell_apply, ...}` ops only — see
+%% `bondy_oplog_cell_apply:batch_frontier/1`), so a restart-reconstructed
+%% frontier equals the incrementally-maintained one. O(live MST) — bounded by
+%% compaction, the same cost class as `compute_live_size/1` / `max_local_seq/2`,
+%% NOT the projection. Composed at init with the checkpoint frontier (the
+%% compacted prefix) and the WAL-tail replay (events past the durable root).
+frontier_from_mst(MST) ->
+    bondy_mst:fold(
+        MST,
+        fun
+            ({K, {{cell_apply, _B, _CK, _FE}, _Meta, _Prev, _Sig}}, Acc) ->
+                Origin = bondy_oplog_event:key_origin(K),
+                Seq = bondy_oplog_event:key_seq(K),
+                case Acc of
+                    #{Origin := Cur} when Cur >= Seq -> Acc;
+                    _ -> Acc#{Origin => Seq}
+                end;
+            ({_K, _V}, Acc) ->
+                Acc
+        end,
+        #{}
+    ).
+
+%% @private
 %% Combined admission test: overlay pressure first, then the MST
 %% working-set cap. Both checks are O(1) — overlay numbers come
 %% from `ets:info/2`, working-set from cached `live_size`. The order
@@ -4928,10 +4783,11 @@ begin_async_catch_up(State, Started, Frontier) ->
 %% already folded it). Makes NO synchronous applier call, so it is
 %% deadlock-free.
 %%
-%% The checkpoint envelope records only the watermark; its state slot is
-%% the `projection_managed` marker — "the materialised state is the
-%% projection" — which on restart is loaded but never fed to
-%% `interpret_cog` (the projection is the authoritative read source).
+%% The checkpoint envelope records the watermark; its state slot carries the
+%% `{projection_managed, frontier, FrontierVV}` payload — "the materialised
+%% state is the projection" plus the applied-frontier convergence oracle — which
+%% on restart seeds the frontier holder but is never fed to `interpret_cog` (the
+%% projection is the authoritative read source).
 %% Verified by
 %% `bondy_oplog_catalogue_compaction_test:crdt_kernel_compaction_matches_from_scratch`.
 finalize_catalogue_compaction(State0, Started, Frontier) ->
@@ -5001,11 +4857,19 @@ finalize_catalogue_compaction_commit(
     StateF, State, Started, Frontier, TruncateUs, FlushUs
 ) ->
     MST1 = StateF#state.mst,
+    %% Persist the applied-frontier convergence oracle alongside the checkpoint.
+    %% REQUIRED here: this truncates the WAL below `Frontier` (the compaction
+    %% watermark), so an origin whose events are all below it could no longer be
+    %% reconstructed from a WAL-tail replay — its maxima must ride in the
+    %% checkpoint. `Frontier` is the event-key watermark; `FrontierVV` is the
+    %% per-origin version vector, read lock-free from the registry holder.
+    FrontierVV = bondy_oplog_registry:frontier(StateF#state.instance_id),
+    Checkpoint = {projection_managed, frontier, FrontierVV},
     {ok, CkptUs} = tc(fun() ->
         (StateF#state.compaction_checkpoint):put_checkpoint(
             StateF#state.compaction_checkpoint_state,
             Frontier,
-            projection_managed
+            Checkpoint
         )
     end),
     NewRoot = bondy_mst:root(MST1),
@@ -5047,7 +4911,7 @@ finalize_catalogue_compaction_commit(
     State1 = StateF#state{
         mst = MST1,
         watermark = Frontier,
-        cached_checkpoint = {Frontier, projection_managed},
+        cached_checkpoint = {Frontier, Checkpoint},
         live_size = LiveSize1,
         remote_events_pending = false,
         pending_compaction = undefined,

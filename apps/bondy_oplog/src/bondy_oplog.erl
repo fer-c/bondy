@@ -477,8 +477,9 @@ db_of(InstanceId) when is_binary(InstanceId) ->
 %% `persistent_term` (written once at provision, read on the sync path).
 -spec set_topology_fingerprint(Db :: atom(), Fingerprint :: binary()) -> ok.
 
-set_topology_fingerprint(Db, Fingerprint)
-when is_atom(Db) andalso is_binary(Fingerprint) ->
+set_topology_fingerprint(Db, Fingerprint) when
+    is_atom(Db) andalso is_binary(Fingerprint)
+->
     persistent_term:put({?MODULE, topology_fingerprint, Db}, Fingerprint).
 
 %% @doc This node's keying-topology fingerprint for `Db`, or `undefined` if none

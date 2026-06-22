@@ -225,11 +225,10 @@ start_link() ->
 
 init([]) ->
     %% Per-realm count / memory counters are maintained inline at the local
-    %% write sites (`bondy_retained_message:put` / `take` / eviction). The
-    %% plum_db `object_update` subscription that used to sync counters for
-    %% remotely-replicated changes (it fired only on `on_merge`, i.e. remote
-    %% merges — never local writes) is retired with the bondy_db cut-over; that
-    %% remote-counter reactor is deferred to the oplog.aae phase.
+    %% write sites (`bondy_retained_message:put` / `take` / eviction). Syncing
+    %% the counters for remotely-replicated changes (which arrive as anti-entropy
+    %% merges, never as local writes) needs a remote-counter reactor that is
+    %% deferred until bondy_db anti-entropy reconciles the counters.
     ok = init_evictor(),
 
     {ok, #state{}}.

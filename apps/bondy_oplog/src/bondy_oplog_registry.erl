@@ -115,23 +115,16 @@ table's lifecycle tied to a supervisor child.
     %% instance init via `set_ae_targets/2`; unchanged for the
     %% instance's lifetime. Empty list = wiring disabled.
     ae_targets = [] :: [{atom(), atom(), non_neg_integer()}],
-    %% Per-instance projection content digest counter
-    %% (`bondy_oplog_content_digest`), the MST-root-independent convergence
-    %% oracle. A single `atomics` word XOR-maintained by the applier after every
-    %% committed cell batch (across ALL shards this instance multiplexes) and
-    %% read by `content_digest/1` / the AAE responder / the observer. Allocated
-    %% and published once at instance init via `set_content_digest_ref/2`;
-    %% `undefined` until then (digest maintenance is then a no-op).
-    content_digest_ref :: bondy_oplog_content_digest:ref() | undefined,
-    %% Whether the content digest in `content_digest_ref` is AUTHORITATIVE yet.
-    %% `false` while a crash-restart recompute is still folding the durable
-    %% projection (the digest reflects only post-boot deltas, not the boot
-    %% content) — the convergence oracle reports `warming` and refuses an
-    %% IN_SYNC/DIVERGED verdict until this flips `true`, mirroring the observer
-    %% lifecycle gate. Set `true` at init for ephemeral instances (empty at
-    %% boot, no recompute) and for the clean-shutdown restore path; set `true`
-    %% by the recompute worker when the fold completes.
-    content_digest_ready = false :: boolean(),
+    %% Per-instance applied-frontier version vector: `#{Origin => max Seq}` over
+    %% every `{HLC, Origin, Seq}` event materialised by this instance (across all
+    %% shards it multiplexes). Because the op-log is delivered causally (no gaps
+    %% per origin), the max Seq per origin faithfully identifies the applied event
+    %% set, so two nodes with equal frontiers have converged — a compaction-
+    %% invariant convergence oracle (the cumulative applied position is unchanged
+    %% by compaction). Maintained by the applier at the commit barrier
+    %% (`merge_frontier/2`, a max-merge), read lock-free by the observer / AAE
+    %% responder (`frontier/1`). O(#origins); persisted with the checkpoint.
+    frontier = #{} :: #{binary() => non_neg_integer()},
     %% Demand-based applier→instance flow control. Single-slot atomic
     %% counter shared between the applier (increments before
     %% dispatching an `install_local_batch` cast) and the instance
@@ -230,8 +223,7 @@ table's lifecycle tied to a supervisor child.
 -export([overlay_tab/1]).
 -export([fast_path/1]).
 -export([ae_targets/1]).
--export([content_digest_ref/1]).
--export([content_digest_ready/1]).
+-export([frontier/1]).
 -export([fused/1]).
 -export([install_in_flight/1]).
 -export([max_install_in_flight/1]).
@@ -250,8 +242,7 @@ table's lifecycle tied to a supervisor child.
 -export([set_overlay_tab/2]).
 -export([set_fast_path/2]).
 -export([set_ae_targets/2]).
--export([set_content_digest_ref/2]).
--export([set_content_digest_ready/2]).
+-export([merge_frontier/2]).
 -export([set_install_in_flight/3]).
 -export([set_lifecycle/2]).
 
@@ -496,29 +487,17 @@ ae_targets(InstanceId) ->
     field(InstanceId, #entry.ae_targets).
 
 ?DOC("""
-Returns the instance's projection content-digest counter ref
-(`bondy_oplog_content_digest:ref()`), or `undefined` if the instance has not
-published one (digest maintenance is then a no-op). Read by the apply path (to
-XOR in each committed batch's delta) and by `content_digest/1` / the AAE
-responder / the observer.
+Returns the instance's applied-frontier version vector `#{Origin => max Seq}`,
+or `#{}` if the instance has no published row yet. Read lock-free by the AAE
+responder / observer to compare against a peer's frontier (equal ⇒ converged).
 """).
--spec content_digest_ref(instance_id()) ->
-    bondy_oplog_content_digest:ref() | undefined.
+-spec frontier(instance_id()) -> #{binary() => non_neg_integer()}.
 
-content_digest_ref(InstanceId) ->
-    field(InstanceId, #entry.content_digest_ref).
-
-?DOC("""
-Whether the instance's content digest is AUTHORITATIVE (`true`) or still
-`warming` (`false`) while a crash-restart recompute folds the durable
-projection. The convergence oracle reads this alongside `content_digest_ref/1`
-and refuses an IN_SYNC/DIVERGED verdict until it is `true`. `false` for an
-instance with no published row.
-""").
--spec content_digest_ready(instance_id()) -> boolean().
-
-content_digest_ready(InstanceId) ->
-    field(InstanceId, #entry.content_digest_ready) =:= true.
+frontier(InstanceId) ->
+    case field(InstanceId, #entry.frontier) of
+        Map when is_map(Map) -> Map;
+        _ -> #{}
+    end.
 
 ?DOC("""
 Returns the instance's ephemeral fused-writer flag. `true` only for
@@ -661,30 +640,29 @@ set_ae_targets(InstanceId, Targets) when
     ok.
 
 ?DOC("""
-Publishes the instance's projection content-digest counter ref. Called once at
-instance init (after the row exists) with a fresh `bondy_oplog_content_digest:new_ref/0`.
+Max-merges a partial applied-frontier `#{Origin => Seq}` into the instance's
+stored frontier (`#{Origin => max Seq}`). Called by the applier at the commit
+barrier with the batch's per-origin maxima — a read-modify-write that is safe
+because the applier is the single writer of a given instance's frontier. An
+empty partial is a no-op.
 """).
--spec set_content_digest_ref(
-    instance_id(), bondy_oplog_content_digest:ref()
-) -> ok.
+-spec merge_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 
-set_content_digest_ref(InstanceId, Ref) when is_binary(InstanceId) ->
-    _ = update_field(InstanceId, #entry.content_digest_ref, Ref),
-    ok.
-
-?DOC("""
-Marks the instance's content digest authoritative (`true`) or `warming`
-(`false`). Set at init (`true` for ephemeral / clean-shutdown restore, `false`
-when a crash-restart recompute is launched) and flipped `true` by the recompute
-worker when the projection fold completes.
-""").
--spec set_content_digest_ready(instance_id(), boolean()) -> ok.
-
-set_content_digest_ready(InstanceId, Ready) when
-    is_binary(InstanceId), is_boolean(Ready)
+merge_frontier(_InstanceId, Partial) when Partial =:= #{} ->
+    ok;
+merge_frontier(InstanceId, Partial) when
+    is_binary(InstanceId), is_map(Partial)
 ->
-    _ = update_field(InstanceId, #entry.content_digest_ready, Ready),
-    ok.
+    case ets:lookup(?TABLE, InstanceId) of
+        [#entry{frontier = Cur} = E] ->
+            Merged = maps:merge_with(
+                fun(_Origin, A, B) -> max(A, B) end, Cur, Partial
+            ),
+            true = ets:insert(?TABLE, E#entry{frontier = Merged}),
+            ok;
+        [] ->
+            ok
+    end.
 
 ?DOC("""
 Publishes the per-instance flow-control handle used by the applier to

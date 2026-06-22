@@ -67,7 +67,7 @@ partisan_gen_server:call(
 | Request                                  | Reply                                                                  |
 |---|---|
 | `get_root`                               | `{ok, hash() \| undefined, fingerprint()}`                             |
-| `get_content_digest`                     | `{ok, {ready \| warming, digest()}, fingerprint()}`                    |
+| `get_frontier`                           | `{ok, #{origin() => seq()}, fingerprint()}`                            |
 | `{get_pages, Set}`                       | `{ok, #{hash() => page()}}`                                            |
 | `get_snapshot`                           | `{ok, no_snapshot}` \| `{ok, event_key(), term()}`                     |
 | `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor()}}}`         |
@@ -148,22 +148,20 @@ dispatch(InstanceId, get_root) when is_binary(InstanceId) ->
                     bondy_oplog:db_of(InstanceId)
                 )}
     end;
-dispatch(InstanceId, get_content_digest) when is_binary(InstanceId) ->
+dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
     case bondy_oplog_instance:whereis(InstanceId) of
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            %% The MST-root-independent convergence oracle (AR-17). Like
-            %% `get_root` we do NOT await the applier drain — the digest is
-            %% eventually consistent and the next round picks up any in-flight
-            %% delta. `content_digest/1` is a lock-free read of the per-instance
-            %% atomics + readiness flag, so it never round-trips the instance
-            %% gen_server. The `warming` status is propagated verbatim so the
-            %% initiator refuses a verdict until our crash-restart recompute has
-            %% landed (it MUST NOT read a partial digest as DIVERGED). The
-            %% topology fingerprint lets the initiator compare digests only when
+            %% The applied-frontier version vector convergence oracle:
+            %% `#{Origin => max Seq}`. Equal frontiers across nodes ⇒ the same
+            %% op-set has been applied ⇒ converged (causal delivery makes a
+            %% per-origin max Seq identify the applied prefix), and it is
+            %% compaction-invariant. Lock-free registry read; like `get_root` we
+            %% do NOT await the applier drain (eventually consistent). The
+            %% topology fingerprint lets the initiator compare frontiers only when
             %% both nodes key data the same way.
-            {ok, bondy_oplog_instance:content_digest(InstanceId),
+            {ok, bondy_oplog_instance:frontier(InstanceId),
                 bondy_oplog:topology_fingerprint(
                     bondy_oplog:db_of(InstanceId)
                 )}

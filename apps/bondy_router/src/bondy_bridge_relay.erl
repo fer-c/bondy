@@ -18,9 +18,9 @@ a node crash or manually stopped and re-started they will not be restarted.
 ## Storage
 
 Permanent bridge configurations are persisted in the bondy_db
-`bondy_bridge_relay` core table (design §11.4 — the second domain cut over from
-plum_db), keyed by bridge name, with the config map carried in an
-`lww_register` cell. The table is provisioned by `bondy_namespace_catalog`.
+`bondy_bridge_relay` core table, keyed by bridge name, with the config map
+carried in an `lww_register` cell. The table is provisioned by
+`bondy_namespace_catalog`.
 Storage is node-local: `bondy_bridge_relay_manager` reads the configs once at
 startup and runs only the bridges tagged with this node's `nodestring`, so the
 table needs no cluster-wide change notification (cross-node replication awaits
@@ -33,8 +33,8 @@ bondy_db anti-entropy, `oplog.aae`).
 -define(TYPE, bridge_relay).
 -define(VERSION, <<"1.0">>).
 %% Permanent bridge configs live in the bondy_db `bondy_bridge_relay` core
-%% table (design §11.4 — the second domain cut over from plum_db). The store is
-%% a flat, name-keyed keyspace, so a single fixed bucket is used. The bridge map
+%% table. The store is a flat, name-keyed keyspace, so a single fixed bucket is
+%% used. The bridge map
 %% is stored directly in an `lww_register` cell (the substrate serialises terms;
 %% no manual encoding); `clear` deletes (non-terminal, so a later `add`
 %% reanimates). The catalogue (`bondy_namespace_catalog`) provisions the table.
@@ -643,9 +643,9 @@ to_external(Bridge) ->
 
 %% @private
 %% The open bondy_db `bondy_bridge_relay` table handle. Raises if the catalogue
-%% has not provisioned it — after the §11.4 cut-over the table is a hard
-%% dependency. The catalogue (a `bondy_sup` child) opens it before
-%% `bondy_bridge_relay_manager` (a later child) reads bridge config at boot.
+%% has not provisioned it — the table is a hard dependency. The catalogue
+%% (a `bondy_sup` child) opens it before `bondy_bridge_relay_manager` (a later
+%% child) reads bridge config at boot.
 table() ->
     case bondy_namespace_catalog:table(bondy_bridge_relay) of
         undefined -> error(bridge_relay_table_unavailable);

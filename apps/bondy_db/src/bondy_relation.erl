@@ -169,8 +169,8 @@ new(Tag, #{table := Table, decode := Decode} = Opts) when
 ->
     Schema = maps:get(schema, Opts, Tag),
     Mode = maps:get(mode, Opts, partition),
-    (Mode =:= partition orelse Mode =:= global)
-        orelse error({badarg, {mode, Mode}}),
+    (Mode =:= partition orelse Mode =:= global) orelse
+        error({badarg, {mode, Mode}}),
     #relation{
         tag = Tag,
         table = Table,
@@ -240,8 +240,9 @@ list(#relation{mode = global} = Relation, Realm, #{limit := Limit} = Opts) when
         {error, _} = Err ->
             Err
     end;
-
-list(#relation{mode = partition} = Relation, Realm, #{limit := Limit} = Opts) when
+list(
+    #relation{mode = partition} = Relation, Realm, #{limit := Limit} = Opts
+) when
     is_binary(Realm), is_integer(Limit), Limit > 0
 ->
     Dir = maps:get(direction, Opts, asc),
@@ -419,7 +420,6 @@ finalize_page(Relation, Accepted, Limit) ->
 %% each entry is tagged with the shard it came from (so the cursor can name it).
 collect_partition(_Relation, _Realm, [], _Lo, _Hi, _Dir, _Target, Acc) ->
     {ok, Acc};
-
 collect_partition(Relation, Realm, [Shard | Rest], Lo, Hi, Dir, Target, Acc) ->
     case collect_shard(Relation, Realm, Shard, Lo, Hi, Dir, Target, Acc) of
         {filled, Acc1} ->
@@ -458,8 +458,14 @@ collect_shard(
                         false ->
                             {Lo1, Hi1} = advance(Dir, Lo, Hi, LastRawKey),
                             collect_shard(
-                                Relation, Realm, Shard,
-                                Lo1, Hi1, Dir, Target, Acc1
+                                Relation,
+                                Realm,
+                                Shard,
+                                Lo1,
+                                Hi1,
+                                Dir,
+                                Target,
+                                Acc1
                             )
                     end
             end;

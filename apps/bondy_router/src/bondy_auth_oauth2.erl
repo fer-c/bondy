@@ -85,11 +85,9 @@ authenticate(JWT, _, Ctxt, State) ->
             {error, Reason, State}
     end.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 -doc """
 The oauth2-specific half of the §9.2 CP-for-security gate: the `token_version`
@@ -111,7 +109,6 @@ cp_security_check(Claims, UserId) ->
             check_token_version(Claims, UserId)
     end.
 
-
 %% @private
 %% Steps 3-4: the JWT's issue-time `tv` (the user cell's HLC at issue) must
 %% equal the user's current `token_version`, else the token predates a
@@ -128,7 +125,6 @@ check_token_version(Claims, UserId) ->
         {error, not_found} ->
             {error, oauth2_invalid_grant}
     end.
-
 
 %% @private
 aae_enabled() ->

@@ -22,7 +22,9 @@
 apply_many_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         gen("multi_entity_single_frame", fun multi_entity_single_frame/1),
-        gen("cross_shard_batch_all_visible", fun cross_shard_batch_all_visible/1),
+        gen(
+            "cross_shard_batch_all_visible", fun cross_shard_batch_all_visible/1
+        ),
         gen("empty_batch_is_ok", fun empty_batch_is_ok/1),
         gen("invalid_write_is_rejected", fun invalid_write_is_rejected/1)
     ]}.
@@ -69,8 +71,12 @@ multi_entity_single_frame({Dir, Sup}) ->
         {Groups, Realm, Subject, set(<<"grp:alice">>)},
         {Sessions, Realm, Subject, set(<<"sess:alice">>)}
     ]),
-    ?assertMatch({ok, {<<"user:alice">>, _}}, bondy_db:read(Users, Realm, Subject)),
-    ?assertMatch({ok, {<<"grp:alice">>, _}}, bondy_db:read(Groups, Realm, Subject)),
+    ?assertMatch(
+        {ok, {<<"user:alice">>, _}}, bondy_db:read(Users, Realm, Subject)
+    ),
+    ?assertMatch(
+        {ok, {<<"grp:alice">>, _}}, bondy_db:read(Groups, Realm, Subject)
+    ),
     ?assertMatch(
         {ok, {<<"sess:alice">>, _}}, bondy_db:read(Sessions, Realm, Subject)
     ),

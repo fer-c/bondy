@@ -677,15 +677,17 @@ registry_metrics() ->
             registry_trie_size,
             gauge,
             "The total number of elements in the in-memory registry trie."
-            "This does not include the memory used by plum_db tables.",
+            "This does not include the memory used by the bondy_db registry "
+            "store.",
             Labels,
             Size
         },
         {
             registry_trie_memory,
             gauge,
-            "The total a ount of memory use in the in-memory registry trie."
-            "This does not include the memory used by plum_db tables.",
+            "The total amount of memory used by the in-memory registry trie."
+            "This does not include the memory used by the bondy_db registry "
+            "store.",
             Labels,
             Mem
         }

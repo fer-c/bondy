@@ -122,7 +122,6 @@ apply_cell_batch(Ctx, Id, Events) ->
     CacheAdapter = maps:get(cache_adapter, Ctx, undefined),
     CacheHandle = maps:get(cache_handle, Ctx, undefined),
     HighWaterRef = maps:get(high_water_ref, Ctx, undefined),
-    ContentDigestRef = content_digest_ref(Id),
     OldStateCache = maps:get(oldstate_cache, Ctx, undefined),
     SecIdx = sec_idx(Ctx),
 
@@ -141,8 +140,8 @@ apply_cell_batch(Ctx, Id, Events) ->
     %% collects the secondary-index ops every cell yields (empty for
     %% non-indexed tables); they are dispatched to the secondary writers
     %% *after* the primary `put_batch` returns ok.
-    {LocalWrites, MaxHlc, IdxAcc, DigestDelta} = lists:foldl(
-        fun(Event, {WAcc, HlcAcc, IAcc, DAcc}) ->
+    {LocalWrites, MaxHlc, IdxAcc} = lists:foldl(
+        fun(Event, {WAcc, HlcAcc, IAcc}) ->
             case bondy_oplog_event:op(Event) of
                 {cell_apply, Bucket, Key, FoldEvent} ->
                     Meta = bondy_oplog_event:key(Event),
@@ -163,25 +162,21 @@ apply_cell_batch(Ctx, Id, Events) ->
                             OldStateCache
                         )
                     of
-                        {ok, NewFrame, NewHlc, IdxOps, OldSB, NewSB} ->
+                        {ok, NewFrame, NewHlc, IdxOps} ->
                             WAcc1 = WAcc#{{Bucket, Key} => NewFrame},
-                            DAcc1 = digest_accum(
-                                ContentDigestRef, DAcc, Bucket, Key, OldSB, NewSB
-                            ),
                             {
                                 WAcc1,
                                 max_hlc(HlcAcc, NewHlc),
-                                merge_idx_ops(IAcc, IdxOps),
-                                DAcc1
+                                merge_idx_ops(IAcc, IdxOps)
                             };
                         skip ->
-                            {WAcc, HlcAcc, IAcc, DAcc}
+                            {WAcc, HlcAcc, IAcc}
                     end;
                 _ ->
-                    {WAcc, HlcAcc, IAcc, DAcc}
+                    {WAcc, HlcAcc, IAcc}
             end
         end,
-        {#{}, undefined, #{}, bondy_oplog_content_digest:empty()},
+        {#{}, undefined, #{}},
         Events
     ),
 
@@ -218,11 +213,14 @@ apply_cell_batch(Ctx, Id, Events) ->
                         undefined -> ok;
                         _ -> advance_high_water(HighWaterRef, MaxHlc)
                     end,
-                    %% Fold this batch's net content-digest delta into the
-                    %% per-instance live digest (no-op when no ref / zero
-                    %% delta). After the durable write, so the digest never
-                    %% leads the projection.
-                    apply_content_digest(ContentDigestRef, DigestDelta),
+                    %% Advance the applied-frontier version vector over this
+                    %% batch's `{HLC, Origin, Seq}` keys (local/append path; the
+                    %% replay/merge path does the same in `apply_cell_pairs/4`).
+                    %% After the durable write, so the frontier never leads the
+                    %% projection — the convergence oracle.
+                    ok = bondy_oplog_registry:merge_frontier(
+                        Id, batch_frontier_events(Events)
+                    ),
                     %% Only after the primary write is durable do we let
                     %% the index see these terms. The live drain path
                     %% enforces the back-pressure cap (Bypass = false).
@@ -278,7 +276,7 @@ compute_one_cell(
         %% byte-identical `{OldState, OldValueOpt}` to a projection read
         %% (the cache is a write-through mirror of the durable frame), so
         %% the kernel result is unchanged — A3 only removes the read I/O.
-        {OldState, OldValueOpt, OldStateBytes} =
+        {OldState, OldValueOpt} =
             case maps:get({Bucket, Key}, LocalWrites, undefined) of
                 undefined ->
                     read_old_value(
@@ -319,12 +317,7 @@ compute_one_cell(
         IdxOps = index_ops_for_cell(
             SecIdx, Id, Kernel, Bucket, Key, OldState, NewState, Hlc
         ),
-        %% `OldStateBytes`/`NewStateBytes` are surfaced for the per-instance
-        %% content digest: the caller's fold XORs out the old cell's
-        %% contribution and XORs in the new one (`bondy_oplog_content_digest`)
-        %% only when a digest ref is present, so the hash cost is zero when the
-        %% oracle is off. `OldStateBytes =:= undefined` ⇒ a brand-new cell.
-        {ok, NewFrame, Hlc, IdxOps, OldStateBytes, NewStateBytes}
+        {ok, NewFrame, Hlc, IdxOps}
     catch
         C:R:S ->
             ?LOG_ERROR(#{
@@ -355,24 +348,27 @@ read_old_value(OldStateCache, Adapter, Handle, Kernel, Id, Bucket, Key) ->
             emit_cache_result(OldStateCache, Id, miss),
             case Adapter:get(Handle, Bucket, Key) of
                 not_found ->
-                    {bondy_oplog_cell_kernel:init(Kernel), undefined, undefined};
+                    {
+                        bondy_oplog_cell_kernel:init(Kernel),
+                        undefined
+                    };
                 {ok, OldFrame} ->
                     decode_old_frame(Kernel, OldFrame)
             end
     end.
 
 %% @private
-%% Decode a stored cell frame into `{OldState, OldValueOpt, OldStateBytes}` — the
-%% exact shape `compute_one_cell/12` consumes. `OldStateBytes` (the stored
-%% encoded state) is surfaced for the content-digest hook so the old cell's
-%% contribution can be XOR-ed out without a re-encode. Shared by the in-batch
-%% shadow, the A3 cache-hit, and the projection-read paths so all three are
-%% byte-for-byte equivalent.
+%% Decode a stored cell frame into `{OldState, OldValueOpt}` — the exact shape
+%% `compute_one_cell/12` consumes. Shared by the in-batch shadow, the A3
+%% cache-hit, and the projection-read paths so all three are byte-for-byte
+%% equivalent.
 decode_old_frame(Kernel, Frame) ->
     {_PrevHlc, StateBytes, ValueBytes} =
         bondy_oplog_cell_frame:decode_full(Frame),
-    {bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes), ValueBytes,
-        StateBytes}.
+    {
+        bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes),
+        ValueBytes
+    }.
 
 %% @private
 %% A3 OldValue frame-cache constructor. `{Tab, Max}` when enabled,
@@ -669,7 +665,6 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     CacheAdapter = maps:get(cache_adapter, Ctx, undefined),
     CacheHandle = maps:get(cache_handle, Ctx, undefined),
     HighWaterRef = maps:get(high_water_ref, Ctx, undefined),
-    ContentDigestRef = content_digest_ref(Id),
     OldStateCache = maps:get(oldstate_cache, Ctx, undefined),
     SecIdx = sec_idx(Ctx),
     %% When set (table opened with `publish => true`), every PEER-authored cell
@@ -682,7 +677,7 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     %% whose event-key origin differs from this node's own origin is a true merge.
     PublishNs = maps:get(publish_ns, Ctx, undefined),
     try
-        {LocalWrites, MaxHlc, N, IdxAcc, PubAcc, DigestDelta} = lists:foldl(
+        {LocalWrites, MaxHlc, N, IdxAcc, PubAcc} = lists:foldl(
             fun
                 (
                     {MstKey, {
@@ -691,7 +686,7 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                         _Prev,
                         _Sig
                     }},
-                    {WAcc, HlcAcc, NAcc, IAcc, PAcc, DAcc}
+                    {WAcc, HlcAcc, NAcc, IAcc, PAcc}
                 ) ->
                     case
                         compute_one_cell(
@@ -709,16 +704,8 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                             OldStateCache
                         )
                     of
-                        {ok, NewFrame, NewHlc, IdxOps, OldSB, NewSB} ->
+                        {ok, NewFrame, NewHlc, IdxOps} ->
                             WAcc1 = WAcc#{{Bucket, CellKey} => NewFrame},
-                            DAcc1 = digest_accum(
-                                ContentDigestRef,
-                                DAcc,
-                                Bucket,
-                                CellKey,
-                                OldSB,
-                                NewSB
-                            ),
                             %% Only a peer-authored cell is a true merge; a
                             %% locally-authored cell swept into the diff was
                             %% already published locally.
@@ -738,16 +725,15 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                                 max_hlc(HlcAcc, NewHlc),
                                 NAcc + 1,
                                 merge_idx_ops(IAcc, IdxOps),
-                                PAcc1,
-                                DAcc1
+                                PAcc1
                             };
                         skip ->
-                            {WAcc, HlcAcc, NAcc, IAcc, PAcc, DAcc}
+                            {WAcc, HlcAcc, NAcc, IAcc, PAcc}
                     end;
                 (_, Acc) ->
                     Acc
             end,
-            {#{}, undefined, 0, #{}, #{}, bondy_oplog_content_digest:empty()},
+            {#{}, undefined, 0, #{}, #{}},
             Pairs
         ),
         case map_size(LocalWrites) of
@@ -776,7 +762,16 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                             undefined -> ok;
                             _ -> advance_high_water(HighWaterRef, MaxHlc)
                         end,
-                        apply_content_digest(ContentDigestRef, DigestDelta),
+                        %% Advance the applied-frontier version vector over every
+                        %% `{HLC, Origin, Seq}` in this committed batch. The
+                        %% universal materialisation path, so it captures all
+                        %% sources (local fast/replay, remote append, page-sync
+                        %% merge). The convergence oracle compares these frontiers
+                        %% across nodes. After the durable write, so the frontier
+                        %% never leads the projection.
+                        ok = bondy_oplog_registry:merge_frontier(
+                            Id, batch_frontier(Pairs)
+                        ),
                         dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, false),
                         %% Notify reactors AFTER the durable write + index
                         %% dispatch, so a reactor that reads back sees the
@@ -809,6 +804,52 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
             }),
             0
     end.
+
+%% @private
+%% As `batch_frontier/1`, for the local/append path (`apply_cell_batch/3`), whose
+%% input is a list of `bondy_oplog_event:t()` rather than `{MstKey, _}` pairs.
+batch_frontier_events(Events) ->
+    lists:foldl(
+        fun(Event, Acc) ->
+            case bondy_oplog_event:op(Event) of
+                {cell_apply, _B, _K, _F} ->
+                    Key = bondy_oplog_event:key(Event),
+                    Origin = bondy_oplog_event:key_origin(Key),
+                    Seq = bondy_oplog_event:key_seq(Key),
+                    case Acc of
+                        #{Origin := Cur} when Cur >= Seq -> Acc;
+                        _ -> Acc#{Origin => Seq}
+                    end;
+                _ ->
+                    Acc
+            end
+        end,
+        #{},
+        Events
+    ).
+
+%% @private
+%% Per-origin max-Seq over the cell_apply events in a replay batch — the
+%% applied-frontier delta committed via `bondy_oplog_registry:merge_frontier/2`.
+%% Iterates ALL cell_apply pairs (materialised or skipped): a skipped event is
+%% older than the cell's current state, so that origin's frontier is already at a
+%% higher seq, making the unconditional `max` correct.
+batch_frontier(Pairs) ->
+    lists:foldl(
+        fun
+            ({MstKey, {{cell_apply, _B, _K, _F}, _Meta, _Prev, _Sig}}, Acc) ->
+                Origin = bondy_oplog_event:key_origin(MstKey),
+                Seq = bondy_oplog_event:key_seq(MstKey),
+                case Acc of
+                    #{Origin := Cur} when Cur >= Seq -> Acc;
+                    _ -> Acc#{Origin => Seq}
+                end;
+            (_, Acc) ->
+                Acc
+        end,
+        #{},
+        Pairs
+    ).
 
 %% @private
 %% Per-bucket multiplexing front-ends for `apply_cell_batch/3` and
@@ -877,7 +918,6 @@ is the no-cell-apply instance.
 
 build_source(undefined, _Opts) ->
     bondy_oplog_mux:single(undefined);
-
 build_source(CellCtx, Opts) ->
     case maps:get(cell_apply_bucket, Opts, undefined) of
         Bucket when is_binary(Bucket) ->
@@ -979,38 +1019,3 @@ advance_high_water(undefined, _Hlc) ->
     ok;
 advance_high_water(Ref, Hlc) ->
     bondy_oplog_high_water:advance(Ref, Hlc).
-
-%% @private
-%% The per-instance content-digest counter, looked up by instance id (the
-%% digest is per-INSTANCE — it aggregates every shard this instance multiplexes
-%% — so it is keyed by `Id`, not read from the per-shard `Ctx`). `undefined`
-%% when the instance has not published one, which makes the whole hook a no-op.
-content_digest_ref(Id) ->
-    try
-        bondy_oplog_registry:content_digest_ref(Id)
-    catch
-        _:_ -> undefined
-    end.
-
-%% @private
-%% Fold one cell's `Old -> New` state transition into the batch's running
-%% content-digest delta. A strict no-op when the instance has no digest ref, so
-%% the two SHA-256 hashes are paid only when the oracle is active.
-digest_accum(undefined, DAcc, _Bucket, _Key, _OldSB, _NewSB) ->
-    DAcc;
-digest_accum(_Ref, DAcc, Bucket, Key, OldSB, NewSB) ->
-    bondy_oplog_content_digest:combine(
-        DAcc,
-        bondy_oplog_content_digest:replace(
-            bondy_oplog_content_digest:empty(), Bucket, Key, OldSB, NewSB
-        )
-    ).
-
-%% @private
-%% XOR a committed batch's net digest delta into the per-instance live digest.
-%% Called only after the projection `put_batch` returned ok, so the digest never
-%% leads the durable projection. No-op when there is no ref.
-apply_content_digest(undefined, _Delta) ->
-    ok;
-apply_content_digest(Ref, Delta) ->
-    bondy_oplog_content_digest:apply_delta(Ref, Delta).

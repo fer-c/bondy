@@ -77,10 +77,8 @@ Add `Key => Value`. Upgrades a seedless `{single, undefined}` to a directory; a
 
 put({dir, Map}, Key, Value) ->
     {dir, Map#{Key => Value}};
-
 put({single, undefined}, Key, Value) ->
     {dir, #{Key => Value}};
-
 put({single, _V0}, _Key, _Value) ->
     error(put_requires_dir).
 
@@ -92,7 +90,6 @@ directory to remove from).
 
 remove({dir, Map}, Key) ->
     {dir, maps:remove(Key, Map)};
-
 remove(Mux, _Key) ->
     Mux.
 
@@ -104,7 +101,6 @@ Resolve a key to its member value. A `{single, V}` resolves every key to `V`; a
 
 resolve({single, V}, _Key) ->
     V;
-
 resolve({dir, Map}, Key) ->
     maps:get(Key, Map, undefined).
 

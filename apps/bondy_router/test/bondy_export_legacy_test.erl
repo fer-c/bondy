@@ -54,7 +54,9 @@ translate_user_test() ->
         {<<"password">>, [{auth_name, pbkdf2}]}
     ],
     {entry, Table, Band, Key, Value} =
-        bondy_export:legacy_translate(security_users, ?REALM, <<"admin">>, PList),
+        bondy_export:legacy_translate(
+            security_users, ?REALM, <<"admin">>, PList
+        ),
     ?assertEqual(?BONDY_DB_USER_TAB, Table),
     ?assertEqual(?REALM, Band),
     ?assertEqual(<<"admin">>, Key),
@@ -189,13 +191,18 @@ translate_skips_test_() ->
         ),
         ?_assertEqual(
             {skip, security_status_dead},
-            bondy_export:legacy_translate(security_status, ?REALM, enabled, true)
+            bondy_export:legacy_translate(
+                security_status, ?REALM, enabled, true
+            )
         ),
         %% A pre-v1.1 source (2-tuple key, non-map value) gets a precise skip.
         ?_assertEqual(
             {skip, legacy_source_format},
             bondy_export:legacy_translate(
-                security_sources, ?REALM, {all, {{0, 0, 0, 0}, 0}}, {password, []}
+                security_sources,
+                ?REALM,
+                {all, {{0, 0, 0, 0}, 0}},
+                {password, []}
             )
         ),
         %% An unknown prefix is skipped (never mis-written).

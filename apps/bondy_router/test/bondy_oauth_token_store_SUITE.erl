@@ -35,7 +35,6 @@
 -export([bounded_set_caps_at_max/1]).
 -export([one_cell_per_user_not_per_token/1]).
 
-
 all() ->
     [
         bounded_set_caps_at_max,
@@ -69,11 +68,9 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     {save_config, Config}.
 
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
-
 
 bounded_set_caps_at_max(_Config) ->
     %% Issue MAX + 3 refresh tokens for ONE user, each with a distinct
@@ -112,11 +109,9 @@ one_cell_per_user_not_per_token(_Config) ->
         [?USER, ?USER2]
     ).
 
-
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
-
 
 %% @private
 %% Issue one refresh token (password grant → refresh type) for `User`, scoped to

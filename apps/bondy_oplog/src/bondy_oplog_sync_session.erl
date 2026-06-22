@@ -463,14 +463,24 @@ do_run(Instance, Peer, Transport, TransportOpts, MaxIterations) ->
     case Transport:request(Peer, Instance, get_root, TransportOpts) of
         {ok, PeerRoot, PeerFp} ->
             pull_if_compatible(
-                Instance, Peer, Transport, TransportOpts, MaxIterations,
-                PeerRoot, PeerFp
+                Instance,
+                Peer,
+                Transport,
+                TransportOpts,
+                MaxIterations,
+                PeerRoot,
+                PeerFp
             );
         {ok, PeerRoot} ->
             %% Legacy peer (pre-fingerprint reply): no topology check.
             pull_if_compatible(
-                Instance, Peer, Transport, TransportOpts, MaxIterations,
-                PeerRoot, undefined
+                Instance,
+                Peer,
+                Transport,
+                TransportOpts,
+                MaxIterations,
+                PeerRoot,
+                undefined
             );
         {error, _} = E ->
             E
@@ -489,7 +499,12 @@ pull_if_compatible(
     case topology_compatible(LocalFp, PeerFp) of
         true ->
             pull_from_root(
-                Instance, Peer, Transport, TransportOpts, MaxIterations, PeerRoot
+                Instance,
+                Peer,
+                Transport,
+                TransportOpts,
+                MaxIterations,
+                PeerRoot
             );
         false ->
             ?LOG_ERROR(#{
@@ -679,7 +694,7 @@ do_bump_ae_targets(Instance, Meta) ->
 %% @private
 %% The configured no-peer fence policy (`oplog.aae.fence.on_isolation`).
 isolation_policy() ->
-    application:get_env(bondy_oplog, aae_fence_on_isolation, refuse).
+    bondy_oplog_config:aae_fence_on_isolation().
 
 %% @private
 %% Whether a freshness certification is permitted now under the isolation

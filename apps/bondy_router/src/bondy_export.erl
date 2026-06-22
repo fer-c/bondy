@@ -565,8 +565,50 @@ apply_entry(Name, Band, Key, Value, #{read_count := N} = C) ->
         undefined ->
             C1;
         Table ->
-            buffer_write(Table, Band, Key, {set, Value}, C1)
+            import_entry(Name, Table, Band, Key, Value, C1)
     end.
+
+%% @private
+%% Most tables re-apply as a plain `{set, Value}`. Realm key material is special:
+%% it lives in its own aw-map `bondy_realm_keys` cell, NOT in the realm identity
+%% cell (see `bondy_realm`).
+%%
+%% - `bondy_realm` — split the imported realm value into a key-stripped identity
+%%   (`{set, Identity}`) plus key entries routed to `bondy_realm_keys`. A
+%%   post-split backup's record is already stripped (no key entries; the keys
+%%   arrive via their own `bondy_realm_keys` entries); a pre-split backup carries
+%%   the keys in the record, which are extracted here.
+%% - `bondy_realm_keys` — exported as a materialized aw-map; an aw-map cannot be
+%%   `{set}`, so re-apply each kid as a `{put, Kid, Bundle}` op.
+import_entry(?BONDY_DB_REALM_TAB, Table, Band, Key, Value, C) ->
+    {Identity, KeyEntries} = bondy_realm:split_for_import(Value),
+    C1 = buffer_write(Table, Band, Key, {set, Identity}, C),
+    put_realm_keys(Band, Key, KeyEntries, C1);
+import_entry(?BONDY_DB_REALM_KEYS_TAB, Table, Band, Key, Value, C) ->
+    put_realm_keys_into(
+        Table, Band, Key, bondy_realm:keys_value_to_entries(Value), C
+    );
+import_entry(_Name, Table, Band, Key, Value, C) ->
+    buffer_write(Table, Band, Key, {set, Value}, C).
+
+%% @private
+put_realm_keys(_Band, _Key, [], C) ->
+    C;
+put_realm_keys(Band, Key, Entries, C) ->
+    case bondy_namespace_catalog:table(?BONDY_DB_REALM_KEYS_TAB) of
+        undefined -> C;
+        Table -> put_realm_keys_into(Table, Band, Key, Entries, C)
+    end.
+
+%% @private
+put_realm_keys_into(Table, Band, Key, Entries, C) ->
+    lists:foldl(
+        fun({Kid, Bundle}, Acc) ->
+            buffer_write(Table, Band, Key, {put, Kid, Bundle}, Acc)
+        end,
+        C,
+        Entries
+    ).
 
 %% =============================================================================
 %% PRIVATE: LEGACY (plum_db / bondy_backup) IMPORT
@@ -745,7 +787,9 @@ intentionally-unmigrated domain (see the moduledoc). The reshape per domain:
 ) ->
     {entry, atom(), binary(), term(), term()} | {skip, term()}.
 
-legacy_translate(security_users, Realm, Username, Payload) when is_binary(Realm) ->
+legacy_translate(security_users, Realm, Username, Payload) when
+    is_binary(Realm)
+->
     {entry, ?BONDY_DB_USER_TAB, Realm, Username,
         bondy_rbac_user:from_term({Username, Payload})};
 legacy_translate(security_groups, Realm, Name, Payload) when is_binary(Realm) ->
@@ -754,13 +798,17 @@ legacy_translate(security_groups, Realm, Name, Payload) when is_binary(Realm) ->
 legacy_translate(security_user_grants, Realm, {_Role, Resource} = K, Perms) when
     is_binary(Realm), is_list(Perms)
 ->
-    {entry, ?BONDY_DB_USER_GRANT_TAB, Realm, bondy_rbac:encode_key(K),
-        #{resource => Resource, permissions => Perms}};
-legacy_translate(security_group_grants, Realm, {_Role, Resource} = K, Perms) when
+    {entry, ?BONDY_DB_USER_GRANT_TAB, Realm, bondy_rbac:encode_key(K), #{
+        resource => Resource, permissions => Perms
+    }};
+legacy_translate(
+    security_group_grants, Realm, {_Role, Resource} = K, Perms
+) when
     is_binary(Realm), is_list(Perms)
 ->
-    {entry, ?BONDY_DB_GROUP_GRANT_TAB, Realm, bondy_rbac:encode_key(K),
-        #{resource => Resource, permissions => Perms}};
+    {entry, ?BONDY_DB_GROUP_GRANT_TAB, Realm, bondy_rbac:encode_key(K), #{
+        resource => Resource, permissions => Perms
+    }};
 legacy_translate(security_sources, Realm, LegacyKey, Source) when
     is_binary(Realm), is_map(Source), is_tuple(LegacyKey)
 ->

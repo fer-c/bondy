@@ -383,7 +383,8 @@ wait_until_loop(Fun, Deadline) ->
             ok;
         false ->
             case erlang:monotonic_time(millisecond) > Deadline of
-                true -> error(wait_until_timeout);
+                true ->
+                    error(wait_until_timeout);
                 false ->
                     timer:sleep(250),
                     wait_until_loop(Fun, Deadline)
@@ -446,7 +447,8 @@ wait_until_eq(Fun, Expected, Node, Deadline) ->
             ok;
         Other ->
             case erlang:monotonic_time(millisecond) > Deadline of
-                true -> error({wait_eq_timeout, Node, Expected, Other});
+                true ->
+                    error({wait_eq_timeout, Node, Expected, Other});
                 false ->
                     timer:sleep(250),
                     wait_until_eq(Fun, Expected, Node, Deadline)
@@ -763,7 +765,12 @@ do_diag(Uri, User) ->
             {ok, JWT} -> catch do_authenticate(Uri, User, JWT);
             _ -> not_issued
         end,
-    #{realm => RealmFound, tv => TV, issue_ok => element(1, Issue), auth => Auth}.
+    #{
+        realm => RealmFound,
+        tv => TV,
+        issue_ok => element(1, Issue),
+        auth => Auth
+    }.
 
 %% @private
 do_issue_jwt(Uri, User) ->

@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_observer_cli_cluster).
 -moduledoc """
 `observer_cli` plugin rendering the Partisan cluster view: this node, the
@@ -41,11 +40,9 @@ cell rather than crashing the render loop.
 -export([sheet_header/0]).
 -export([sheet_body/1]).
 
-
 %% =============================================================================
 %% OBSERVER_CLI_PLUGIN CALLBACKS
 %% =============================================================================
-
 
 -doc "Top summary block: node, membership size, connected count, manager.".
 -spec attributes(State :: term()) -> {[[map()]], NewState :: term()}.
@@ -75,7 +72,6 @@ attributes(State) ->
     ],
     {Rows, State}.
 
-
 -doc "Per-node table columns.".
 -spec sheet_header() -> [map()].
 
@@ -86,7 +82,6 @@ sheet_header() ->
         #{title => "Connected", width => 12},
         #{title => "Self", width => 8}
     ].
-
 
 -doc "One row per known node (membership view ∪ connected ∪ self).".
 -spec sheet_body(State :: term()) -> {[list()], NewState :: term()}.
@@ -111,26 +106,25 @@ sheet_body(State) ->
     ],
     {Rows, State}.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 cell(Content, Width) ->
     #{content => Content, width => Width}.
 
-
 %% @private
 cell(Content, Width, Colour) ->
     #{content => Content, width => Width, color => Colour}.
 
-
 %% @private
 self_node() ->
-    try partisan:node() catch _:_ -> node() end.
-
+    try
+        partisan:node()
+    catch
+        _:_ -> node()
+    end.
 
 %% @private
 members() ->
@@ -140,7 +134,6 @@ members() ->
         _ -> []
     end.
 
-
 %% @private
 connected() ->
     case catch partisan:nodes() of
@@ -148,14 +141,12 @@ connected() ->
         _ -> []
     end.
 
-
 %% @private
 manager() ->
     case application:get_env(partisan, peer_service_manager) of
         {ok, Mod} -> to_str(Mod);
         undefined -> "n/a"
     end.
-
 
 %% @private
 %% Green when every member is connected, otherwise red (a member we cannot
@@ -167,11 +158,9 @@ connected_colour(Members, Connected, Self) ->
         _ -> ?RED
     end.
 
-
 %% @private
 yes_no(true) -> "yes";
 yes_no(false) -> "no".
-
 
 %% @private
 to_str(V) when is_atom(V) -> atom_to_list(V);

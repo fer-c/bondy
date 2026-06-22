@@ -380,7 +380,7 @@ row_to_map(#cursor{
 
 %% @private
 ttl_ms() ->
-    application:get_env(bondy_oplog, catalogue_cursor_ttl_ms, ?DEFAULT_TTL_MS).
+    bondy_oplog_config:catalogue_cursor_ttl_ms().
 
 %% @private
 schedule_gc() ->

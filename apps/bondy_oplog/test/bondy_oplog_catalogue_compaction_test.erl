@@ -188,12 +188,11 @@ no_projection_defers_truncation() ->
         ok = bondy_oplog:stop_instance(InstId)
     end.
 
-%% Step 4 verification (`architecture_regrounding_plan.md` §7 step 4): the
-%% catalogue's per-cell `interpret_cog` checkpoint IS the durable
-%% projection, maintained by the applier's CRDT kernel (steps 3/3b). This
-%% pins the plan's explicit gate — **post-compaction read == from-scratch
-%% `interpret_cog`** — on the NATIVE `crdt_module` path (the tests above
-%% exercise only the fold kernel).
+%% The catalogue's per-cell `interpret_cog` checkpoint IS the durable
+%% projection, maintained by the applier's CRDT kernel. This pins the
+%% invariant — **post-compaction read == from-scratch `interpret_cog`** —
+%% on the NATIVE `crdt_module` path (the tests above exercise only the
+%% fold kernel).
 %%
 %% Two instances apply the SAME event set (LWW overwrites in non-HLC
 %% order, plus a clear). Instance A compacts (stable prefix truncated from

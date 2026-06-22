@@ -48,7 +48,9 @@ setup() ->
         fold_module => lww_register
     }),
     {ok, Users} = bondy_db:open_table(Db, users, #{fold_module => lww_register}),
-    {ok, Groups} = bondy_db:open_table(Db, groups, #{fold_module => lww_register}),
+    {ok, Groups} = bondy_db:open_table(Db, groups, #{
+        fold_module => lww_register
+    }),
     {Db, Users, Groups}.
 
 cleanup({Db, _U, _G}) ->
@@ -100,8 +102,12 @@ independent_projections({_Db, Users, Groups}) ->
     ),
     %% Two realms, same key, same table — realm-folding keeps them distinct.
     put_cell(Users, <<"r2">>, Key, <<"r2_value">>),
-    ?assertMatch({ok, {<<"user_value">>, _}}, bondy_db:read(Users, <<"r1">>, Key)),
-    ?assertMatch({ok, {<<"r2_value">>, _}}, bondy_db:read(Users, <<"r2">>, Key)).
+    ?assertMatch(
+        {ok, {<<"user_value">>, _}}, bondy_db:read(Users, <<"r1">>, Key)
+    ),
+    ?assertMatch(
+        {ok, {<<"r2_value">>, _}}, bondy_db:read(Users, <<"r2">>, Key)
+    ).
 
 %% Closing one table leaves the sibling working AND keeps the shared instances
 %% up (refcount > 0); closing the last stops them.

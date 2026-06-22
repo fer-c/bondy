@@ -39,14 +39,14 @@ input to lowercase use `string:casefold/1`.
 ### Storage
 
 Grants are stored in the bondy_db `security_user_grants` and
-`security_group_grants` core tables (design §11.4 — seventh domain cut over
-from plum_db). The store is realm-sharded; the compound `{Rolename, Resource}`
-key is encoded to a binary with `term_to_binary/1`. That encoding is not
-order-preserving and the match was always on the `Rolename` (the `Resource`
-component is a wildcard), so the `plum_db:match` pattern scans become a
-realm scan (`bondy_db:list/2`) that decodes each key and filters by `Rolename`.
-Grants are storage-only (no change reactor): there is nothing to notify on a
-grant/revoke beyond the RBAC context epoch, which callers refresh on read.
+`security_group_grants` core tables. The store is realm-sharded; the compound
+`{Rolename, Resource}` key is encoded to a binary with `term_to_binary/1`. That
+encoding is not order-preserving and the match is always on the `Rolename` (the
+`Resource` component is a wildcard), so a lookup is a realm scan
+(`bondy_db:list/2`) that decodes each key and filters by `Rolename`. A
+grant/revoke invalidates this node's cached RBAC contexts for the realm —
+inline locally, and via the `publish => true` / `bondy_aae_reactor` seam when a
+peer's change arrives through anti-entropy.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -157,7 +157,9 @@ end#{
     [Permission :: permission()]
 }.
 -type grant_opts() :: #{
-    rebase => boolean(),
+    %% `true` when applying declarative config (idempotent write, no runtime
+    %% side-effects) — see `bondy_realm:apply_config/0`.
+    declarative => boolean(),
     actor_id => term()
 }.
 
@@ -1035,16 +1037,25 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
     do_grant(T, RealmUri, Resources, Permissions0, Opts).
 
 %% @private
-%% Both the historical `rebase` (dirty_put) and normal paths collapse to a
-%% single lww write: a fresh bondy_db write already dominates by HLC, and
-%% grants carry no lifecycle side-effects, so the `rebase`/`actor_id` opts no
-%% longer apply.
-store(Table, RealmUri, {_Rolename, Resource} = Key, Permissions, _Opts) ->
+%% A runtime grant is a plain lww set (dominates by HLC). A declarative config
+%% apply (`declarative`) is IDEMPOTENT via `bondy_db:reconcile`: re-reading the same
+%% config file on every boot emits no operation and never re-stamps the cell
+%% with a fresh HLC — which would diverge cross-node convergence and make
+%% peers ping-pong grant merges on every restart. The op-based CRDT +
+%% anti-entropy reconcile multi-node grants, so plum_db's deterministic-version
+%% rebase is obsolete.
+store(Table, RealmUri, {_Rolename, Resource} = Key, Permissions, Opts) ->
     %% The grant cell value is the fact map `#{resource, permissions}` (reshaped
     %% from the bare permissions list) so the `by_resource` reverse index can
     %% reach the resource column — it lives only in the key otherwise.
     Value = #{resource => Resource, permissions => Permissions},
-    bondy_db:apply(Table, RealmUri, encode_key(Key), {set, Value}).
+    EncKey = encode_key(Key),
+    %% `Opts` may be a map (`#{declarative => true}` from config apply) or a
+    %% plain list (`[]` from the internal regrant path), so guard with `is_map/1`.
+    case is_map(Opts) andalso maps:get(declarative, Opts, false) =:= true of
+        true -> bondy_db:reconcile(Table, RealmUri, EncKey, Value);
+        false -> bondy_db:apply(Table, RealmUri, EncKey, {set, Value})
+    end.
 
 -doc "Revoke permissions to one or more roles".
 -spec revoke(

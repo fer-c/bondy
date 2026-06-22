@@ -3,8 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% End-to-end test for the operation-based projection path
-%% (`architecture_regrounding_plan.md` §7 step 3).
+%% End-to-end test for the operation-based projection path.
 %%
 %% A catalogue shard is registered with `crdt_module =>
 %% bondy_oplog_crdt_lww_register`, so the applier's cell kernel selects

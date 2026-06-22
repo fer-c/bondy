@@ -596,10 +596,9 @@ publish(NS, Key, Hlc, Op) ->
     bondy_oplog_core_dispatcher:publish(NS, Key, Hlc, Op).
 
 -doc """
-Publish a remote-merge event (the plum_db `on_merge` equivalent). Fired by the
-replay path when anti-entropy merges a peer's write into the local projection,
-so node-local reactors can react to peer-originated changes. See
-`bondy_oplog_core_dispatcher:publish_merge/4`.
+Publish a remote-merge event. Fired by the replay path when anti-entropy merges
+a peer's write into the local projection, so node-local reactors can react to
+peer-originated changes. See `bondy_oplog_core_dispatcher:publish_merge/4`.
 """.
 -spec publish_merge(atom(), term(), bondy_oplog_hlc:hlc(), term()) -> ok.
 
@@ -1040,8 +1039,12 @@ scatter_range(Shards, NS, Index, Bucket, Low, High, Opts) ->
         begin
             {_NS, _Idx, Shard} = bondy_oplog_core_registry:entry_key(Entry),
             spawn_monitor(fun() ->
-                exit({scatter_result,
-                    range(NS, Index, Bucket, {Low, High}, Opts#{shard => Shard})})
+                exit(
+                    {scatter_result,
+                        range(NS, Index, Bucket, {Low, High}, Opts#{
+                            shard => Shard
+                        })}
+                )
             end)
         end
      || Entry <- Shards

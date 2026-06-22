@@ -15,7 +15,6 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-
 %% A representative configured frozen topology (the catalogue assembles the
 %% real one). Omits hash_algo / key_encoding_version on purpose — those are
 %% stamped by the module itself.
@@ -33,7 +32,6 @@ configured() ->
             bondy_realm => #{shard_by => key, aggregate_root => identity}
         }
     }.
-
 
 %% =============================================================================
 %% Fixtures
@@ -57,7 +55,11 @@ manifest_test_() ->
 
 setup() ->
     Dir = filename:join(
-        ["/tmp", "bondy_db_manifest_test", integer_to_list(erlang:unique_integer([positive]))]
+        [
+            "/tmp",
+            "bondy_db_manifest_test",
+            integer_to_list(erlang:unique_integer([positive]))
+        ]
     ),
     ok = filelib:ensure_path(Dir),
     Dir.
@@ -65,7 +67,6 @@ setup() ->
 cleanup(Dir) ->
     _ = file_delete_recursive(Dir),
     ok.
-
 
 %% =============================================================================
 %% Tests
@@ -90,8 +91,12 @@ match_on_identical_config(Dir) ->
         Cfg = configured(),
         {ok, genesis, _} = bondy_db_manifest:reconcile(Dir, Cfg, warn),
         %% Re-reconciling with the same config (warn or stop) matches.
-        ?assertMatch({ok, match, _}, bondy_db_manifest:reconcile(Dir, Cfg, warn)),
-        ?assertMatch({ok, match, _}, bondy_db_manifest:reconcile(Dir, Cfg, stop))
+        ?assertMatch(
+            {ok, match, _}, bondy_db_manifest:reconcile(Dir, Cfg, warn)
+        ),
+        ?assertMatch(
+            {ok, match, _}, bondy_db_manifest:reconcile(Dir, Cfg, stop)
+        )
     end.
 
 stamps_substrate_invariants(Dir) ->
@@ -147,7 +152,9 @@ stop_mismatch_errors(Dir) ->
 
 corrupt_manifest_is_rejected(Dir) ->
     fun() ->
-        ok = file:write_file(bondy_db_manifest:path(Dir), <<"not an erlang term">>),
+        ok = file:write_file(
+            bondy_db_manifest:path(Dir), <<"not an erlang term">>
+        ),
         ?assertMatch({error, _}, bondy_db_manifest:read(Dir)),
         %% reconcile surfaces the read error (does not silently genesis-write).
         ?assertMatch(
@@ -177,7 +184,6 @@ read_absent_is_not_found(Dir) ->
     fun() ->
         ?assertEqual({error, not_found}, bondy_db_manifest:read(Dir))
     end.
-
 
 %% =============================================================================
 %% diff/2
@@ -230,7 +236,6 @@ diff_table_added_removed(Dir) ->
             bondy_db_manifest:diff(Changed, OnDisk)
         )
     end.
-
 
 %% =============================================================================
 %% Helpers

@@ -58,9 +58,8 @@ Subscribers receive one of
 
 The first is published by the applier for a **local** `bondy_db:apply/4`
 write; the second by the replay path when **anti-entropy** merges a peer's
-write into the local projection (the plum_db `on_merge` equivalent). Both
-carry the same `(Key, Operation)` so a reactor can subscribe once and handle
-either tag.
+write into the local projection. Both carry the same `(Key, Operation)` so a
+reactor can subscribe once and handle either tag.
 
 Delivery uses the bare send operator (`Pid ! Msg`), which is local-only
 best-effort and never blocks the publisher.
@@ -168,10 +167,10 @@ publish(NS, Key, Hlc, Op) ->
 -doc """
 Publish a **remote-merge** event to every matching subscriber: a cell whose
 value changed on this node because anti-entropy merged a peer's write (not a
-local `bondy_db:apply/4`). This is the bondy_db equivalent of plum_db's
-`on_merge` callback — node-local reactors that must react to a peer-originated
-change (e.g. close a user's sessions when the user is deleted on another node)
-subscribe and handle this message; purely local writes never deliver it.
+local `bondy_db:apply/4`). Node-local reactors that must react to a
+peer-originated change (e.g. close a user's sessions when the user is deleted on
+another node) subscribe and handle this message; purely local writes never
+deliver it.
 
 Subscribers receive `{bondy_oplog_core_merge_event, NS, Key, Hlc, Op}` — the
 same `(Key, Op)` shape as a local event, only the tag differs, so a reactor can

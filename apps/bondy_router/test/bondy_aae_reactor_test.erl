@@ -278,7 +278,8 @@ owner_up_reflects_partisan_view_test() ->
             (_) -> false
         end),
 
-        ok = meck:expect(bondy_registry_entry, node, fun(self_e) -> 'me@host';
+        ok = meck:expect(bondy_registry_entry, node, fun
+            (self_e) -> 'me@host';
             (up_e) -> 'up@host';
             (down_e) -> 'down@host'
         end),

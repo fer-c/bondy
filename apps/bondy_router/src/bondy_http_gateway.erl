@@ -30,9 +30,9 @@ via the corresponding public API functions.
 ## API specifications
 
 API specs are JSON documents parsed by `bondy_http_gateway_api_spec_parser`.
-They are stored in the bondy_db `api_gateway` core table (design §11.4 — the
-first domain migrated off plum_db), keyed by spec id, with the **source JSON**
-carried as a `term_to_binary/1` payload in an `lww_register` cell. When a spec
+They are stored in the bondy_db `api_gateway` core table, keyed by spec id,
+with the **source JSON** carried as a `term_to_binary/1` payload in an
+`lww_register` cell. When a spec
 is loaded:
 
 1. The JSON document is validated and parsed
@@ -91,9 +91,9 @@ Listeners are configured with two connection-count alarms:
 -include("bondy_uris.hrl").
 
 -define(DISPATCH_KEY(Name), {?MODULE, dispatch, Name}).
-%% API specs live in the bondy_db `api_gateway` core table (design §11.4 — the
-%% first domain cut over from plum_db). The store is a flat, id-keyed keyspace
-%% (a spec's realm is a field in the value, not part of the key), so a single
+%% API specs live in the bondy_db `api_gateway` core table. The store is a flat,
+%% id-keyed keyspace (a spec's realm is a field in the value, not part of the
+%% key), so a single
 %% fixed bucket is used. The spec map is stored directly in an `lww_register`
 %% cell (the substrate serialises terms; no manual encoding); `clear` deletes
 %% (non-terminal, so a re-`load` reanimates). The catalogue
@@ -490,8 +490,8 @@ unsubscribe(State) ->
 
 %% @private
 %% The open bondy_db `api_gateway` table handle. Raises if the catalogue has
-%% not provisioned it — after the §11.4 cut-over the table is a hard dependency
-%% (the catalogue, a `bondy_sup` child, opens it before this gen_server starts).
+%% not provisioned it — the table is a hard dependency (the catalogue, a
+%% `bondy_sup` child, opens it before this gen_server starts).
 spec_table() ->
     case spec_table_opt() of
         undefined -> error(api_gateway_table_unavailable);
@@ -630,7 +630,7 @@ do_apply_config(FName) ->
     try
         case bondy_utils:json_consult(FName) of
             {ok, Spec} when is_map(Spec) ->
-                load_spec(Spec);
+                load_spec(Spec, #{declarative => true});
             {ok, []} ->
                 ok;
             {ok, Specs} when is_list(Specs) ->
@@ -638,7 +638,7 @@ do_apply_config(FName) ->
                     description => "Loading configuration file found",
                     filename => FName
                 }),
-                _ = [load_spec(Spec) || Spec <- Specs],
+                _ = [load_spec(Spec, #{declarative => true}) || Spec <- Specs],
                 ok;
             {error, enoent} ->
                 ?LOG_WARNING(#{
@@ -668,15 +668,19 @@ do_apply_config(FName) ->
     end.
 
 %% @private
-load_spec(Map) when is_map(Map) ->
+load_spec(MapOrFName) ->
+    load_spec(MapOrFName, #{}).
+
+%% @private
+%% `Opts` may carry `declarative => true` (a config-file apply, run on every
+%% boot). Under that flag the spec is stored IDEMPOTENTLY — see `store_spec/3`.
+%% A runtime load (no flag) always writes.
+load_spec(Map, Opts) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, #{~"id" := Id} = Spec} ->
             %% We store the source specification, see add/2 for an explanation
             ok = maybe_init_groups(maps:get(~"realm_uri", Spec)),
-            add(
-                Id,
-                maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
-            );
+            store_spec(Id, Map, Opts);
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Error while loading API specification",
@@ -685,10 +689,10 @@ load_spec(Map) when is_map(Map) ->
             }),
             throw(Reason)
     end;
-load_spec(FName) ->
+load_spec(FName, Opts) ->
     case bondy_utils:json_consult(FName) of
         {ok, Spec} when is_map(Spec) ->
-            ok = load_spec(Spec),
+            ok = load_spec(Spec, Opts),
             rebuild_dispatch_tables();
         {ok, []} ->
             ok;
@@ -700,6 +704,42 @@ load_spec(FName) ->
             }),
             throw(invalid_json_format)
     end.
+
+%% @private
+%% Persist the source spec under `Id`. A runtime load always writes, stamping a
+%% fresh `ts` (the per-node load time `load_dispatch_tables/0` uses to FIFO-order
+%% overlapping specs). A DECLARATIVE config apply writes only when the spec
+%% source actually changed (compared modulo `ts`): re-reading the config file on
+%% every boot must NOT re-stamp `ts`, because `ts` is a per-node wall clock and
+%% a fresh value on each node/boot diverges the replicated cell (and its content
+%% digest). The op-based CRDT + anti-entropy reconcile multi-node writes, so an
+%% unchanged spec needs no per-boot rewrite.
+store_spec(Id, Map, Opts) ->
+    case maps:get(declarative, Opts, false) of
+        true ->
+            Desired = maps:remove(<<"ts">>, Map),
+            case lookup(Id) of
+                Stored when is_map(Stored) ->
+                    case maps:remove(<<"ts">>, Stored) =:= Desired of
+                        true ->
+                            %% Unchanged — keep the replicated value (and its
+                            %% already-converged ts); emit no operation.
+                            ok;
+                        false ->
+                            add(Id, with_ts(Map))
+                    end;
+                {error, not_found} ->
+                    add(Id, with_ts(Map))
+            end;
+        false ->
+            add(Id, with_ts(Map))
+    end.
+
+%% @private
+%% Stamp the per-node load time used to FIFO-order overlapping specs
+%% (`load_dispatch_tables/0`).
+with_ts(Map) ->
+    maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map).
 
 -doc """
 We store the API Spec in the metadata store. Notice that we store the JSON

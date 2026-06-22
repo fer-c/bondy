@@ -151,7 +151,10 @@ client_claims(Authid, ClientId, DeviceId) ->
 %% (its first tuple element), regardless of map- or list-valued.
 rows_for(Table, Authid) ->
     {ok, Rows} = bondy_db:list(Table, ?REALM),
-    [R || {Key, _V, _H} = R <- Rows, element(1, binary_to_term(Key)) =:= Authid].
+    [
+        R
+     || {Key, _V, _H} = R <- Rows, element(1, binary_to_term(Key)) =:= Authid
+    ].
 
 device(I) ->
     <<"device_", (integer_to_binary(I))/binary>>.

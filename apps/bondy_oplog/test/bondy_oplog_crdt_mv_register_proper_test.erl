@@ -13,8 +13,8 @@
 %% achieves), so the generated contexts are well-formed partial
 %% observations, not arbitrary noise.
 %%
-%% The headline property `prop_eager_equals_group` closes
-%% `architecture_regrounding_plan.md` §4.3: the eager incremental
+%% The headline property `prop_eager_equals_group` asserts the
+%% eager-equals-group invariant: the eager incremental
 %% `apply_op/4` fold in ARRIVAL order equals the canonical sorted-group
 %% `interpret_cog/2`. Both are `bondy_dvvset:sync` folds of the same
 %% fixed per-event contributions, so a lattice join makes them equal

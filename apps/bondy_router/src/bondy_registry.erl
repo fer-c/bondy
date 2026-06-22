@@ -329,7 +329,7 @@ remove_all(Type, RealmUri, SessionId, Task, Opts) when
     do_remove_all(Matches, SessionId, Task, Opts).
 
 -doc """
-Looks up the entry in plum_db.
+Looks up a registration / subscription entry by its key.
 """.
 -spec lookup(Type :: entry_type(), Key :: entry_key()) ->
     {ok, entry()} | {error, not_found}.

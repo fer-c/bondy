@@ -30,6 +30,16 @@ A **Merkle Search Tree** turns this into log-N comparisons:
 The result: peers find their disagreement in **O(diff)**, not
 O(set size).
 
+A caveat on "equal roots? done": root equality means the two *trees*
+are identical, which lets a peer skip page exchange. It is not, on its
+own, a test for "the two peers hold the same application data" once a
+consumer **truncates** the tree. A consumer that compacts stable items
+out of its MST leaves a converged tree empty, with an `undefined`
+root, so two peers in different compaction states carry different
+roots over identical data. A consumer that needs a data-convergence
+oracle maintains it over its materialised state, not over the MST
+root.
+
 > The construction is from Auvolat & Taïani, *Merkle Search Trees:
 > Efficient State-Based CRDTs in Open Networks*, SRDS 2019. The
 > Erlang implementation in `bondy_mst.erl` is ported from the

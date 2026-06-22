@@ -524,6 +524,47 @@ warn_default_wal_path_test_() ->
     ].
 
 %% =============================================================================
+%% reconcile/4 — idempotent declarative-config write
+%% =============================================================================
+
+%% `reconcile/4` is the write used to apply declarative config on every boot.
+%% The contract that fixes the cross-node convergence bug: re-asserting an
+%% UNCHANGED value emits NO operation, so the cell's HLC does not advance and
+%% the per-shard state stays identical across nodes/boots. A genuine
+%% change still writes (fresh HLC). A durable (leveled) table is used because
+%% that is where the real config tables live.
+reconcile_test_() ->
+    {setup, fun() -> setup(bondy_db_topology_per_entity) end, fun cleanup/1,
+        fun(Ctx) ->
+            {"reconcile_idempotent", fun() -> reconcile_idempotent(Ctx) end}
+        end}.
+
+reconcile_idempotent({Db, _Sup, _Dir}) ->
+    {ok, T} = bondy_db:open_table(Db, things, #{}),
+    %% First reconcile of an absent cell writes it.
+    ok = bondy_db:reconcile(T, <<"r1">>, <<"k">>, <<"v1">>),
+    {ok, {<<"v1">>, H1}} = bondy_db:read(T, <<"r1">>, <<"k">>),
+    %% Re-asserting the SAME value is a no-op: no new write, so the HLC is
+    %% unchanged. This is exactly what keeps the per-shard state stable when
+    %% config is re-applied on a restart.
+    ok = bondy_db:reconcile(T, <<"r1">>, <<"k">>, <<"v1">>),
+    ?assertEqual({ok, {<<"v1">>, H1}}, bondy_db:read(T, <<"r1">>, <<"k">>)),
+    %% Re-asserting it many times stays a no-op (HLC never moves).
+    _ = [
+        ok = bondy_db:reconcile(T, <<"r1">>, <<"k">>, <<"v1">>)
+     || _ <- lists:seq(1, 5)
+    ],
+    ?assertEqual({ok, {<<"v1">>, H1}}, bondy_db:read(T, <<"r1">>, <<"k">>)),
+    %% A genuine change DOES write: value updates and the HLC advances.
+    ok = bondy_db:reconcile(T, <<"r1">>, <<"k">>, <<"v2">>),
+    {ok, {<<"v2">>, H2}} = bondy_db:read(T, <<"r1">>, <<"k">>),
+    ?assert(H2 > H1),
+    %% ...and the new value is then idempotent in turn.
+    ok = bondy_db:reconcile(T, <<"r1">>, <<"k">>, <<"v2">>),
+    ?assertEqual({ok, {<<"v2">>, H2}}, bondy_db:read(T, <<"r1">>, <<"k">>)),
+    ok = bondy_db:close_table(T).
+
+%% =============================================================================
 %% Helpers
 %% =============================================================================
 

@@ -412,22 +412,10 @@ init(Opts) ->
         end,
     State = #state{
         enabled = maps:get(
-            enabled,
-            Opts,
-            application:get_env(
-                bondy_oplog,
-                sync_scheduler,
-                true
-            )
+            enabled, Opts, bondy_oplog_config:sync_scheduler_enabled()
         ),
         interval_ms = maps:get(
-            interval_ms,
-            Opts,
-            application:get_env(
-                bondy_oplog,
-                sync_interval_ms,
-                500
-            )
+            interval_ms, Opts, bondy_oplog_config:sync_interval_ms()
         ),
         peer_source = maps:get(
             peer_source,
@@ -456,17 +444,12 @@ handle_call(info, _From, State) ->
         peer_source => State#state.peer_source,
         peer_source_opts => State#state.peer_source_opts,
         dispatch_set => State#state.dispatch =/= undefined,
-        bootstrap_peer_strategy =>
-            application:get_env(bondy_oplog, bootstrap_peer_strategy, first),
-        max_inflight_bootstraps =>
-            application:get_env(bondy_oplog, max_inflight_bootstraps, 4),
+        bootstrap_peer_strategy => bondy_oplog_config:bootstrap_peer_strategy(),
+        max_inflight_bootstraps => bondy_oplog_config:max_inflight_bootstraps(),
         current_inflight_bootstraps => inflight_count(),
-        bootstrap_retry_base_ms =>
-            application:get_env(bondy_oplog, bootstrap_retry_base_ms, 500),
-        bootstrap_retry_max_ms =>
-            application:get_env(bondy_oplog, bootstrap_retry_max_ms, 30000),
-        bootstrap_retry_jitter =>
-            application:get_env(bondy_oplog, bootstrap_retry_jitter, true),
+        bootstrap_retry_base_ms => bondy_oplog_config:bootstrap_retry_base_ms(),
+        bootstrap_retry_max_ms => bondy_oplog_config:bootstrap_retry_max_ms(),
+        bootstrap_retry_jitter => bondy_oplog_config:bootstrap_retry_jitter(),
         live_sync_adaptive => live_adaptive_enabled(),
         live_sync_base_ms => live_sync_base_ms(),
         live_sync_max_ms => live_sync_max_ms()
@@ -642,7 +625,7 @@ maybe_dispatch_bootstrap(InstanceId, Peers) ->
 
 %% @private
 maybe_dispatch_bootstrap_cap_check(InstanceId, Peers) ->
-    Cap = application:get_env(bondy_oplog, max_inflight_bootstraps, 4),
+    Cap = bondy_oplog_config:max_inflight_bootstraps(),
     Current = inflight_count(),
     case Current >= Cap of
         true ->
@@ -653,9 +636,7 @@ maybe_dispatch_bootstrap_cap_check(InstanceId, Peers) ->
             ),
             ok;
         false ->
-            Strategy = application:get_env(
-                bondy_oplog, bootstrap_peer_strategy, first
-            ),
+            Strategy = bondy_oplog_config:bootstrap_peer_strategy(),
             Peer = pick_bootstrap_peer(Strategy, InstanceId, Peers),
             dispatch_bootstrap(InstanceId, Peer, Strategy)
     end.
@@ -825,12 +806,12 @@ update_backoff(InstanceId, _Reason) ->
 %% Returns the wait in ms for failure-count N. Exponential with
 %% optional uniform jitter in [0.5, 1.5].
 backoff_wait_ms(N) when N >= 1 ->
-    Base = application:get_env(bondy_oplog, bootstrap_retry_base_ms, 500),
-    Max = application:get_env(bondy_oplog, bootstrap_retry_max_ms, 30000),
+    Base = bondy_oplog_config:bootstrap_retry_base_ms(),
+    Max = bondy_oplog_config:bootstrap_retry_max_ms(),
     %% 2^31 caps the exponent to avoid overflow on adversarial N.
     Exp = min(N - 1, 30),
     Raw = min(Base bsl Exp, Max),
-    case application:get_env(bondy_oplog, bootstrap_retry_jitter, true) of
+    case bondy_oplog_config:bootstrap_retry_jitter() of
         true ->
             %% uniform float in [0.5, 1.5].
             Factor = 0.5 + rand:uniform(),
@@ -979,21 +960,17 @@ current_root(InstanceId) ->
 
 %% @private
 live_adaptive_enabled() ->
-    application:get_env(bondy_oplog, live_sync_adaptive, true).
+    bondy_oplog_config:live_sync_adaptive().
 
 %% @private
 %% Base poll interval; defaults to the tick interval so an active shard
 %% syncs every tick exactly as before.
 live_sync_base_ms() ->
-    application:get_env(
-        bondy_oplog,
-        live_sync_base_ms,
-        application:get_env(bondy_oplog, sync_interval_ms, 500)
-    ).
+    bondy_oplog_config:live_sync_base_ms().
 
 %% @private
 live_sync_max_ms() ->
-    application:get_env(bondy_oplog, live_sync_max_ms, 5000).
+    bondy_oplog_config:live_sync_max_ms().
 
 %% @private
 ensure_live_backoff_table() ->
@@ -1034,4 +1011,4 @@ dispatch_live_sync(InstanceId, Peers) ->
 %% deployment sets `#{transport => bondy_oplog_transport_partisan,
 %% transport_opts => #{channel => ...}}` here (see `bondy_app`).
 session_opts() ->
-    application:get_env(bondy_oplog, sync_session_opts, #{}).
+    bondy_oplog_config:sync_session_opts().

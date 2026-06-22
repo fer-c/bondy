@@ -90,9 +90,9 @@ the dispatcher is configured to effectively never restart.
 -record(sub, {
     table :: atom(),
     label :: string(),
-    kind  :: user | realm | grant | member | registry,
-    ns    :: atom() | undefined,
-    ref   :: reference() | undefined
+    kind :: user | realm | grant | member | registry,
+    ns :: atom() | undefined,
+    ref :: reference() | undefined
 }).
 
 -record(state, {
@@ -170,7 +170,8 @@ remote_entries_of(Node) ->
 
 init([]) ->
     Entries = ensure_entries_table(),
-    {ok, #state{subs = reacted_tables(), entries = Entries}, {continue, subscribe}}.
+    {ok, #state{subs = reacted_tables(), entries = Entries},
+        {continue, subscribe}}.
 
 handle_continue(subscribe, State) ->
     {noreply, subscribe(State)}.
@@ -199,7 +200,7 @@ handle_info(_Info, State) ->
 terminate(_Reason, #state{subs = Subs}) ->
     _ = [
         bondy_oplog_core:unsubscribe(Ref)
-        || #sub{ref = Ref} <- Subs, is_reference(Ref)
+     || #sub{ref = Ref} <- Subs, is_reference(Ref)
     ],
     ok.
 

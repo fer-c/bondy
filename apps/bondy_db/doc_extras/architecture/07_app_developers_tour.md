@@ -206,7 +206,8 @@ everything that must survive a restart, and an ephemeral `registry` DB
 > `crdt_module`, or a short `fold_module` label for the common ones
 > (`lww_register`, `g_set`, `pn_counter`, `g_counter`). The catalogue
 > maps each table's declared *fold class* to a CRDT: `lww` →
-> `lww_register`, `mv` → `mv_register`, `aw` → `aw_map`.
+> `lww_register`, `mv` → `mv_register`, `aw` → `aw_map`, `ew` →
+> `ew_flag` (the enable-wins flag behind group membership, §4.4).
 
 The durable tables live in one DB, opened once with a **default
 `fold_module`** — the required type label every table inherits and each
@@ -259,6 +260,12 @@ resurrect dead, unroutable entries on restart, so the table is
 ([chapter 03](03_bondy_db.md#projection-backend-durable-vs-ephemeral)).
 After a restart the node starts empty and re-converges live entries from
 peers.
+
+Both tables are `publish => true`: a registration that arrives from a
+peer via anti-entropy drives this node's reactor to add it to the
+routing trie (and a `clear` to remove it), so a node learns it can route
+to a peer's callee without that peer re-announcing
+([chapter 03](03_bondy_db.md#change-notification)).
 
 The cell is keyed by a random, realm-unique `entry_id` and holds a thin
 record; present (a `set`) or withdrawn (a `clear`), highest-HLC wins, so
@@ -314,13 +321,10 @@ write, so `lww_register` is the right shape. Like realms it is `publish
 => true`: a peer deleting a user publishes a merge event, and this node's
 reactor closes that user's local sessions (§5).
 
-Group membership lives **in this record** (`user.groups`), and a native
-multi-valued `by_group` secondary index over that field
-(`extract => [groups]`) answers the reverse question — "which users are
-in group G" — without scanning every user. The forward write stays a
-plain `lww_register` record replace; the index is maintained for free
-from the old→new diff ([chapter 03](03_bondy_db.md#secondary-indexes)).
-See 4.4 for when membership graduates to its own table.
+A user's group membership is **not** stored on the user record — it
+lives in its own relation, `security_group_members` (§4.4). The user
+cell stays a plain `lww_register` value, and `security_users` declares
+no secondary indexes.
 
 ### 4.4 Groups and group memberships
 
@@ -330,42 +334,57 @@ See 4.4 for when membership graduates to its own table.
     shard_count => 4
 }).
 {ok, Members} = bondy_db:open_table(Core, security_group_members, #{
-    crdt_module => bondy_oplog_crdt_aw_map,
-    shard_count => 8
+    crdt_module    => bondy_oplog_crdt_ew_flag,
+    aggregate_root => second_col,
+    shard_count    => 8
 }).
 ```
 
 The group record — name, meta, default policies — is `lww_register` on
-`security_groups`. **Membership** is the interesting part, and it lives
-in two places at two maturity levels.
+`security_groups`. **Membership** is the interesting part, and it is a
+first-class relation in its own right.
 
-Today, the authoritative membership is the `user.groups` field on the
-user record (§4.3), with the `by_group` index serving the reverse "who is
-in group G" query. A membership change is therefore an `lww_register`
-write to *one user*, which is exactly right while a user's groups are
-edited by one writer at a time.
+Each `(user, group)` membership is one cell, and its CRDT is an
+**enable-wins flag** (`ew_flag`): a concurrent *add* survives a *remove*
+that did not observe it. Modelling membership as a cell per fact —
+rather than a `groups` list inside the user's `lww_register` record — is
+what makes concurrent edits safe: two nodes that independently add the
+*same* user to *different* groups both survive, where a whole-record
+`lww` write would let one clobber the other.
 
-`security_group_members` is the **design target** for when that stops
-being true. Modelled as the native add-wins map
-(`bondy_oplog_crdt_aw_map`), it makes membership a first-class relation
-whose concurrent adds and removes converge by observed-remove semantics —
-a concurrent add survives a remove that did not observe it
-([chapter 05](05_crdt_model.md)). The table is declared and provisioned,
-but stays dormant until anti-entropy is exchanging concurrent membership
-edits; an add-wins map only differs from the forward `lww` write under
-exactly that concurrency.
+The relation answers both directions **without a secondary index**,
+using the *permutation-index* pattern: every fact is written in two key
+orderings — a forward band keyed `enc(user) ⊕ enc(group)` and a reverse
+band keyed `enc(group) ⊕ enc(user)`. "Which groups is this user in?" is
+a bounded, realm-local scan of the forward band; "who is in this group?"
+the same scan of the reverse band. `aggregate_root => second_col`
+co-locates each fact with its leading entity — a forward fact on the
+user's shard, a reverse fact on the group's — so each direction is a
+single-shard scan, not a cross-shard scatter. The read/write primitives
+live in `bondy_rbac_user`.
+
+Like grants, the relation is `publish => true`: when anti-entropy merges
+a peer's membership change, this node's reactor invalidates the realm's
+cached authorization contexts in place
+([chapter 03](03_bondy_db.md#change-notification)). A membership change
+still advances the user's `token_version`, because the write path also
+touches the user cell.
 
 ```mermaid
 flowchart LR
-    FWD["security_users<br/>user.groups (lww_register)<br/>+ by_group reverse index"]
-    AW["security_group_members<br/>(membership relation, aw_map)<br/>design target — dormant"]
+    FACT["(user, group)<br/>one ew_flag cell"]
+    F["forward band<br/>enc(user) ⊕ enc(group)<br/>on the user's shard<br/>→ groups of a user"]
+    R["reverse band<br/>enc(group) ⊕ enc(user)<br/>on the group's shard<br/>→ members of a group"]
 
-    FWD -->|"graduates under<br/>concurrent membership edits"| AW
+    FACT --> F
+    FACT --> R
 ```
 
-The lesson generalises: **memberships scale better as a dedicated
-add-wins relation** than as a list inside an LWW record — but the move
-earns its cost only once concurrent multi-writer edits are real.
+The lesson generalises: **a relation that must answer in two directions
+is cheaper as a cell-per-fact relation with a permutation index than as
+a list inside a record** — the record form forces a read-modify-write
+and a lossy `lww` merge, while cell-per-fact gives concurrent edits and
+direction-free reads.
 
 ### 4.5 Grants (user and group)
 
@@ -580,9 +599,9 @@ concurrent multi-writer is enabled.
 | `bondy_registration` | `lww_register` | presence FSM | registry (ephemeral) | `by_session` index; structurally-unique keys |
 | `bondy_subscription` | `lww_register` | presence FSM | registry (ephemeral) | `by_session` index |
 | `bondy_realm` | `lww_register` | — | core | global registry; `publish` |
-| `security_users` | `lww_register` | — | core | `publish`; `by_group` membership index |
+| `security_users` | `lww_register` | — | core | `publish`; no secondary index (membership is its own relation) |
 | `security_groups` | `lww_register` | — | core | group record |
-| `security_group_members` | `aw_map` | (active under concurrency) | core | dormant; membership lives on `security_users` today |
+| `security_group_members` | `ew_flag` | — | core | authoritative membership relation; forward/reverse permutation index; `aggregate_root => second_col`; `publish` |
 | `security_user_grants` | `lww_register` | `mv_register` | core | composite key; `by_resource` index; `publish` |
 | `security_group_grants` | `lww_register` | `mv_register` | core | composite key; `by_resource` index; `publish` |
 | `security_sources` | `lww_register` | `mv_register` | core | composite key |
@@ -735,6 +754,10 @@ strictly for reacting to what a peer did.
 - `bondy_oplog_core.erl` — substrate primitives
   (`read/3`, `read_batch/2`, `ensure_fresh/2`, `range/4`,
   `subscribe/2`).
+- `bondy_oplog_config.erl` (in `bondy_oplog`) — the layer-wide tuning
+  surface (sync and GC cadence, the live-sync throttle, the AAE
+  freshness-fence policy), separate from the per-table options you pass
+  to `open_table/3`.
 - `bondy_namespace_catalog.erl` (in `bondy_router`) — the catalogue
   that declares the two DBs and every table above, with each table's
   fold class, `shard_by`, indexes, and `publish` flag.

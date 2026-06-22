@@ -43,9 +43,16 @@
 bondy_relation_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         %% partition mode (the default): partition-ordered, page from ~1 shard
-        gen("partition_asc_covers_all_once", fun partition_asc_covers_all_once/1),
-        gen("partition_desc_covers_all_once", fun partition_desc_covers_all_once/1),
-        gen("partition_rejected_backfilled", fun partition_rejected_backfilled/1),
+        gen(
+            "partition_asc_covers_all_once", fun partition_asc_covers_all_once/1
+        ),
+        gen(
+            "partition_desc_covers_all_once",
+            fun partition_desc_covers_all_once/1
+        ),
+        gen(
+            "partition_rejected_backfilled", fun partition_rejected_backfilled/1
+        ),
         gen("partition_cursor_roundtrip", fun partition_cursor_roundtrip/1),
         gen("default_mode_is_partition", fun default_mode_is_partition/1),
         %% global mode: globally key-ordered, scatter+merge every page
@@ -239,7 +246,9 @@ global_cursor_roundtrip({_Db, T, _Sup, _Dir}) ->
     ),
     %% a cursor minted for a different schema ⇒ stale
     Other = bondy_relation:new(users, #{
-        table => T, decode => fun decode_row/1, mode => global,
+        table => T,
+        decode => fun decode_row/1,
+        mode => global,
         schema => some_other_schema
     }),
     ?assertEqual({error, stale}, bondy_relation:decode_cursor(Other, Wire)).
@@ -248,7 +257,9 @@ global_cursor_roundtrip({_Db, T, _Sup, _Dir}) ->
 %% an explicit-partition relation and rejected by a global one.
 default_mode_is_partition({_Db, T, _Sup, _Dir}) ->
     _ = put_users(T, 12),
-    Default = bondy_relation:new(users, #{table => T, decode => fun decode_row/1}),
+    Default = bondy_relation:new(users, #{
+        table => T, decode => fun decode_row/1
+    }),
     {ok, #{next := Cursor}} = bondy_relation:list(Default, ?R, #{limit => 5}),
     ?assertNotEqual(undefined, Cursor),
     Wire = bondy_relation:encode_cursor(Cursor),

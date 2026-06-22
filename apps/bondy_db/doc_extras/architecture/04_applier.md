@@ -191,6 +191,13 @@ Four load-bearing details:
   `publish_batch` (the local tag), because their side-effects already
   ran inline at the call site; the merge tag is what lets a node react
   to what a peer did.
+- **The applied frontier is advanced here.** After the durable
+  `put_batch` returns, the engine max-merges the batch's per-origin
+  maxima into the per-instance **applied frontier** — the
+  compaction-invariant convergence oracle ([chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)).
+  The update is a small `O(#origins-in-batch)` max-merge applied on both
+  the local and the remote-merge fold, right beside the high-water
+  advance, and never leads the durable projection.
 
 The applier also keeps an in-memory `fold_state`
 (`apply_fold_batch/3`) for bare single-CRDT instances that have no

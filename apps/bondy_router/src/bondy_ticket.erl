@@ -140,9 +140,9 @@ WAMP permission required to call the procedures.
 % 2 mins
 -define(LEEWAY_SECS, 2 * 60).
 
-%% Tickets live in the bondy_db `bondy_ticket` core table (design §11.4 — cut
-%% over from plum_db), bucketed by the auth realm and keyed by the composed
-%% store key. The 3-tuple store key `{Authid, A, B}` is encoded to a binary with
+%% Tickets live in the bondy_db `bondy_ticket` core table, bucketed by the auth
+%% realm and keyed by the composed store key. The 3-tuple store key
+%% `{Authid, A, B}` is encoded to a binary with
 %% `term_to_binary/1`; it is NOT order-preserving, so `revoke_all/2` scans the
 %% realm and filters by the decoded `Authid` rather than a key-prefix range. The
 %% catalogue (`bondy_namespace_catalog`) provisions the table.
@@ -535,7 +535,9 @@ do_issue(Session, Opts) ->
     ok = authorize(ScopeType, AuthCtxt),
 
     AuthRealm = bondy_realm:fetch(AuthRealmUri),
-    Kid = bondy_realm:get_random_kid(AuthRealm),
+    %% Pick the signing key atomically: keys are generated lazily, so the kid
+    %% and its private key must come from the same (post-generation) realm.
+    {Kid, PrivKey} = bondy_realm:get_random_private_key(AuthRealm),
 
     IssuedAt = ?NOW,
     ExpiresAt = IssuedAt + expiry_time_secs(Opts),
@@ -557,7 +559,6 @@ do_issue(Session, Opts) ->
 
     %% We first sign (jose lib does not still support nested JWS in JWE, so we
     %% do it our way)
-    PrivKey = bondy_realm:get_private_key(AuthRealm, Kid),
     {_, Ticket} = jose_jws:compact(jose_jwt:sign(PrivKey, JWT)),
 
     case is_persistent(ScopeType) of
@@ -765,9 +766,9 @@ is_expired(#{expires_at := Exp}) ->
 
 %% @private
 %% The open bondy_db `bondy_ticket` table handle. Raises if the catalogue has
-%% not provisioned it — after the §11.4 cut-over the table is a hard dependency
-%% (the catalogue, a `bondy_sup` child, opens it at boot, well before any auth
-%% flow issues or revokes a ticket).
+%% not provisioned it — the table is a hard dependency (the catalogue, a
+%% `bondy_sup` child, opens it at boot, well before any auth flow issues or
+%% revokes a ticket).
 table() ->
     case bondy_namespace_catalog:table(?BONDY_DB_TICKET_TAB) of
         undefined -> error(ticket_table_unavailable);

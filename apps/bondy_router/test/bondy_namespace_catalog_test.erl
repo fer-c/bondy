@@ -23,10 +23,22 @@ declarations_test_() ->
     Core = [S || S <- Tables, maps:get(db, S) =:= core],
     Registry = [S || S <- Tables, maps:get(db, S) =:= registry],
     [
-        {"fourteen tables declared", ?_assertEqual(14, length(Tables))},
-        {"twelve core, two registry", fun() ->
-            ?assertEqual(12, length(Core)),
+        {"fifteen tables declared", ?_assertEqual(15, length(Tables))},
+        {"thirteen core, two registry", fun() ->
+            ?assertEqual(13, length(Core)),
             ?assertEqual(2, length(Registry))
+        end},
+        {"realm_keys is a durable core aw table sharded by key", fun() ->
+            %% Realm key material, split out of the realm identity cell so the
+            %% realm's bondy_db identity/digest is Uri + config, not key bytes.
+            %% Global registry like bondy_realm (key-sharded); aw-map of
+            %% kid => key bundle so concurrent rotations merge without loss.
+            Spec = maps:get(bondy_realm_keys, ByName),
+            ?assertEqual(core, maps:get(db, Spec)),
+            ?assertEqual(durable, maps:get(durability, Spec)),
+            ?assertEqual(key, maps:get(shard_by, Spec)),
+            ?assertEqual(aw, maps:get(fold, Spec)),
+            ?assertEqual(true, maps:get(migrated, Spec, false))
         end},
         {"retained_messages is a durable core lww migrated table", fun() ->
             %% Cut over to bondy_db (§11.4): always durable regardless of the
@@ -55,13 +67,15 @@ declarations_test_() ->
             ?assertEqual(true, maps:get(migrated, Spec, false)),
             ?assertEqual(true, maps:get(publish, Spec, false))
         end},
-        {"ticket/oauth_token/realm shard by key", fun() ->
-            %% ticket/oauth_token prioritise point lookup; bondy_realm is a
-            %% global registry under one band, so realm-sharding would be
-            %% degenerate (every realm on one shard) — it shards by key.
+        {"ticket/oauth_token/realm(+keys) shard by key", fun() ->
+            %% ticket/oauth_token prioritise point lookup; bondy_realm and
+            %% bondy_realm_keys are global registries under one band, so
+            %% realm-sharding would be degenerate (every realm on one shard) —
+            %% they shard by key.
             ?assertEqual(key, shard_by(ByName, bondy_ticket)),
             ?assertEqual(key, shard_by(ByName, bondy_oauth_token)),
-            ?assertEqual(key, shard_by(ByName, bondy_realm))
+            ?assertEqual(key, shard_by(ByName, bondy_realm)),
+            ?assertEqual(key, shard_by(ByName, bondy_realm_keys))
         end},
         {"all other tables shard by realm", fun() ->
             Others = [
@@ -69,7 +83,12 @@ declarations_test_() ->
              || S <- Tables,
                 not lists:member(
                     maps:get(name, S),
-                    [bondy_ticket, bondy_oauth_token, bondy_realm]
+                    [
+                        bondy_ticket,
+                        bondy_oauth_token,
+                        bondy_realm,
+                        bondy_realm_keys
+                    ]
                 )
             ],
             ?assert(
@@ -218,7 +237,7 @@ provision_all() ->
         %% info/0 summary.
         Info = ?CAT:info(),
         ?assertMatch(#{provision_all := true, core := #{kind := db}}, Info),
-        ?assertEqual(12, map_size(maps:get(tables, Info)))
+        ?assertEqual(13, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),
         reset_env(),

@@ -29,8 +29,10 @@ shared_instance_test_() ->
         gen("one_instance_per_shard", fun one_instance_per_shard/1),
         gen("independent_projections", fun independent_projections/1),
         gen("refcounted_teardown", fun refcounted_teardown/1),
-        gen("compaction_preserves_all_tables",
-            fun compaction_preserves_all_tables/1)
+        gen(
+            "compaction_preserves_all_tables",
+            fun compaction_preserves_all_tables/1
+        )
     ]}.
 
 gen(Title, Fn) ->
@@ -82,9 +84,7 @@ one_instance_per_shard({_Db, Users, Groups, _Sup, _Dir}) ->
     [put_cell(Groups, <<"r1">>, K, <<"g">>) || K <- Keys],
 
     Instances = lists:sort(db_instances()),
-    Expected = lists:sort([
-        instance_id(S) || S <- lists:seq(0, ?SHARDS - 1)
-    ]),
+    Expected = lists:sort([instance_id(S) || S <- lists:seq(0, ?SHARDS - 1)]),
     ?assertEqual(Expected, Instances),
     %% No per-table (entity-type-bearing) instance id leaked through.
     ?assertEqual(
@@ -110,7 +110,9 @@ independent_projections({_Db, Users, Groups, _Sup, _Dir}) ->
     ),
     %% The other table never sees this one's value for a key it did not write.
     put_cell(Users, Realm, <<"only_user">>, <<"uv">>),
-    ?assertEqual({error, not_found}, bondy_db:read(Groups, Realm, <<"only_user">>)).
+    ?assertEqual(
+        {error, not_found}, bondy_db:read(Groups, Realm, <<"only_user">>)
+    ).
 
 %% Closing one table leaves the sibling fully working AND keeps the shared
 %% instances up (refcount > 0); closing the last table stops them.

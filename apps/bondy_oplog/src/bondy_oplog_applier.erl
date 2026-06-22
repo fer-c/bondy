@@ -1216,7 +1216,9 @@ build_cell_apply_source(InstanceId, CellCtx, Opts) ->
 %% sibling whose ctx cannot be resolved (mid-teardown) is skipped — the next
 %% `register_table/4` or restart re-adds it.
 rebuild_dir_source(InstanceId, CellCtx, FoundingBucket, Opts) ->
-    Entries = bondy_oplog_core_registry:primary_entries_for_instance(InstanceId),
+    Entries = bondy_oplog_core_registry:primary_entries_for_instance(
+        InstanceId
+    ),
     lists:foldl(
         fun(Entry, Acc) ->
             case bondy_oplog_core_registry:entry_cell_apply_bucket(Entry) of
@@ -1226,7 +1228,9 @@ rebuild_dir_source(InstanceId, CellCtx, FoundingBucket, Opts) ->
                     Acc;
                 Bucket ->
                     Key = bondy_oplog_core_registry:entry_key(Entry),
-                    case resolve_cell_apply_ctx(Opts#{cell_apply_target => Key}) of
+                    case
+                        resolve_cell_apply_ctx(Opts#{cell_apply_target => Key})
+                    of
                         {ok, Ctx} when Ctx =/= undefined ->
                             bondy_oplog_mux:put(Acc, Bucket, Ctx);
                         _ ->

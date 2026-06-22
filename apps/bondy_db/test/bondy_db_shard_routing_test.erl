@@ -21,7 +21,6 @@
 -define(SC, 16).
 -define(REALM, <<"com.example.tenant1">>).
 
-
 %% A synthetic aggregate-strategy table for a given aggregate-root extractor.
 %% These are the only fields `shard_for/3` reads for the `aggregate` / `realm`
 %% strategies (the `entity` strategy additionally needs a real topology, which
@@ -49,7 +48,6 @@ composite_key(Subject, Rest) ->
         0,
         (term_to_binary(Rest, [deterministic]))/binary
     >>.
-
 
 %% =============================================================================
 %% aggregate_root/2
@@ -99,7 +97,6 @@ aggregate_root_second_col_band_prefix_test() ->
     Prefix = bondy_oplog_index_key:encode_tuple([<<"f">>, <<"alice">>]),
     ?assertEqual(<<"alice">>, bondy_db:aggregate_root(second_col, Prefix)).
 
-
 %% =============================================================================
 %% Co-location (aggregate strategy)
 %% =============================================================================
@@ -145,7 +142,8 @@ distinct_subjects_spread_test() ->
     %% exists to avoid). Deterministic (phash2), so not flaky.
     UserT = agg_table(identity),
     Subjects = [
-        list_to_binary("user_" ++ integer_to_list(N)) || N <- lists:seq(1, 100)
+        list_to_binary("user_" ++ integer_to_list(N))
+     || N <- lists:seq(1, 100)
     ],
     Shards = lists:usort(
         [bondy_db:shard_for(UserT, ?REALM, S) || S <- Subjects]
@@ -160,13 +158,12 @@ realm_is_part_of_aggregate_shard_test() ->
     UserT = agg_table(identity),
     Realms = [
         list_to_binary("com.example.r" ++ integer_to_list(N))
-        || N <- lists:seq(1, 100)
+     || N <- lists:seq(1, 100)
     ],
     Shards = lists:usort(
         [bondy_db:shard_for(UserT, R, <<"alice">>) || R <- Realms]
     ),
     ?assert(length(Shards) > 1).
-
 
 %% =============================================================================
 %% realm strategy
@@ -193,7 +190,7 @@ realm_strategy_deep_prefix_separates_test() ->
     T = realm_table(5),
     Realms = [
         list_to_binary("com.example.app." ++ integer_to_list(N))
-        || N <- lists:seq(1, 100)
+     || N <- lists:seq(1, 100)
     ],
     Shards = lists:usort([bondy_db:shard_for(T, R, <<"k">>) || R <- Realms]),
     ?assert(length(Shards) > 1).

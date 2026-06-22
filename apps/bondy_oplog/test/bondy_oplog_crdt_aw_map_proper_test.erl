@@ -16,8 +16,8 @@
 %% contexts are therefore well-formed partial causal observations, not
 %% arbitrary noise.
 %%
-%% The headline property `prop_per_replica_eager_equals_group` closes
-%% `architecture_regrounding_plan.md` §4.3 in its realistic form: each
+%% The headline property `prop_per_replica_eager_equals_group` asserts
+%% the eager-equals-group invariant in its realistic form: each
 %% replica's incremental eager state — built by applying `apply_op/4` in
 %% (causal) delivery order — equals the canonical key-sorted
 %% `interpret_cog/2` over exactly the events that replica delivered. The

@@ -157,28 +157,14 @@ init(Opts) ->
         end,
     State = #state{
         enabled = maps:get(
-            enabled,
-            Opts,
-            application:get_env(
-                bondy_oplog,
-                gc_scheduler,
-                true
-            )
+            enabled, Opts, bondy_oplog_config:gc_scheduler_enabled()
         ),
         interval_ms = maps:get(
-            interval_ms,
-            Opts,
-            application:get_env(
-                bondy_oplog,
-                gc_interval_ms,
-                1000
-            )
+            interval_ms, Opts, bondy_oplog_config:gc_interval_ms()
         ),
         trigger = Trigger,
         max_concurrency = maps:get(
-            max_concurrency,
-            Opts,
-            application:get_env(bondy_oplog, gc_max_concurrency, 4)
+            max_concurrency, Opts, bondy_oplog_config:gc_max_concurrency()
         ),
         in_flight = #{}
     },
